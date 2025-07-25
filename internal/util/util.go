@@ -11,8 +11,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/garaekz/fileman/internal/model"
 	"github.com/pmezard/go-difflib/difflib"
+
+	"github.com/garaekz/fileman/internal/model"
 )
 
 // --- String and Slice Helpers ---

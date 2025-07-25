@@ -21,7 +21,7 @@ fix:
 	gci write -s standard -s default -s "prefix($(shell go list -m))" .
 	go mod tidy
 	go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -fix ./...
-	golangci-lint run --fix || true
+# 	golangci-lint run --fix || true
 
 build:
 	go build -o fileman ./cmd/fileman

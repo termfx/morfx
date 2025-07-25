@@ -1,6 +1,10 @@
 package core
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -102,5 +106,32 @@ func TestManipulatorApply_NoNormalize_Regression(t *testing.T) {
 	}
 	if out != "func A() error {}\n" {
 		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestDedupeInsert(t *testing.T) {
+	buf := []byte("print\n")
+	insert := []byte("// log\n")
+	// First time: should allow
+	if !dedupeInsert(buf, 0, insert, true) {
+		t.Fatalf("first insert incorrectly flagged as dup")
+	}
+	// Simulate insertion
+	buf = append(insert, buf...)
+	// Second time: should skip
+	if dedupeInsert(buf, len(insert), insert, true) {
+		t.Fatalf("second insert not detected as dup")
+	}
+}
+
+func TestRunner_JSONErrorInvalidRegex(t *testing.T) {
+	exe := filepath.Join("..", "..", "cmd", "fileman")
+	if _, err := os.Stat(exe); err != nil {
+		t.Skip("fileman binary not built; skip integration test")
+	}
+	cmd := exec.Command(exe, "--json", "--pattern", "[", "--files", "*.go")
+	out, _ := cmd.CombinedOutput()
+	if !bytes.Contains(out, []byte(ErrInvalidRegex)) {
+		t.Fatalf("expected json error code, got %s", string(out))
 	}
 }

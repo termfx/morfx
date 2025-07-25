@@ -29,6 +29,8 @@ type ModificationConfig struct {
 	MustChangeBytes     int       `json:"must_change_bytes"`
 	NormalizeWhitespace bool      `json:"normalize_whitespace"`
 	LiteralPattern      bool      `json:"literal_pattern"`
+	UseAST              bool      `json:"use_ast"`
+	Lang                string    `json:"lang"` // "go", "python", etc.
 }
 
 // Context defines constraints on the text surrounding a match.
@@ -52,8 +54,9 @@ type Result struct {
 	ErrorCode       ErrorCode `json:"error_code,omitempty"`
 	OriginalSHA1    string    `json:"original_sha1,omitempty"`
 	ModifiedSHA1    string    `json:"modified_sha1,omitempty"`
-	OriginalContent string    `json:"-"` // Omitted from JSON for brevity
-	ModifiedContent string    `json:"-"` // Omitted from JSON for brevity
+	OriginalContent string    `json:"-"`                 // Omitted from JSON for brevity
+	ModifiedContent string    `json:"-"`                 // Omitted from JSON for brevity
+	Changes         []Change  `json:"changes,omitempty"` // List of changes made
 }
 
 // Change represents a single modification within a file.

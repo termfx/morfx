@@ -1,11 +1,14 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/garaekz/fileman/internal/matcher"
 	"github.com/garaekz/fileman/internal/model"
 	"github.com/garaekz/fileman/internal/util"
 )
@@ -15,64 +18,81 @@ type Manipulator struct {
 	Config model.ModificationConfig
 }
 
+type entry struct {
+	mt  matcher.Matcher
+	err error
+}
+
+var (
+	mu   sync.RWMutex
+	data = make(map[string]*entry) // key = ruleID + fingerprint(pattern/flags)
+)
+
 // NewManipulator creates a new manipulator for a given rule.
 func NewManipulator(cfg model.ModificationConfig) *Manipulator {
 	return &Manipulator{Config: cfg}
 }
 
+// Apply executes the rule on the content and delegates to the appropriate helpers.
+// – If NormalizeWhitespace is false, works on original text (traditional regex).
+// – If NormalizeWhitespace is true, collapses whitespace in content and pattern,
+//
+//	matches on the normalized version, then remaps to original.
+//
+// – If LiteralPattern is true, the pattern (already normalized or not) is escaped
+//
+//	with regexp.QuoteMeta to treat it as literal text.
 func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
-	pattern := m.Config.Pattern
+	cfg := m.Config
+	pattern := cfg.Pattern
 
-	// --- SIN normalización ---
-	if !m.Config.NormalizeWhitespace {
-		if m.Config.LiteralPattern {
-			pattern = regexp.QuoteMeta(pattern)
-		}
+	// ---------------------------------------------------------
+	// 1. Path WITHOUT whitespace normalization
+	// ---------------------------------------------------------
+	if !cfg.NormalizeWhitespace {
 		return m.applyNoNormalize(content, pattern)
 	}
 
-	// --- CON normalización ---
+	// ---------------------------------------------------------
+	// 2. Path WITH whitespace normalization
+	// ---------------------------------------------------------
+	//   a) Normalize original content
 	normContent, n2o, o2n := util.NormalizeWhitespace(content)
 
-	var normPattern string
-	if m.Config.LiteralPattern {
-		// Para literal: normaliza el patrón y luego hazlo literal
-		normPattern, _, _ = util.NormalizeWhitespace(pattern)
+	//   b) Normalize the pattern to collapse its whitespace
+	normPattern, _, _ := util.NormalizeWhitespace(pattern)
+	if cfg.LiteralPattern {
 		normPattern = regexp.QuoteMeta(normPattern)
-	} else {
-		// Para regex “real”: NO normalices el patrón (deja \s, clases, etc. intactas)
-		// Solo úsalo tal cual el usuario lo escribió.
-		normPattern = pattern
 	}
 
-	// Flags regex
-	if m.Config.Multiline {
+	//   c) Flags (?m)(?s)
+	if cfg.Multiline {
 		normPattern = "(?m)" + normPattern
 	}
-	if m.Config.DotAll {
+	if cfg.DotAll {
 		normPattern = "(?s)" + normPattern
 	}
 
+	//   d) Compile
 	re, err := regexp.Compile(normPattern)
 	if err != nil {
-		return "", nil, fmt.Errorf(
-			"%w: %w (consider using --literal-pattern if this is a literal string)",
-			model.ErrInvalidRegex, err,
-		)
+		return "", nil, fmt.Errorf("%w: %v", model.ErrInvalidRegex, err)
 	}
 
-	// Buscamos en normalizado
+	//   e) Search in normalized content
 	matchesNorm := re.FindAllStringSubmatchIndex(normContent, -1)
 
-	// Remapeamos a original
+	//   f) Remap spans to original
 	matchesOrig := util.RemapAllMatches(matchesNorm, n2o, o2n)
 
-	occ, err := parseOccurrences(m.Config.Occurrences)
+	//   g) Parse occurrences
+	occ, err := parseOccurrences(cfg.Occurrences)
 	if err != nil {
 		return "", nil, err
 	}
 
-	if m.Config.Context != nil {
+	//   h) Context filtering and final application on ORIGINAL
+	if cfg.Context != nil {
 		return m.applyWithContextOnOriginal(content, re, matchesOrig, occ)
 	}
 	return m.applyMatchesOnOriginal(content, re, matchesOrig, occ)
@@ -91,11 +111,8 @@ func (m *Manipulator) applyNoNormalize(content, pattern string) (string, []model
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return "", nil, fmt.Errorf(
-			"%w: %w (consider using --literal-pattern if this is a literal string)",
-			model.ErrInvalidRegex,
-			err,
-		)
+		return "", nil, Wrap(ErrInvalidRegex,
+			"failed to compile regex pattern", err)
 	}
 
 	occ, err := parseOccurrences(m.Config.Occurrences)
@@ -232,14 +249,24 @@ func (m *Manipulator) applyMatches(
 			newBytes = re.ExpandString(nil, m.Config.Replacement, content, match)
 		case model.OpInsertBefore:
 			ins := preserveIndentation(content, start, m.Config.Replacement)
+			if !dedupeInsert(b, start, []byte(ins), true) {
+				continue
+			}
 			newBytes = append([]byte(ins), origBytes...)
+
 		case model.OpInsertAfter:
 			ins := preserveIndentation(content, end, m.Config.Replacement)
+			if !dedupeInsert(b, end, []byte(ins), false) {
+				continue
+			}
 			newBytes = append(origBytes, []byte(ins)...)
 		case model.OpDelete:
 			newBytes = []byte("")
 		default:
-			return "", nil, fmt.Errorf("unknown operation: %s", m.Config.Operation)
+			return "", nil, CLIError{
+				Code:    ErrInvalidOperation,
+				Message: fmt.Sprintf("unknown operation: %s", m.Config.Operation),
+			}
 		}
 
 		b = util.Splice(b, start, end, newBytes)
@@ -268,13 +295,19 @@ func (m *Manipulator) filterMatchesByContext(content string, allMatches [][]int)
 	if ctx.Before != "" {
 		beforeRe, err = regexp.Compile(ctx.Before)
 		if err != nil {
-			return nil, fmt.Errorf("invalid before context regex: %w", err)
+			return nil, CLIError{
+				Code:    ErrInvalidRegex,
+				Message: fmt.Sprintf("invalid before context regex: %s", ctx.Before),
+			}
 		}
 	}
 	if ctx.After != "" {
 		afterRe, err = regexp.Compile(ctx.After)
 		if err != nil {
-			return nil, fmt.Errorf("invalid after context regex: %w", err)
+			return nil, CLIError{
+				Code:    ErrInvalidRegex,
+				Message: fmt.Sprintf("invalid after context regex: %s", ctx.After),
+			}
 		}
 	}
 
@@ -319,6 +352,80 @@ func (m *Manipulator) filterMatchesByContext(content string, allMatches [][]int)
 	return valid, nil
 }
 
+// GetCached returns a (possibly cached) matcher for the rule.
+// If not present it compiles/creates and stores atomically.
+func GetCached(cfg model.ModificationConfig) (matcher.Matcher, error) {
+	key := cacheKey(cfg)
+	mu.RLock()
+	if e, ok := data[key]; ok {
+		mu.RUnlock()
+		return e.mt, e.err
+	}
+	mu.RUnlock()
+
+	// slow path – build matcher
+	mt, err := buildMatcher(cfg) // existing helper in core
+	mu.Lock()
+	data[key] = &entry{mt: mt, err: err}
+	mu.Unlock()
+	return mt, err
+}
+
+// cacheKey creates a unique fingerprint for a rule's relevant fields.
+func cacheKey(cfg model.ModificationConfig) string {
+	return cfg.RuleID + "|" + cfg.Pattern + "|" +
+		boolToStr(cfg.UseAST) + "|" + cfg.Lang + "|" +
+		boolToStr(cfg.LiteralPattern) + "|" +
+		boolToStr(cfg.NormalizeWhitespace) + "|" +
+		boolToStr(cfg.Multiline) + boolToStr(cfg.DotAll)
+}
+
+func boolToStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// findMatches abstracts calling the selected matcher engine and returning
+// [][]int compatible with the existing applyMatches flow (start, end only).
+func (m *Manipulator) findMatchesBytes(b []byte) ([][]int, error) {
+	mat, err := GetCached(m.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	spans, err := mat.Find(b)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]int, len(spans))
+	for i, s := range spans {
+		out[i] = []int{s.Start, s.End}
+	}
+	return out, nil
+}
+
+// ApplyAST is a thin wrapper that swaps out the regex path with the new matcher
+// while re‑using existing modification logic.
+func (m *Manipulator) ApplyAST(content string) (string, []model.Change, error) {
+	matches, err := m.findMatchesBytes([]byte(content))
+	if err != nil {
+		return "", nil, err
+	}
+	if len(matches) == 0 {
+		return content, nil, nil // nothing to do
+	}
+
+	// Re‑use existing applyMatches with dummy regexp since replacement for AST
+	// is currently only delete / insert raw text.
+	// For replace operations we simply ignore capture groups (not yet supported).
+	// For now, we don't leverage capture groups in AST mode. We just need a
+	// placeholder *regexp.Regexp to satisfy applyMatches.
+	dummy := regexp.MustCompile("")
+	return m.applyMatches(content, dummy, matches)
+}
+
 // --- Helpers ---
 
 func parseOccurrences(s string) (model.OccurrenceSpec, error) {
@@ -331,7 +438,10 @@ func parseOccurrences(s string) (model.OccurrenceSpec, error) {
 	default:
 		n, err := strconv.Atoi(s)
 		if err != nil || n <= 0 {
-			return model.OccurrenceSpec{}, fmt.Errorf("invalid occurrences value: %q", s)
+			return model.OccurrenceSpec{}, CLIError{
+				Code:    ErrInvalidOccurrences,
+				Message: fmt.Sprintf("invalid occurrences value: %q", s),
+			}
 		}
 		return model.OccurrenceSpec{Max: n}, nil
 	}
@@ -386,4 +496,21 @@ func byteToLine(lineIdx []int, pos int) int {
 
 func byteToLineRange(lineIdx []int, start, end int) (int, int) {
 	return byteToLine(lineIdx, start), byteToLine(lineIdx, end-1) // end is exclusive
+}
+
+// dedupeInsert ensures we don't insert duplicate text if it's already present
+// at the given position (prefix for insert-before, suffix for insert-after).
+func dedupeInsert(buf []byte, pos int, insert []byte, before bool) bool {
+	if before {
+		// Check prefix ending at pos
+		if pos >= len(insert) && bytes.Equal(buf[pos-len(insert):pos], insert) {
+			return false // duplicate, skip
+		}
+	} else {
+		// Check suffix starting at pos
+		if pos+len(insert) <= len(buf) && bytes.Equal(buf[pos:pos+len(insert)], insert) {
+			return false
+		}
+	}
+	return true // safe to insert
 }

@@ -129,7 +129,8 @@ func main() {
 	// --- Execution Logic ---
 	var exitCode int
 	if *configFile != "" {
-		if *pattern != "" || *replacement != "" || *operation != "replace" || *occurrences != "all" ||
+		if *pattern != "" || *replacement != "" || *operation != "replace" ||
+			*occurrences != "all" ||
 			*ruleID != "cli-rule" ||
 			*mustMatch != 0 ||
 			*mustChange != 0 ||
@@ -160,10 +161,7 @@ func main() {
 			MustMatch:           *mustMatch,
 			MustChangeBytes:     *mustChange,
 			NormalizeWhitespace: *normalizeWhitespace,
-		}
-
-		if *literalPattern {
-			singleRuleConfig.Pattern = util.EscapeRegexLiteral(singleRuleConfig.Pattern)
+			LiteralPattern:      *literalPattern,
 		}
 
 		expandedFiles := util.ExpandGlobs(inputFiles)

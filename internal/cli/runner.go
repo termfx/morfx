@@ -1,3 +1,4 @@
+// ===================== internal/cli/runner.go (refactored) =====================
 package cli
 
 import (
@@ -5,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/garaekz/fileman/internal/core"
@@ -21,109 +24,109 @@ type Runner struct {
 	ShowDiff    bool
 	DiffContext int
 	ColorDiff   bool
+	Workers     int // for parallel processing, unused in this version
 }
+
+// -----------------------------------------------------------------------------
+// Public entry points
+// -----------------------------------------------------------------------------
 
 // RunWithConfig executes the tool based on a configuration file.
 func (r *Runner) RunWithConfig(path string) int {
-	b, err := os.ReadFile(path)
+	cfgBytes, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading config file: %v\n", err)
+		r.printFatal(core.Wrap(core.ErrIO, "error reading config file", err))
 		return 1
 	}
 
 	var tc model.ToolConfig
-	if err := json.Unmarshal(b, &tc); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing config file: %v\n", err)
+	if err := json.Unmarshal(cfgBytes, &tc); err != nil {
+		r.printFatal(core.Wrap(core.ErrParseQuery, "error parsing config file", err))
 		return 1
 	}
 
-	// Validate config
+	// Basic validation
 	if tc.SchemaVersion != 0 && tc.SchemaVersion > model.CurrentSchemaVersion {
-		fmt.Fprintf(
-			os.Stderr,
-			"Config schema version %d is not supported by tool version %s (max schema %d)\n",
-			tc.SchemaVersion,
-			model.CurrentToolVersion,
-			model.CurrentSchemaVersion,
+		msg := fmt.Sprintf(
+			"config schema version %d is not supported by tool version %s (max schema %d)",
+			tc.SchemaVersion, model.CurrentToolVersion, model.CurrentSchemaVersion,
 		)
+		r.printFatal(core.CLIError{Code: string(model.ECConfigError), Message: msg})
 		return 1
 	}
 	if len(tc.Files) == 0 || len(tc.Rules) == 0 {
-		fmt.Fprintln(os.Stderr, "Config must specify at least one file and one rule.")
+		r.printFatal(core.CLIError{Code: string(model.ECConfigError), Message: "config must specify at least one file and one rule."})
 		return 2
 	}
 
-	expandedFiles := util.ExpandGlobs(tc.Files)
-	totalChanges := 0
-	hadError := false
-
-	for _, file := range expandedFiles {
-		res, err := r.processFileWithRules(file, tc.Rules)
-		if err != nil {
-			hadError = true
-			fmt.Fprintf(os.Stderr, "✗ %s: %v\n", file, err)
-			continue
-		}
-
-		r.printResult(res)
-		if !res.Success {
-			hadError = true
-		} else {
-			totalChanges += res.ModifiedCount
-		}
-	}
-
-	if hadError {
-		return 1
-	}
-	if totalChanges == 0 && tc.FailIfNoMatch {
-		if tc.ExitCodeNoDiff != 0 {
-			return tc.ExitCodeNoDiff
-		}
-		return 2
-	}
-	return 0
+	files := util.ExpandGlobs(tc.Files)
+	return r.run(files, tc.Rules, tc.FailIfNoMatch, tc.ExitCodeNoDiff)
 }
 
-// RunWithFlags executes the tool based on command-line flags for a single rule.
-func (r *Runner) RunWithFlags(
-	files []string,
-	cfg model.ModificationConfig,
-	failIfNoMatch bool,
-) int {
+// RunWithFlags executes the tool based on CLI flags for a single rule.
+func (r *Runner) RunWithFlags(files []string, cfg model.ModificationConfig, failIfNoMatch bool) int {
+	return r.run(files, []model.ModificationConfig{cfg}, failIfNoMatch, 2)
+}
+
+// -----------------------------------------------------------------------------
+// Core execution pipeline
+// -----------------------------------------------------------------------------
+
+func (r *Runner) run(files []string, rules []model.ModificationConfig, failIfNoMatch bool, noDiffCode int) int {
 	totalChanges := 0
 	hadError := false
 
-	for _, file := range files {
-		res, err := r.processFileWithRules(file, []model.ModificationConfig{cfg})
-		if err != nil {
-			hadError = true
-			fmt.Fprintf(os.Stderr, "✗ %s: %v\n", file, err)
-			continue
-		}
+	var results []model.Result // for JSON output mode
 
-		r.printResult(res)
-		if !res.Success {
-			hadError = true
-		} else {
-			totalChanges += res.ModifiedCount
-		}
+	jobs := make(chan string)
+
+	var wg sync.WaitGroup
+	numW := r.Workers
+	if numW < 1 {
+		numW = runtime.NumCPU()
+	}
+
+	for i := 0; i < numW; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				res, err := r.processFileWithRules(path, rules)
+				if err != nil {
+					r.addFileResult(&results, path, false, nil, err)
+					continue
+				}
+				r.addFileResult(&results, path, res.Success, res.Changes, nil)
+			}
+		}()
+	}
+
+	for _, f := range files {
+		jobs <- f
+	}
+	close(jobs)
+	wg.Wait()
+
+	// Emit output
+	if r.JSONOutput {
+		b, _ := json.MarshalIndent(results, "", "  ")
+		fmt.Println(string(b))
 	}
 
 	if hadError {
 		return 1
 	}
 	if totalChanges == 0 && failIfNoMatch {
-		return 2
+		return noDiffCode
 	}
 	return 0
 }
 
-// processFileWithRules reads a single file and applies a pipeline of rules.
-func (r *Runner) processFileWithRules(
-	path string,
-	rules []model.ModificationConfig,
-) (*model.Result, error) {
+// -----------------------------------------------------------------------------
+// Single-file processing
+// -----------------------------------------------------------------------------
+
+func (r *Runner) processFileWithRules(path string, rules []model.ModificationConfig) (*model.Result, error) {
 	var data []byte
 	var err error
 	var stBefore os.FileInfo
@@ -137,30 +140,27 @@ func (r *Runner) processFileWithRules(
 		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
+		return nil, core.Wrap(core.ErrIO, "reading file", err)
 	}
 
-	originalContent := string(data)
-	currentContent := originalContent
+	original := string(data)
+	current := original
 	var allChanges []model.Change
 
 	for _, rule := range rules {
-		manipulator := core.NewManipulator(rule)
-		modified, changes, err := manipulator.Apply(currentContent)
+		manip := core.NewManipulator(rule)
+		modified, changes, err := manip.Apply(current)
 		if err != nil {
-			return nil, fmt.Errorf("applying rule %q: %w", rule.RuleID, err)
+			return nil, core.Wrap(core.ErrParseQuery, fmt.Sprintf("applying rule %q", rule.RuleID), err)
 		}
-
-		// Per-rule contract validation
 		if err := validateRuleContracts(rule, changes); err != nil {
-			return nil, fmt.Errorf("contract for rule %q failed: %w", rule.RuleID, err)
+			return nil, core.Wrap(core.ErrParseQuery, fmt.Sprintf("contract for rule %q failed", rule.RuleID), err)
 		}
-
-		currentContent = modified
+		current = modified
 		allChanges = append(allChanges, changes...)
 	}
 
-	// Create result object
+	// Build result
 	res := &model.Result{
 		File:            path,
 		Time:            time.Now().Format(time.RFC3339),
@@ -170,43 +170,57 @@ func (r *Runner) processFileWithRules(
 		ModifiedCount:   len(allChanges),
 		ChangedBytes:    util.SumChangedBytes(allChanges),
 		OriginalSHA1:    util.SHA1Hex(data),
-		OriginalContent: originalContent,
-		ModifiedContent: currentContent,
+		OriginalContent: original,
+		ModifiedContent: current,
+		Changes:         allChanges,
 	}
 
-	// Write file if modified and not in dry-run mode
-	if originalContent != currentContent && !r.DryRun && path != "-" {
-		// Race condition check
+	// Write back if needed
+	if original != current && !r.DryRun && path != "-" {
 		stAfter, _ := os.Stat(path)
 		if util.RaceDetected(stBefore, stAfter) {
 			res.Success = false
-			res.Error = model.ErrWriteRace.Error()
 			res.ErrorCode = model.ECWriteRace
+			res.Error = model.ErrWriteRace.Error()
 			return res, model.ErrWriteRace
 		}
-
-		if err := util.WriteFileAtomic(path, []byte(currentContent), 0o644); err != nil {
+		if err := util.WriteFileAtomic(path, []byte(current), 0o644); err != nil {
 			res.Success = false
-			res.Error = fmt.Sprintf("write error: %v", err)
 			res.ErrorCode = model.ECWriteError
-			return res, err
+			res.Error = err.Error()
+			return res, core.Wrap(core.ErrIO, "write file", err)
 		}
 		res.ModifiedSHA1 = util.SHA1FileHex(path)
-	} else if originalContent == currentContent {
+	} else {
 		res.ModifiedSHA1 = res.OriginalSHA1
 	}
 
 	return res, nil
 }
 
-// printResult formats and prints the result to the console.
-func (r *Runner) printResult(res *model.Result) {
-	if r.JSONOutput {
-		b, _ := json.MarshalIndent(res, "", "  ")
-		fmt.Println(string(b))
-		return
+// -----------------------------------------------------------------------------
+// Output helpers
+// -----------------------------------------------------------------------------
+
+func (r *Runner) addFileResult(results *[]model.Result, path string, succ bool, chgs []model.Change, err error) {
+	res := model.Result{File: path, Success: succ, Changes: chgs}
+	if err != nil {
+		if ce, ok := err.(core.CLIError); ok {
+			res.ErrorCode = model.ErrorCode(ce.Code)
+			res.Error = ce.Message
+		} else {
+			res.ErrorCode = model.ECUnknown
+			res.Error = err.Error()
+		}
 	}
 
+	if !r.JSONOutput {
+		r.printResultCLI(&res)
+	}
+	*results = append(*results, res)
+}
+
+func (r *Runner) printResultCLI(res *model.Result) {
 	if !res.Success {
 		fmt.Fprintf(os.Stderr, "✗ %s: %s (%s)\n", res.File, res.Error, res.ErrorCode)
 		return
@@ -214,25 +228,14 @@ func (r *Runner) printResult(res *model.Result) {
 
 	if r.Verbose {
 		if res.ModifiedCount > 0 {
-			fmt.Printf(
-				"✓ %s — %d changes (%d bytes diff)\n",
-				res.File,
-				res.ModifiedCount,
-				res.ChangedBytes,
-			)
+			fmt.Printf("✓ %s — %d changes (%d bytes diff)\n", res.File, res.ModifiedCount, res.ChangedBytes)
 		} else {
 			fmt.Printf("✓ %s — No changes\n", res.File)
 		}
 	}
 
 	if r.ShowDiff && res.ModifiedCount > 0 {
-		diff := util.UnifiedDiff(
-			res.OriginalContent,
-			res.ModifiedContent,
-			res.File,
-			r.DiffContext,
-			r.ColorDiff,
-		)
+		diff := util.UnifiedDiff(res.OriginalContent, res.ModifiedContent, res.File, r.DiffContext, r.ColorDiff)
 		fmt.Print(diff)
 	}
 
@@ -241,7 +244,23 @@ func (r *Runner) printResult(res *model.Result) {
 	}
 }
 
-// validateRuleContracts checks if a rule's Must* conditions are met.
+func (r *Runner) printFatal(err error) {
+	if r.JSONOutput {
+		if ce, ok := err.(core.CLIError); ok {
+			fmt.Println(ce.JSON())
+		} else {
+			b, _ := json.Marshal(core.CLIError{Code: string(model.ECUnknown), Message: err.Error()})
+			fmt.Println(string(b))
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Contracts
+// -----------------------------------------------------------------------------
+
 func validateRuleContracts(rule model.ModificationConfig, changes []model.Change) error {
 	if rule.MustMatch > 0 && len(changes) < rule.MustMatch {
 		return model.ErrMustMatchFailed

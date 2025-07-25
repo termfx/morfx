@@ -3,7 +3,6 @@ package cli_test
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,15 +42,15 @@ func TestRunWithConfig_InvalidConfigPath(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "Error reading config file:") {
-		t.Errorf("Expected 'Error reading config file:' in output, got %q", output)
+	if !strings.Contains(output, "Error: error reading config file:") {
+		t.Errorf("Expected 'Error: error reading config file:' in output, got %q", output)
 	}
 }
 
 func TestRunWithConfig_InvalidJSON(t *testing.T) {
 	tempDir := t.TempDir()
 	invalidJSONPath := filepath.Join(tempDir, "invalid.json")
-	err := ioutil.WriteFile(invalidJSONPath, []byte("{invalid json"), 0o644)
+	err := os.WriteFile(invalidJSONPath, []byte("{invalid json"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write invalid JSON file: %v", err)
 	}
@@ -64,8 +63,8 @@ func TestRunWithConfig_InvalidJSON(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "Error parsing config file:") {
-		t.Errorf("Expected 'Error parsing config file:' in output, got %q", output)
+	if !strings.Contains(output, "Error: error parsing config file:") {
+		t.Errorf("Expected 'Error: error parsing config file:' in output, got %q", output)
 	}
 }
 
@@ -99,7 +98,7 @@ func TestRunWithConfig_NoFilesOrRules(t *testing.T) {
 	configPath := filepath.Join(tempDir, "no_files_rules.json")
 
 	// Test case: No files
-	err := ioutil.WriteFile(
+	err := os.WriteFile(
 		configPath,
 		[]byte(
 			`{"schema_version": 1, "rules": [{"rule_id": "test", "pattern": "a", "replacement": "b", "operation": "replace"}]}`,
@@ -116,15 +115,15 @@ func TestRunWithConfig_NoFilesOrRules(t *testing.T) {
 			t.Errorf("Expected exit code 2 for no files, got %d", exitCode)
 		}
 	})
-	if !strings.Contains(output, "Config must specify at least one file and one rule.") {
+	if !strings.Contains(output, "Error: config must specify at least one file and one rule.") {
 		t.Errorf(
-			"Expected 'Config must specify at least one file and one rule.' in output, got %q",
+			"Expected 'Error: config must specify at least one file and one rule.' in output, got %q",
 			output,
 		)
 	}
 
 	// Test case: No rules
-	err = ioutil.WriteFile(configPath, []byte(`{"schema_version": 1, "files": ["a.go"]}`), 0o644)
+	err = os.WriteFile(configPath, []byte(`{"schema_version": 1, "files": ["a.go"]}`), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
@@ -134,9 +133,9 @@ func TestRunWithConfig_NoFilesOrRules(t *testing.T) {
 			t.Errorf("Expected exit code 2 for no rules, got %d", exitCode)
 		}
 	})
-	if !strings.Contains(output, "Config must specify at least one file and one rule.") {
+	if !strings.Contains(output, "Error: config must specify at least one file and one rule.") {
 		t.Errorf(
-			"Expected 'Config must specify at least one file and one rule.' in output, got %q",
+			"Expected 'Error: config must specify at least one file and one rule.' in output, got %q",
 			output,
 		)
 	}
@@ -145,7 +144,7 @@ func TestRunWithConfig_NoFilesOrRules(t *testing.T) {
 func TestRunWithFlags_LiteralPattern(t *testing.T) {
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "literal_test.txt")
-	err := ioutil.WriteFile(
+	err := os.WriteFile(
 		testFilePath,
 		[]byte("func main() {\n\tfmt.Println(\"Hello, World!\")\n}"),
 		0o644,
@@ -157,11 +156,11 @@ func TestRunWithFlags_LiteralPattern(t *testing.T) {
 	// Test with a pattern that contains regex metacharacters, used as literal
 	cfg := model.ModificationConfig{
 		RuleID:         "literal-test",
-		Pattern:        "fmt.Println(\"Hello, World!\")", // Contains parentheses, dot, etc.
+		Pattern:        "fmt.Println(\"Hello, World!\")",
 		Replacement:    "fmt.Println(\"Goodbye, World!\")",
 		Operation:      model.OpReplace,
 		Occurrences:    "all",
-		LiteralPattern: true, // This is the key
+		LiteralPattern: true,
 	}
 
 	r := &cli.Runner{Verbose: true}
@@ -176,7 +175,7 @@ func TestRunWithFlags_LiteralPattern(t *testing.T) {
 		t.Errorf("Expected success message for literal pattern, got %q", output)
 	}
 
-	modifiedContent, err := ioutil.ReadFile(testFilePath)
+	modifiedContent, err := os.ReadFile(testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read modified file: %v", err)
 	}
@@ -189,7 +188,7 @@ func TestRunWithFlags_LiteralPattern(t *testing.T) {
 func TestRunWithFlags_NormalizeWhitespace(t *testing.T) {
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "whitespace_test.txt")
-	err := ioutil.WriteFile(
+	err := os.WriteFile(
 		testFilePath,
 		[]byte("func  main()   {\n\tfmt.Println(\"Hello, World!\")\n}"),
 		0o644,
@@ -223,7 +222,7 @@ func TestRunWithFlags_NormalizeWhitespace(t *testing.T) {
 		t.Errorf("Expected success message for whitespace normalization, got %q", output)
 	}
 
-	modifiedContent, err := ioutil.ReadFile(testFilePath)
+	modifiedContent, err := os.ReadFile(testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read modified file: %v", err)
 	}
@@ -239,7 +238,7 @@ func TestRunWithFlags_NormalizeWhitespace(t *testing.T) {
 func TestRunWithFlags_LiteralPatternAndNormalizeWhitespace(t *testing.T) {
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "literal_norm_test.txt")
-	err := ioutil.WriteFile(
+	err := os.WriteFile(
 		testFilePath,
 		[]byte("var myMap = map[string]int{\n\t\"key1\": 1,\n\t\"key2\": 2,\n}"),
 		0o644,
@@ -274,7 +273,7 @@ func TestRunWithFlags_LiteralPatternAndNormalizeWhitespace(t *testing.T) {
 		t.Errorf("Expected success message for literal and normalized match, got %q", output)
 	}
 
-	modifiedContent, err := ioutil.ReadFile(testFilePath)
+	modifiedContent, err := os.ReadFile(testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read modified file: %v", err)
 	}
@@ -290,7 +289,7 @@ func TestRunWithConfig_Success(t *testing.T) {
 	configPath := filepath.Join(tempDir, "config.json")
 
 	// Create a dummy file
-	err := ioutil.WriteFile(testFilePath, []byte("hello world"), 0o644)
+	err := os.WriteFile(testFilePath, []byte("hello world"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
@@ -310,7 +309,7 @@ func TestRunWithConfig_Success(t *testing.T) {
 		]
 	}`, strings.ReplaceAll(testFilePath, "\\", "\\")) // Escape backslashes for JSON
 
-	err = ioutil.WriteFile(configPath, []byte(configContent), 0o644)
+	err = os.WriteFile(configPath, []byte(configContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
@@ -328,7 +327,7 @@ func TestRunWithConfig_Success(t *testing.T) {
 	}
 
 	// Verify file content
-	modifiedContent, err := ioutil.ReadFile(testFilePath)
+	modifiedContent, err := os.ReadFile(testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read modified file: %v", err)
 	}
@@ -342,7 +341,7 @@ func TestRunWithFlags_Success(t *testing.T) {
 	testFilePath := filepath.Join(tempDir, "test_file_flags.txt")
 
 	// Create a dummy file
-	err := ioutil.WriteFile(testFilePath, []byte("foo bar"), 0o644)
+	err := os.WriteFile(testFilePath, []byte("foo bar"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
@@ -368,7 +367,7 @@ func TestRunWithFlags_Success(t *testing.T) {
 	}
 
 	// Verify file content
-	modifiedContent, err := ioutil.ReadFile(testFilePath)
+	modifiedContent, err := os.ReadFile(testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read modified file: %v", err)
 	}
