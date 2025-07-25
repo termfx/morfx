@@ -69,91 +69,105 @@ func SumChangedBytes(ch []model.Change) int {
 func NormalizeWhitespace(
 	s string,
 ) (normalized string, normalizedToOriginal []int, originalToNormalized []int) {
-	var b strings.Builder
-	b.Grow(len(s)) // Pre-allocate for efficiency, though it might shrink
-
-	// Initialize mapping slices
-	normalizedToOriginal = make([]int, 0, len(s))
-	originalToNormalized = make([]int, len(s))
-	for i := range originalToNormalized {
-		originalToNormalized[i] = -1 // Mark as unmapped initially
+	if len(s) == 0 {
+		return "", nil, nil
 	}
 
-	emittedAnyNonSpace := false   // Tracks if any non-whitespace character has been emitted
-	inWhitespaceSequence := false // Tracks if currently inside a sequence of whitespace
-	whitespaceSequenceStart := 0  // Byte index of the start of the current whitespace sequence
-	normalizedByteIndex := 0      // Current byte index in the normalized string
+	var result []byte
+	originalToNormalized = make([]int, len(s))
+	for i := range originalToNormalized {
+		originalToNormalized[i] = -1
+	}
 
-	for originalByteIndex := 0; originalByteIndex < len(s); {
-		r, size := utf8.DecodeRuneInString(s[originalByteIndex:])
+	i := 0
+	normalizedPos := 0
+	hasContent := false
 
-		// Handle RuneError (invalid UTF-8 byte sequence)
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+
 		if r == utf8.RuneError {
-			// Treat as a non-whitespace character to preserve the byte
-			if inWhitespaceSequence {
-				inWhitespaceSequence = false
-				if emittedAnyNonSpace {
-					b.WriteByte(' ')
-					normalizedToOriginal = append(normalizedToOriginal, whitespaceSequenceStart)
-					normalizedByteIndex++
+			// Handle consecutive invalid UTF-8 bytes as one replacement character
+			invalidStart := i
+			for i < len(s) {
+				r2, size2 := utf8.DecodeRuneInString(s[i:])
+				if r2 != utf8.RuneError {
+					break
 				}
+				i += size2
 			}
-			// Emit the replacement character ''
-			replacementRuneBytes := []byte(string(utf8.RuneError))
-			b.Write(replacementRuneBytes)
 
-			// Map the original invalid bytes to -1 as they are replaced
-			for j := range size {
-				originalToNormalized[originalByteIndex+j] = -1
+			// Emit one replacement character for the entire invalid sequence
+			replacement := []byte(string(utf8.RuneError))
+			result = append(result, replacement...)
+
+			// Map the replacement bytes to the start of the invalid sequence
+			for range replacement {
+				normalizedToOriginal = append(normalizedToOriginal, invalidStart)
 			}
-			// Map the bytes of the replacement character in normalized to the start of the original invalid sequence
-			// Each byte of the RuneError maps to the start of the original invalid sequence
-			// Only map the first byte of the RuneError to the original index
-			normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
-			for j := 1; j < len(replacementRuneBytes); j++ {
-				normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
+
+			// Map first original invalid byte to start of replacement
+			originalToNormalized[invalidStart] = normalizedPos
+			// Other invalid bytes map to -1 (they were combined)
+			for j := invalidStart + 1; j < i; j++ {
+				originalToNormalized[j] = -1
 			}
-			normalizedByteIndex += len(replacementRuneBytes)
-			emittedAnyNonSpace = true
-			originalByteIndex += size
+
+			normalizedPos += len(replacement)
+			hasContent = true
 			continue
 		}
 
 		if unicode.IsSpace(r) {
-			if !inWhitespaceSequence {
-				inWhitespaceSequence = true
-				whitespaceSequenceStart = originalByteIndex
+			// Skip leading whitespace
+			if !hasContent {
+				i += size
+				continue
 			}
-			// Mark original bytes as unmapped (they will be collapsed or trimmed)
-			for j := range size {
-				originalToNormalized[originalByteIndex+j] = -1
-			}
-		} else {
-			// Non-whitespace character
-			if inWhitespaceSequence {
-				inWhitespaceSequence = false
-				// If we've already emitted non-space characters, emit a single space
-				if emittedAnyNonSpace {
-					b.WriteByte(' ')
-					normalizedToOriginal = append(normalizedToOriginal, whitespaceSequenceStart)
-					normalizedByteIndex++
+
+			// Find end of whitespace sequence
+			wsEnd := i
+			for wsEnd < len(s) {
+				r2, size2 := utf8.DecodeRuneInString(s[wsEnd:])
+				if r2 == utf8.RuneError || !unicode.IsSpace(r2) {
+					break
 				}
+				wsEnd += size2
 			}
 
-			// Emit the non-whitespace rune and map its bytes
-			encodedRune := make([]byte, size)
-			utf8.EncodeRune(encodedRune, r)
-			b.Write(encodedRune)
-
-			for j := range size {
-				originalToNormalized[originalByteIndex+j] = normalizedByteIndex + j
-				normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
+			// If we're at the end, this is trailing whitespace - skip it
+			if wsEnd >= len(s) {
+				break
 			}
-			normalizedByteIndex += size
-			emittedAnyNonSpace = true
+
+			// Emit single space for internal whitespace
+			result = append(result, ' ')
+
+			// Map the single space to any byte in the whitespace sequence
+			// Let's use the first byte for consistency
+			normalizedToOriginal = append(normalizedToOriginal, i)
+			originalToNormalized[i] = normalizedPos
+
+			normalizedPos++
+			i = wsEnd
+			continue
 		}
-		originalByteIndex += size
+
+		// Non-whitespace character
+		runeBytes := make([]byte, size)
+		utf8.EncodeRune(runeBytes, r)
+		result = append(result, runeBytes...)
+
+		// Map each byte
+		for j := range size {
+			normalizedToOriginal = append(normalizedToOriginal, i+j)
+			originalToNormalized[i+j] = normalizedPos + j
+		}
+
+		normalizedPos += size
+		hasContent = true
+		i += size
 	}
 
-	return b.String(), normalizedToOriginal, originalToNormalized
+	return string(result), normalizedToOriginal, originalToNormalized
 }

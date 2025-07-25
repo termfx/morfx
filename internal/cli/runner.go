@@ -126,6 +126,7 @@ func (r *Runner) run(files []string, rules []model.ModificationConfig, failIfNoM
 // Single-file processing
 // -----------------------------------------------------------------------------
 
+// processFileWithRules contains the corrected logic for handling the 'get' operation.
 func (r *Runner) processFileWithRules(path string, rules []model.ModificationConfig) (*model.Result, error) {
 	var data []byte
 	var err error
@@ -147,15 +148,13 @@ func (r *Runner) processFileWithRules(path string, rules []model.ModificationCon
 	// --- Handle 'get' operation as a special read-only case ---
 	if len(rules) == 1 && rules[0].Operation == model.OpGet {
 		manip := core.NewManipulator(rules[0])
-		// The Apply method will find all matches and return them as 'changes'.
 		_, changes, err := manip.Apply(original)
 		if err != nil {
-			return nil, err // Propagate errors from the manipulator
+			return nil, err
 		}
 
 		if len(changes) > 0 {
 			// For 'get', we print the content of the first matched node.
-			// The 'Original' field of the Change struct holds the captured text.
 			fmt.Print(changes[0].Original)
 		}
 		// The 'get' operation terminates here successfully without writing files.

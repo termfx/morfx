@@ -121,15 +121,15 @@ func TestNormalizeWhitespace_Extended(t *testing.T) {
 			name:               "Multiple internal whitespace sequences",
 			input:              "hello   world  again",
 			expectedNormalized: "hello world again",
-			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 14, 15, 16, 17},
-			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, 6, 7, 8, 9, 10, -1, 11, 12, 13, 14},
+			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19},
+			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, 6, 7, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16},
 		},
 		{
 			name:               "Mixed whitespace characters",
 			input:              "hello\t\n world",
 			expectedNormalized: "hello world",
-			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 8, 9, 10, 11},
-			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, 6, 7, 8, 9},
+			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12},
+			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, 6, 7, 8, 9, 10},
 		},
 		{
 			name:               "Only newlines",
@@ -142,15 +142,15 @@ func TestNormalizeWhitespace_Extended(t *testing.T) {
 			name:               "Invalid UTF-8 sequence",
 			input:              "hello\xed\xbe\xadworld", // Invalid UTF-8 for U+FDD0
 			expectedNormalized: "hello" + string(utf8.RuneError) + "world",
-			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 5, 5, 5, 8, 9, 10, 11}, // Mapping for '' points to start of invalid sequence
-			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, -1, 6, 7, 8, 9},
+			expectedN2O:        []int{0, 1, 2, 3, 4, 5, 5, 5, 8, 9, 10, 11, 12}, // Mapping for '' points to start of invalid sequence
+			expectedO2N:        []int{0, 1, 2, 3, 4, 5, -1, -1, 8, 9, 10, 11, 12},
 		},
 		{
 			name:               "Complex mapping check",
 			input:              "  a b  c   d  ",
 			expectedNormalized: "a b c d",
-			expectedN2O:        []int{2, 3, 4, 6, 7, 8, 11, 12, 13},
-			expectedO2N:        []int{-1, -1, 0, 1, -1, 2, 3, -1, -1, 4, 5, -1, -1, -1, 6, 7, 8, -1, -1},
+			expectedN2O:        []int{2, 3, 4, 5, 7, 8, 11},
+			expectedO2N:        []int{-1, -1, 0, 1, 2, 3, -1, 4, 5, -1, -1, 6, -1, -1},
 		},
 	}
 

@@ -75,7 +75,7 @@ func TestManipulator_findMatchesBytes(t *testing.T) {
 
 func TestManipulator_ApplyAST(t *testing.T) {
 	cfg := model.ModificationConfig{
-		Pattern:     "(function_declaration name: (identifier) @name (#eq? @name \"main\"))",
+		Pattern:     "((function_declaration name: (identifier) @target (#eq? @target \"main\")))",
 		Replacement: "newMain",
 		Operation:   model.OpReplace,
 		UseAST:      true,
@@ -221,7 +221,7 @@ func TestManipulator_applyMatchesOnOriginal(t *testing.T) {
 
 	// Test with occ.Max limiting matches
 	original2 := "one two three four"
-	re2 := regexp.MustCompile("\\w+")
+	re2 := regexp.MustCompile(`\w+`)
 	matches2 := re2.FindAllStringSubmatchIndex(original2, -1)
 	occ2 := model.OccurrenceSpec{Max: 2} // Limit to 2 matches
 
@@ -502,7 +502,7 @@ func TestManipulator_applySimple(t *testing.T) {
 
 	// Test with occ.Max limiting matches
 	original2 := "one two three four"
-	re2 := regexp.MustCompile("\\w+")
+	re2 := regexp.MustCompile(`\w+`)
 	occ2 := model.OccurrenceSpec{Max: 2} // Limit to 2 matches
 
 	modified2, changes2, err2 := manip.applySimple(original2, re2, occ2)

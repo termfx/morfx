@@ -43,12 +43,21 @@ func NewManipulator(cfg model.ModificationConfig) *Manipulator {
 //
 //	with regexp.QuoteMeta to treat it as literal text.
 func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
+	// Handle AST path
+	if m.Config.UseAST {
+		matches, err := m.findMatchesBytes([]byte(content))
+		if err != nil {
+			return "", nil, err
+		}
+		if len(matches) == 0 {
+			return content, nil, nil
+		}
+		// For AST, we use a nil regex as there are no capture groups to expand.
+		return m.applyMatches(content, nil, matches)
+	}
+	// Handle regex path
 	cfg := m.Config
 	pattern := cfg.Pattern
-
-	if cfg.UseAST {
-		return m.ApplyAST(content)
-	}
 
 	if !cfg.NormalizeWhitespace {
 		return m.applyNoNormalize(content, pattern)
@@ -227,22 +236,22 @@ func (m *Manipulator) applyWithContext(
 // applyMatches performs the actual byte-level modifications for a given set of matches.
 func (m *Manipulator) applyMatches(
 	content string,
-	re *regexp.Regexp,
+	re *regexp.Regexp, // Can be nil for AST mode
 	matches [][]int,
 ) (string, []model.Change, error) {
 	lineIdx := computeLineIndex(content)
 	b := []byte(content)
 	var changes []model.Change
 
-	// Process in reverse to avoid recalculating offsets
 	for i := len(matches) - 1; i >= 0; i-- {
 		match := matches[i]
 		start, end := match[0], match[1]
-
 		origBytes := b[start:end]
 		var newBytes []byte
 
 		switch m.Config.Operation {
+		case model.OpGet:
+			newBytes = origBytes
 		case model.OpReplace:
 			if m.Config.UseAST {
 				newBytes = []byte(m.Config.Replacement)
@@ -251,14 +260,14 @@ func (m *Manipulator) applyMatches(
 			}
 		case model.OpInsertBefore:
 			ins := preserveIndentation(content, start, m.Config.Replacement)
-			if !dedupeInsert(b, start, []byte(ins), true) {
+			if m.Config.Dedupe && !dedupeInsert(b, start, []byte(ins), true) {
 				continue
 			}
 			newBytes = append([]byte(ins), origBytes...)
 
 		case model.OpInsertAfter:
 			ins := preserveIndentation(content, end, m.Config.Replacement)
-			if !dedupeInsert(b, end, []byte(ins), false) {
+			if m.Config.Dedupe && !dedupeInsert(b, end, []byte(ins), false) {
 				continue
 			}
 			newBytes = append(origBytes, []byte(ins)...)
@@ -271,7 +280,10 @@ func (m *Manipulator) applyMatches(
 			}
 		}
 
-		b = util.Splice(b, start, end, newBytes)
+		// For 'get', we don't actually splice the bytes.
+		if m.Config.Operation != model.OpGet {
+			b = util.Splice(b, start, end, newBytes)
+		}
 
 		ls, le := byteToLineRange(lineIdx, start, end)
 		changes = append(changes, model.Change{

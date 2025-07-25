@@ -6,15 +6,13 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// ASTMatcher uses Tree‑sitter queries to match AST nodes.
-// Pattern must be written in Tree‑sitter Query syntax.
+// ASTMatcher uses Tree-sitter queries to match AST nodes.
 type ASTMatcher struct {
 	lang  *sitter.Language
 	query *sitter.Query
 }
 
 // NewAST builds an ASTMatcher for the given query and language identifier.
-// Example: NewAST("(function_declaration name: (identifier) @func)", "go")
 func NewAST(pattern, langName string) (*ASTMatcher, error) {
 	lang, ok := ResolveLanguage(langName)
 	if !ok {
@@ -28,8 +26,7 @@ func NewAST(pattern, langName string) (*ASTMatcher, error) {
 	return &ASTMatcher{lang: lang, query: q}, nil
 }
 
-// Find parses the source once and returns all capture spans (byte offsets).
-// Each capture in the query is returned as a separate Result.
+// Find parses the source and returns the byte spans of the '@target' captures.
 func (a *ASTMatcher) Find(src []byte) ([]Result, error) {
 	parser := sitter.NewParser()
 	parser.SetLanguage(a.lang)
@@ -47,13 +44,20 @@ func (a *ASTMatcher) Find(src []byte) ([]Result, error) {
 		if !ok {
 			break
 		}
-
-		for _, cap := range cursor.FilterPredicates(match, src).Captures {
-			node := cap.Node
-			res = append(res, Result{
-				Start: int(node.StartByte()),
-				End:   int(node.EndByte()),
-			})
+		// Filter out predicates before iterating captures
+		match = cursor.FilterPredicates(match, src)
+		for _, cap := range match.Captures {
+			captureName := a.query.CaptureNameForId(cap.Index)
+			// We only care about the final node designated as '@target'.
+			if captureName == "target" {
+				node := cap.Node
+				res = append(res, Result{
+					Start: int(node.StartByte()),
+					End:   int(node.EndByte()),
+				})
+				// Found the target for this match, break inner loop to avoid duplicates.
+				break
+			}
 		}
 	}
 	return res, nil

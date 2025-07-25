@@ -11,18 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var filemanBinaryPath string
+var entryPath string
 
-// TestMain locates the compiled binary before running tests.
-// It skips integration tests if the binary is not found.
+// TestMain locates the main entry point for the fileman CLI tool.
+// It skips integration tests if not found.
 func TestMain(m *testing.M) {
-	path, err := filepath.Abs("../../bin/fileman")
+	path, err := filepath.Abs("cmd/fileman")
 	if err == nil {
 		if _, statErr := os.Stat(path); statErr == nil {
-			filemanBinaryPath = path
+			entryPath = path
 		}
 	}
-	// If the binary path is not set, tests that require it will be skipped.
 	os.Exit(m.Run())
 }
 
@@ -54,7 +53,7 @@ func assertFileContent(t *testing.T, filePath, expectedContent string) {
 }
 
 func TestASTCommand_GetOperations(t *testing.T) {
-	if filemanBinaryPath == "" {
+	if entryPath == "" {
 		t.Skip("Skipping integration test: fileman binary not found")
 	}
 	content := `package main
@@ -95,7 +94,7 @@ func GetUser() {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(filemanBinaryPath, "ast", "--target", tc.target, "--file", testFile)
+			cmd := exec.Command(entryPath, "ast", "--target", tc.target, "--file", testFile)
 			output, err := cmd.CombinedOutput()
 			require.NoError(t, err, "Command failed unexpectedly. Output: %s", string(output))
 			assert.Equal(t, tc.expectedOutput, strings.TrimSpace(string(output)))
@@ -104,7 +103,7 @@ func GetUser() {
 }
 
 func TestASTCommand_ModificationOperations(t *testing.T) {
-	if filemanBinaryPath == "" {
+	if entryPath == "" {
 		t.Skip("Skipping integration test: fileman binary not found")
 	}
 	baseContent := `package main
@@ -118,7 +117,7 @@ func KeepThisOne() {}
 	t.Run("ReplaceFunction", func(t *testing.T) {
 		testFile := setupTestFile(t, baseContent)
 		newFunction := `func GetUser() { /* new logic */ }`
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:GetUser", "--operation", "replace", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "replace", "--file", testFile)
 		cmd.Stdin = strings.NewReader(newFunction)
 
 		output, err := cmd.CombinedOutput()
@@ -135,7 +134,7 @@ func KeepThisOne() {}
 
 	t.Run("DeleteFunction", func(t *testing.T) {
 		testFile := setupTestFile(t, baseContent)
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:GetUser", "--operation", "delete", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "delete", "--file", testFile)
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Delete command failed. Output: %s", string(output))
@@ -153,7 +152,7 @@ func KeepThisOne() {}
 		testFile := setupTestFile(t, baseContent)
 		insertedFunc := `
 func InsertedFunc() {}`
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:GetUser", "--operation", "insert-after", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "insert-after", "--file", testFile)
 		cmd.Stdin = strings.NewReader(insertedFunc)
 
 		output, err := cmd.CombinedOutput()
@@ -176,7 +175,7 @@ func KeepThisOne() {}
 		insertedFunc := `// A new function will be inserted after this comment.
 func InsertedFunc() {}
 `
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:KeepThisOne", "--operation", "insert-before", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:KeepThisOne", "--operation", "insert-before", "--file", testFile)
 		cmd.Stdin = strings.NewReader(insertedFunc)
 
 		output, err := cmd.CombinedOutput()
@@ -197,18 +196,18 @@ func KeepThisOne() {}
 }
 
 func TestASTCommand_FailureScenarios(t *testing.T) {
-	if filemanBinaryPath == "" {
+	if entryPath == "" {
 		t.Skip("Skipping integration test: fileman binary not found")
 	}
 	t.Run("InvalidTargetFormat", func(t *testing.T) {
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "invalidformat", "--file", "dummy.go")
+		cmd := exec.Command(entryPath, "ast", "--target", "invalidformat", "--file", "dummy.go")
 		output, err := cmd.CombinedOutput()
 		require.Error(t, err, "Command should have failed but did not")
 		assert.Contains(t, string(output), "invalid --target format")
 	})
 
 	t.Run("NoFileSpecified", func(t *testing.T) {
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:foo")
+		cmd := exec.Command(entryPath, "ast", "--target", "function:foo")
 		output, err := cmd.CombinedOutput()
 		require.Error(t, err, "Command should have failed but did not")
 		assert.Contains(t, string(output), "at least one -file is required")
@@ -216,7 +215,7 @@ func TestASTCommand_FailureScenarios(t *testing.T) {
 
 	t.Run("UnsupportedLanguage", func(t *testing.T) {
 		testFile := setupTestFile(t, "content")
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:foo", "--lang", "brainfuck", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:foo", "--lang", "brainfuck", "--file", testFile)
 		output, err := cmd.CombinedOutput()
 		require.Error(t, err, "Command should have failed but did not")
 		assert.Contains(t, string(output), "unsupported language: brainfuck")
@@ -224,7 +223,7 @@ func TestASTCommand_FailureScenarios(t *testing.T) {
 
 	t.Run("TargetNotFound", func(t *testing.T) {
 		testFile := setupTestFile(t, `package main`)
-		cmd := exec.Command(filemanBinaryPath, "ast", "--target", "function:nonexistent", "--file", testFile)
+		cmd := exec.Command(entryPath, "ast", "--target", "function:nonexistent", "--file", testFile)
 		// This should succeed with no output and no changes
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Command failed for a non-existent target. Output: %s", string(output))

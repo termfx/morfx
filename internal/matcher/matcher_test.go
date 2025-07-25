@@ -5,7 +5,7 @@ import "testing"
 func TestASTMatcher_RenameFunc(t *testing.T) {
 	src := []byte(`package main\nfunc main() {}`)
 
-	q := `((function_declaration name: (identifier) @id))`
+	q := `((function_declaration name: (identifier) @target))`
 	m, err := NewAST(q, "go")
 	if err != nil {
 		t.Fatalf("new ast: %v", err)

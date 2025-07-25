@@ -4,7 +4,7 @@ GO_TEST_FLAGS := -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
 GO_RACE_FLAGS := -race
 GO_VERBOSE    := -v
 
-.PHONY: test test-verbose test-race coverage clean demo build-demo
+.PHONY: test test-verbose test-race coverage clean demo build-demo fixtest fix build
 
 test:
 	go test ./... $(GO_TEST_FLAGS)
@@ -24,6 +24,8 @@ fix:
 	go mod tidy
 	go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -fix ./...
 # 	golangci-lint run --fix || true
+
+fixtest: fix test
 
 build:
 	go build -o bin/fileman ./cmd/fileman
