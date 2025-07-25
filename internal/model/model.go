@@ -30,7 +30,8 @@ type ModificationConfig struct {
 	NormalizeWhitespace bool      `json:"normalize_whitespace"`
 	LiteralPattern      bool      `json:"literal_pattern"`
 	UseAST              bool      `json:"use_ast"`
-	Lang                string    `json:"lang"` // "go", "python", etc.
+	Lang                string    `json:"lang"`   // "go", "python", etc.
+	Dedupe              bool      `json:"dedupe"` // Enable auto-deduplication on insert operations
 }
 
 // Context defines constraints on the text surrounding a match.

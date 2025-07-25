@@ -2,16 +2,9 @@ package util
 
 import (
 	"bytes"
-	"crypto/sha1"
-	"encoding/hex"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/garaekz/fileman/internal/model"
 )
@@ -77,212 +70,79 @@ func NormalizeWhitespace(
 	s string,
 ) (normalized string, normalizedToOriginal []int, originalToNormalized []int) {
 	var b strings.Builder
-	b.Grow(
-		len(s),
-	) // la normalizada nunca será más larga que la original en bytes si no hay RuneError
+	b.Grow(len(s)) // Pre-allocate for efficiency, though it might shrink
 
+	// Initialize mapping slices
 	normalizedToOriginal = make([]int, 0, len(s))
 	originalToNormalized = make([]int, len(s))
 	for i := range originalToNormalized {
-		originalToNormalized[i] = -1
+		originalToNormalized[i] = -1 // Mark as unmapped initially
 	}
 
-	emittedAny := false // ya emitimos al menos un no-espacio
-	inWS := false       // estamos dentro de una secuencia de whitespace
-	wsStart := 0        // índice byte del primer whitespace de la secuencia
-	normIdx := 0        // índice byte actual en la cadena normalizada
+	emittedAnyNonSpace := false   // Tracks if any non-whitespace character has been emitted
+	inWhitespaceSequence := false // Tracks if currently inside a sequence of whitespace
+	whitespaceSequenceStart := 0  // Byte index of the start of the current whitespace sequence
+	normalizedByteIndex := 0      // Current byte index in the normalized string
 
-	i := 0
-	for i < len(s) {
-		r, size := utf8.DecodeRuneInString(s[i:])
+	for originalByteIndex := 0; originalByteIndex < len(s); {
+		r, size := utf8.DecodeRuneInString(s[originalByteIndex:])
+
+		// Handle RuneError (invalid UTF-8 byte sequence)
 		if r == utf8.RuneError && size == 1 {
-			// String con byte inválido. Lo tratamos como "no whitespace" para preservar el byte.
-			// Se puede ajustar política según necesidad.
+			// Treat as a non-whitespace character to preserve the byte
+			if inWhitespaceSequence {
+				inWhitespaceSequence = false
+				if emittedAnyNonSpace {
+					b.WriteByte(' ')
+					normalizedToOriginal = append(normalizedToOriginal, whitespaceSequenceStart)
+					normalizedByteIndex++
+				}
+			}
+			// Map the invalid byte directly
+			originalToNormalized[originalByteIndex] = normalizedByteIndex
+			normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
+			b.WriteByte(s[originalByteIndex])
+			normalizedByteIndex++
+			emittedAnyNonSpace = true
+			originalByteIndex += size
+			continue
 		}
 
 		if unicode.IsSpace(r) {
-			if !inWS {
-				inWS = true
-				wsStart = i
+			if !inWhitespaceSequence {
+				inWhitespaceSequence = true
+				whitespaceSequenceStart = originalByteIndex
 			}
-			// No asignamos originalToNormalized para estos bytes (permanecerán -1)
-			i += size
-			continue
-		}
-
-		// r no es whitespace
-		if inWS {
-			// Acabamos de cerrar una secuencia de whitespace
-			if emittedAny {
-				// Emitimos un solo espacio representando toda la secuencia previa
-				b.WriteByte(' ')
-				normalizedToOriginal = append(
-					normalizedToOriginal,
-					wsStart,
-				) // convención: mapea al primer byte del span
-				normIdx++ // 1 byte
+			// Mark original bytes as unmapped (they will be collapsed or trimmed)
+			for j := range size {
+				originalToNormalized[originalByteIndex+j] = -1
 			}
-			inWS = false
-		}
-
-		// Emitimos el rune tal cual (en bytes) y mapeamos por byte
-		var buf [utf8.UTFMax]byte
-		n := utf8.EncodeRune(buf[:], r)
-		// En teoría n == size casi siempre para UTF-8 válido. Si no, igual es seguro.
-
-		// Mapear original -> normalizado (por cada byte del rune original)
-		for j := range size {
-			if j < n {
-				originalToNormalized[i+j] = normIdx + j
-			} else {
-				// rune raro (RuneError 3 bytes vs size 1, etc.) mapeamos al primer byte normalizado
-				originalToNormalized[i+j] = normIdx
+		} else {
+			// Non-whitespace character
+			if inWhitespaceSequence {
+				inWhitespaceSequence = false
+				// If we've already emitted non-space characters, emit a single space
+				if emittedAnyNonSpace {
+					b.WriteByte(' ')
+					normalizedToOriginal = append(normalizedToOriginal, whitespaceSequenceStart)
+					normalizedByteIndex++
+				}
 			}
-		}
 
-		// Mapear normalizado -> original
-		for range n {
-			normalizedToOriginal = append(
-				normalizedToOriginal,
-				i,
-			) // apúntalo al inicio del rune original
-		}
+			// Emit the non-whitespace rune and map its bytes
+			encodedRune := make([]byte, size)
+			utf8.EncodeRune(encodedRune, r)
+			b.Write(encodedRune)
 
-		b.Write(buf[:n])
-		normIdx += n
-		emittedAny = true
-		i += size
+			for j := range size {
+				originalToNormalized[originalByteIndex+j] = normalizedByteIndex + j
+				normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
+			}
+			normalizedByteIndex += size
+			emittedAnyNonSpace = true
+		}
+		originalByteIndex += size
 	}
-
-	// Si terminamos en whitespace, no emitimos el espacio (evitamos trailing). Nada que hacer.
 
 	return b.String(), normalizedToOriginal, originalToNormalized
-}
-
-// --- Filesystem Helpers ---
-
-// WriteFileAtomic writes data to a file atomically.
-func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode()
-	}
-	dir := filepath.Dir(path)
-	// Use a more descriptive temp file pattern
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }() // Clean up on error
-	defer func() { _ = tmp.Close() }()
-
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
-}
-
-// RaceDetected checks if a file was modified on disk between reading and writing.
-func RaceDetected(before, after os.FileInfo) bool {
-	if before == nil || after == nil {
-		return false
-	}
-	// Also check size, as some filesystems have low-resolution timestamps.
-	return !before.ModTime().Equal(after.ModTime()) || before.Size() != after.Size()
-}
-
-// ExpandGlobs expands a list of file paths, including glob patterns.
-func ExpandGlobs(files []string) []string {
-	var out []string
-	for _, f := range files {
-		if f == "-" {
-			out = append(out, f)
-			continue
-		}
-		if strings.ContainsAny(f, "*?[") {
-			matches, _ := filepath.Glob(f)
-			out = append(out, matches...)
-		} else {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-// --- Hashing Helpers ---
-
-// SHA1Hex computes the SHA1 hash of a byte slice and returns it as a hex string.
-func SHA1Hex(b []byte) string {
-	h := sha1.Sum(b)
-	return hex.EncodeToString(h[:])
-}
-
-// SHA1FileHex computes the SHA1 hash of a file's content.
-func SHA1FileHex(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return SHA1Hex(b)
-}
-
-// EscapeRegexLiteral escapes all regex metacharacters in a string.
-func EscapeRegexLiteral(s string) string {
-	return regexp.QuoteMeta(s)
-}
-
-// --- Diff Helpers ---
-
-const (
-	colorReset = "\x1b[0m"
-	colorRed   = "\x1b[31m"
-	colorGreen = "\x1b[32m"
-	colorCyan  = "\x1b[36m"
-)
-
-// UnifiedDiff generates a colored or plain unified diff string.
-func UnifiedDiff(orig, mod, filename string, context int, color bool) string {
-	d := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(orig),
-		B:        difflib.SplitLines(mod),
-		FromFile: filename,
-		ToFile:   filename + " (modified)",
-		Context:  context,
-	}
-	text, err := difflib.GetUnifiedDiffString(d)
-	if err != nil {
-		return "(diff error: " + err.Error() + ")"
-	}
-
-	if !color {
-		return text
-	}
-
-	var sb strings.Builder
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		if i == len(lines)-1 && l == "" {
-			continue // Skip trailing newline from split
-		}
-		switch {
-		case strings.HasPrefix(l, "+"):
-			sb.WriteString(colorGreen + l + colorReset + "\n")
-		case strings.HasPrefix(l, "-"):
-			sb.WriteString(colorRed + l + colorReset + "\n")
-		case strings.HasPrefix(l, "@"):
-			sb.WriteString(colorCyan + l + colorReset + "\n")
-		default:
-			sb.WriteString(l + "\n")
-		}
-	}
-	return sb.String()
 }

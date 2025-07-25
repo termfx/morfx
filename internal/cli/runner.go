@@ -193,7 +193,14 @@ func (r *Runner) processFileWithRules(path string, rules []model.ModificationCon
 			res.Error = err.Error()
 			return res, core.Wrap(core.ErrIO, "write file", err)
 		}
-		res.ModifiedSHA1 = util.SHA1FileHex(path)
+		sha1, err := util.SHA1FileHex(path)
+		if err != nil {
+			res.Success = false
+			res.ErrorCode = model.ECWriteError
+			res.Error = err.Error()
+			return res, core.Wrap(core.ErrIO, "write file", err)
+		}
+		res.ModifiedSHA1 = sha1
 	} else {
 		res.ModifiedSHA1 = res.OriginalSHA1
 	}

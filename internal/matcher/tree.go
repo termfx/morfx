@@ -47,7 +47,8 @@ func (a *ASTMatcher) Find(src []byte) ([]Result, error) {
 		if !ok {
 			break
 		}
-		for _, cap := range match.Captures {
+
+		for _, cap := range cursor.FilterPredicates(match, src).Captures {
 			node := cap.Node
 			res = append(res, Result{
 				Start: int(node.StartByte()),

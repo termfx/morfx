@@ -46,19 +46,18 @@ func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
 	cfg := m.Config
 	pattern := cfg.Pattern
 
-	// ---------------------------------------------------------
-	// 1. Path WITHOUT whitespace normalization
-	// ---------------------------------------------------------
+	if cfg.UseAST {
+		return m.ApplyAST(content)
+	}
+
 	if !cfg.NormalizeWhitespace {
 		return m.applyNoNormalize(content, pattern)
 	}
 
-	// ---------------------------------------------------------
-	// 2. Path WITH whitespace normalization
-	// ---------------------------------------------------------
-	//   a) Normalize original content
+	// Normalize original content
 	normContent, n2o, o2n := util.NormalizeWhitespace(content)
-	//   b) Normalize the pattern to collapse its whitespace
+
+	// Normalize the pattern to collapse its whitespace
 	normPattern, _, _ := util.NormalizeWhitespace(pattern)
 	if cfg.LiteralPattern {
 		normPattern = regexp.QuoteMeta(normPattern)
@@ -245,7 +244,11 @@ func (m *Manipulator) applyMatches(
 
 		switch m.Config.Operation {
 		case model.OpReplace:
-			newBytes = re.ExpandString(nil, m.Config.Replacement, content, match)
+			if m.Config.UseAST {
+				newBytes = []byte(m.Config.Replacement)
+			} else {
+				newBytes = re.ExpandString(nil, m.Config.Replacement, content, match)
+			}
 		case model.OpInsertBefore:
 			ins := preserveIndentation(content, start, m.Config.Replacement)
 			if !dedupeInsert(b, start, []byte(ins), true) {
@@ -326,6 +329,11 @@ func (m *Manipulator) filterMatchesByContext(content string, allMatches [][]int)
 				windowStart = startLine - ctx.WindowBefore
 			}
 			window := lines[windowStart:startLine]
+			// If the window is empty, it means the match is at the beginning of the file or line.
+			// In this case, we should check if the 'Before' regex matches an empty string.
+			if len(window) == 0 && ctx.Before != "" && !beforeRe.MatchString("") {
+				continue // No 'before' context to match against, and regex doesn't match empty string
+			}
 			if !beforeRe.MatchString(strings.Join(window, "\n")) {
 				continue
 			}
@@ -456,6 +464,9 @@ func preserveIndentation(content string, position int, text string) string {
 	}
 
 	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		lines[0] = indent + strings.TrimPrefix(lines[0], "\r")
+	}
 	for i := 1; i < len(lines); i++ {
 		if lines[i] != "" {
 			lines[i] = indent + strings.TrimPrefix(lines[i], "\r")
@@ -512,4 +523,18 @@ func dedupeInsert(buf []byte, pos int, insert []byte, before bool) bool {
 		}
 	}
 	return true // safe to insert
+}
+
+// buildMatcher centralises the decision logic for regex vs AST based on rule cfg.
+func buildMatcher(cfg model.ModificationConfig) (matcher.Matcher, error) {
+	// Flags and preprocessing for regex are still handled in Manipulator.Apply.
+	if cfg.UseAST {
+		lang := cfg.Lang
+		if lang == "" {
+			lang = "go" // sensible default for Go projects
+		}
+		return matcher.NewAST(cfg.Pattern, lang)
+	}
+	// Regex path – cfg.Pattern may already include (?m) / (?s) etc.
+	return matcher.NewRegex(cfg.Pattern)
 }
