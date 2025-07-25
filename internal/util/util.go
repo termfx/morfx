@@ -88,7 +88,7 @@ func NormalizeWhitespace(
 		r, size := utf8.DecodeRuneInString(s[originalByteIndex:])
 
 		// Handle RuneError (invalid UTF-8 byte sequence)
-		if r == utf8.RuneError && size == 1 {
+		if r == utf8.RuneError {
 			// Treat as a non-whitespace character to preserve the byte
 			if inWhitespaceSequence {
 				inWhitespaceSequence = false
@@ -98,11 +98,22 @@ func NormalizeWhitespace(
 					normalizedByteIndex++
 				}
 			}
-			// Map the invalid byte directly
-			originalToNormalized[originalByteIndex] = normalizedByteIndex
+			// Emit the replacement character ''
+			replacementRuneBytes := []byte(string(utf8.RuneError))
+			b.Write(replacementRuneBytes)
+
+			// Map the original invalid bytes to -1 as they are replaced
+			for j := range size {
+				originalToNormalized[originalByteIndex+j] = -1
+			}
+			// Map the bytes of the replacement character in normalized to the start of the original invalid sequence
+			// Each byte of the RuneError maps to the start of the original invalid sequence
+			// Only map the first byte of the RuneError to the original index
 			normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
-			b.WriteByte(s[originalByteIndex])
-			normalizedByteIndex++
+			for j := 1; j < len(replacementRuneBytes); j++ {
+				normalizedToOriginal = append(normalizedToOriginal, originalByteIndex)
+			}
+			normalizedByteIndex += len(replacementRuneBytes)
 			emittedAnyNonSpace = true
 			originalByteIndex += size
 			continue

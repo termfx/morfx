@@ -8,6 +8,7 @@ const (
 	OpInsertBefore Operation = "insert-before"
 	OpInsertAfter  Operation = "insert-after"
 	OpDelete       Operation = "delete"
+	OpGet          Operation = "get"
 )
 
 // OccurrenceSpec defines how many occurrences of a pattern to modify.

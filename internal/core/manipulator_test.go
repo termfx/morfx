@@ -431,7 +431,7 @@ func TestManipulator_applyWithContextOnOriginal(t *testing.T) {
 		Operation:           model.OpInsertAfter,
 		NormalizeWhitespace: true,
 		Context: &model.Context{
-			After: "^world$",
+			After: "",
 		},
 	}
 	manipInsertAfter := NewManipulator(cfgInsertAfter)

@@ -142,11 +142,33 @@ func (r *Runner) processFileWithRules(path string, rules []model.ModificationCon
 	if err != nil {
 		return nil, core.Wrap(core.ErrIO, "reading file", err)
 	}
-
 	original := string(data)
+
+	// --- Handle 'get' operation as a special read-only case ---
+	if len(rules) == 1 && rules[0].Operation == model.OpGet {
+		manip := core.NewManipulator(rules[0])
+		// The Apply method will find all matches and return them as 'changes'.
+		_, changes, err := manip.Apply(original)
+		if err != nil {
+			return nil, err // Propagate errors from the manipulator
+		}
+
+		if len(changes) > 0 {
+			// For 'get', we print the content of the first matched node.
+			// The 'Original' field of the Change struct holds the captured text.
+			fmt.Print(changes[0].Original)
+		}
+		// The 'get' operation terminates here successfully without writing files.
+		return &model.Result{
+			File:          path,
+			Success:       true,
+			ModifiedCount: len(changes),
+		}, nil
+	}
+
+	// --- Regular modification flow for replace, delete, etc. ---
 	current := original
 	var allChanges []model.Change
-
 	for _, rule := range rules {
 		manip := core.NewManipulator(rule)
 		modified, changes, err := manip.Apply(current)
