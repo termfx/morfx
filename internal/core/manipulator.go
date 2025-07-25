@@ -20,9 +20,68 @@ func NewManipulator(cfg model.ModificationConfig) *Manipulator {
 	return &Manipulator{Config: cfg}
 }
 
-// Apply applies the manipulator's rule to the given content string.
 func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
 	pattern := m.Config.Pattern
+
+	// --- SIN normalización ---
+	if !m.Config.NormalizeWhitespace {
+		if m.Config.LiteralPattern {
+			pattern = regexp.QuoteMeta(pattern)
+		}
+		return m.applyNoNormalize(content, pattern)
+	}
+
+	// --- CON normalización ---
+	normContent, n2o, o2n := util.NormalizeWhitespace(content)
+
+	var normPattern string
+	if m.Config.LiteralPattern {
+		// Para literal: normaliza el patrón y luego hazlo literal
+		normPattern, _, _ = util.NormalizeWhitespace(pattern)
+		normPattern = regexp.QuoteMeta(normPattern)
+	} else {
+		// Para regex “real”: NO normalices el patrón (deja \s, clases, etc. intactas)
+		// Solo úsalo tal cual el usuario lo escribió.
+		normPattern = pattern
+	}
+
+	// Flags regex
+	if m.Config.Multiline {
+		normPattern = "(?m)" + normPattern
+	}
+	if m.Config.DotAll {
+		normPattern = "(?s)" + normPattern
+	}
+
+	re, err := regexp.Compile(normPattern)
+	if err != nil {
+		return "", nil, fmt.Errorf(
+			"%w: %w (consider using --literal-pattern if this is a literal string)",
+			model.ErrInvalidRegex, err,
+		)
+	}
+
+	// Buscamos en normalizado
+	matchesNorm := re.FindAllStringSubmatchIndex(normContent, -1)
+
+	// Remapeamos a original
+	matchesOrig := util.RemapAllMatches(matchesNorm, n2o, o2n)
+
+	occ, err := parseOccurrences(m.Config.Occurrences)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if m.Config.Context != nil {
+		return m.applyWithContextOnOriginal(content, re, matchesOrig, occ)
+	}
+	return m.applyMatchesOnOriginal(content, re, matchesOrig, occ)
+}
+
+func (m *Manipulator) applyNoNormalize(content, pattern string) (string, []model.Change, error) {
+	if m.Config.LiteralPattern {
+		pattern = regexp.QuoteMeta(pattern)
+	}
 	if m.Config.Multiline {
 		pattern = "(?m)" + pattern
 	}
@@ -32,7 +91,11 @@ func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %v", model.ErrInvalidRegex, err)
+		return "", nil, fmt.Errorf(
+			"%w: %w (consider using --literal-pattern if this is a literal string)",
+			model.ErrInvalidRegex,
+			err,
+		)
 	}
 
 	occ, err := parseOccurrences(m.Config.Occurrences)
@@ -46,8 +109,67 @@ func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
 	return m.applySimple(content, re, occ)
 }
 
+// Igual que applySimple pero usando los índices ya remapeados.
+func (m *Manipulator) applyMatchesOnOriginal(
+	content string,
+	re *regexp.Regexp,
+	matches [][]int,
+	occ model.OccurrenceSpec,
+) (string, []model.Change, error) {
+	// Limpia los -1 y aplica occ
+	filtered := make([][]int, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 || m[0] < 0 || m[1] < 0 {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+
+	if len(filtered) == 0 {
+		return content, nil, nil
+	}
+
+	if occ.Max != -1 && len(filtered) > occ.Max {
+		filtered = filtered[:occ.Max]
+	}
+
+	return m.applyMatches(content, re, filtered)
+}
+
+// Igual que filterMatchesByContext, pero recibe matches ya remapeados a original.
+func (m *Manipulator) applyWithContextOnOriginal(
+	content string,
+	re *regexp.Regexp,
+	matches [][]int,
+	occ model.OccurrenceSpec,
+) (string, []model.Change, error) {
+	allMatches := matches
+	if len(allMatches) == 0 {
+		return content, nil, nil
+	}
+
+	validMatches, err := m.filterMatchesByContext(content, allMatches)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if len(validMatches) == 0 {
+		return content, nil, nil
+	}
+
+	if occ.Max != -1 && len(validMatches) > occ.Max {
+		validMatches = validMatches[:occ.Max]
+	}
+
+	return m.applyMatches(content, re, validMatches)
+}
+
 // applySimple applies modifications by iterating matches from right to left.
-func (m *Manipulator) applySimple(content string, re *regexp.Regexp, occ model.OccurrenceSpec) (string, []model.Change, error) {
+func (m *Manipulator) applySimple(
+	content string,
+	re *regexp.Regexp,
+	occ model.OccurrenceSpec,
+) (string, []model.Change, error) {
 	matches := re.FindAllStringSubmatchIndex(content, -1)
 	if len(matches) == 0 {
 		return content, nil, nil
@@ -61,7 +183,11 @@ func (m *Manipulator) applySimple(content string, re *regexp.Regexp, occ model.O
 }
 
 // applyWithContext filters matches by context and then applies modifications.
-func (m *Manipulator) applyWithContext(content string, re *regexp.Regexp, occ model.OccurrenceSpec) (string, []model.Change, error) {
+func (m *Manipulator) applyWithContext(
+	content string,
+	re *regexp.Regexp,
+	occ model.OccurrenceSpec,
+) (string, []model.Change, error) {
 	allMatches := re.FindAllStringSubmatchIndex(content, -1)
 	if len(allMatches) == 0 {
 		return content, nil, nil
@@ -84,7 +210,11 @@ func (m *Manipulator) applyWithContext(content string, re *regexp.Regexp, occ mo
 }
 
 // applyMatches performs the actual byte-level modifications for a given set of matches.
-func (m *Manipulator) applyMatches(content string, re *regexp.Regexp, matches [][]int) (string, []model.Change, error) {
+func (m *Manipulator) applyMatches(
+	content string,
+	re *regexp.Regexp,
+	matches [][]int,
+) (string, []model.Change, error) {
 	lineIdx := computeLineIndex(content)
 	b := []byte(content)
 	var changes []model.Change

@@ -1,0 +1,58 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - revive
+    - gocritic
+    - gosec
+    - wrapcheck
+    - forbidigo
+    - bodyclose
+    - contextcheck
+    - sqlclosecheck
+    - rowserrcheck
+    - ireturn
+    - errorlint
+    - nilerr
+    - nilnesserr
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprint
+        - fmt.Fprintln
+    revive:
+      ignore-generated-header: true
+      rules:
+        - name: early-return
+        - name: errorf
+        - name: error-naming
+        - name: context-as-argument
+        - name: modifies-parameter
+        - name: blank-imports
+        - name: if-return
+        - name: range-val-in-closure
+        - name: comment-spacings
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+  exclude-files:
+    - ".*_gen.go"
+    - "vendor/"
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+    - golines
+  settings:
+    gofumpt:
+      simplify: true
+    golines:
+      base-formatter: gofumpt
+      max-len: 100

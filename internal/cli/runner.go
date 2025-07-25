@@ -39,8 +39,13 @@ func (r *Runner) RunWithConfig(path string) int {
 
 	// Validate config
 	if tc.SchemaVersion != 0 && tc.SchemaVersion > model.CurrentSchemaVersion {
-		fmt.Fprintf(os.Stderr, "Config schema version %d is not supported by tool version %s (max schema %d)\n",
-			tc.SchemaVersion, model.CurrentToolVersion, model.CurrentSchemaVersion)
+		fmt.Fprintf(
+			os.Stderr,
+			"Config schema version %d is not supported by tool version %s (max schema %d)\n",
+			tc.SchemaVersion,
+			model.CurrentToolVersion,
+			model.CurrentSchemaVersion,
+		)
 		return 1
 	}
 	if len(tc.Files) == 0 || len(tc.Rules) == 0 {
@@ -81,7 +86,11 @@ func (r *Runner) RunWithConfig(path string) int {
 }
 
 // RunWithFlags executes the tool based on command-line flags for a single rule.
-func (r *Runner) RunWithFlags(files []string, cfg model.ModificationConfig, failIfNoMatch bool) int {
+func (r *Runner) RunWithFlags(
+	files []string,
+	cfg model.ModificationConfig,
+	failIfNoMatch bool,
+) int {
 	totalChanges := 0
 	hadError := false
 
@@ -111,7 +120,10 @@ func (r *Runner) RunWithFlags(files []string, cfg model.ModificationConfig, fail
 }
 
 // processFileWithRules reads a single file and applies a pipeline of rules.
-func (r *Runner) processFileWithRules(path string, rules []model.ModificationConfig) (*model.Result, error) {
+func (r *Runner) processFileWithRules(
+	path string,
+	rules []model.ModificationConfig,
+) (*model.Result, error) {
 	var data []byte
 	var err error
 	var stBefore os.FileInfo
@@ -202,14 +214,25 @@ func (r *Runner) printResult(res *model.Result) {
 
 	if r.Verbose {
 		if res.ModifiedCount > 0 {
-			fmt.Printf("✓ %s — %d changes (%d bytes diff)\n", res.File, res.ModifiedCount, res.ChangedBytes)
+			fmt.Printf(
+				"✓ %s — %d changes (%d bytes diff)\n",
+				res.File,
+				res.ModifiedCount,
+				res.ChangedBytes,
+			)
 		} else {
 			fmt.Printf("✓ %s — No changes\n", res.File)
 		}
 	}
 
 	if r.ShowDiff && res.ModifiedCount > 0 {
-		diff := util.UnifiedDiff(res.OriginalContent, res.ModifiedContent, res.File, r.DiffContext, r.ColorDiff)
+		diff := util.UnifiedDiff(
+			res.OriginalContent,
+			res.ModifiedContent,
+			res.File,
+			r.DiffContext,
+			r.ColorDiff,
+		)
 		fmt.Print(diff)
 	}
 

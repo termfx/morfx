@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	"github.com/pmezard/go-difflib/difflib"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/garaekz/fileman/internal/model"
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 // --- String and Slice Helpers ---
@@ -58,6 +60,104 @@ func SumChangedBytes(ch []model.Change) int {
 	return total
 }
 
+// NormalizeWhitespace colapsa cualquier secuencia de espacios Unicode en un único ' ',
+// elimina espacios líderes y finales, y devuelve los mapas bidireccionales de índices
+// *en bytes*:
+//
+//  1. normalizedToOriginal[nIdx] = índice byte en s que "originó" el byte nIdx en la normalizada
+//     (para runas multibyte, cada byte normalizado apunta al byte inicial del rune original).
+//     Para el ' ' colapsado, apunta al primer byte de la secuencia original de whitespace.
+//  2. originalToNormalized[oIdx] = índice byte en la normalizada que corresponde a oIdx;
+//     si el byte original fue colapsado/recortado, será -1.
+//
+// Nota: No hacemos TrimSpace al final; evitamos emitir espacios líderes/trailing desde el inicio,
+// así no tenemos que reindexar nada después.
+func NormalizeWhitespace(
+	s string,
+) (normalized string, normalizedToOriginal []int, originalToNormalized []int) {
+	var b strings.Builder
+	b.Grow(
+		len(s),
+	) // la normalizada nunca será más larga que la original en bytes si no hay RuneError
+
+	normalizedToOriginal = make([]int, 0, len(s))
+	originalToNormalized = make([]int, len(s))
+	for i := range originalToNormalized {
+		originalToNormalized[i] = -1
+	}
+
+	emittedAny := false // ya emitimos al menos un no-espacio
+	inWS := false       // estamos dentro de una secuencia de whitespace
+	wsStart := 0        // índice byte del primer whitespace de la secuencia
+	normIdx := 0        // índice byte actual en la cadena normalizada
+
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			// String con byte inválido. Lo tratamos como "no whitespace" para preservar el byte.
+			// Se puede ajustar política según necesidad.
+		}
+
+		if unicode.IsSpace(r) {
+			if !inWS {
+				inWS = true
+				wsStart = i
+			}
+			// No asignamos originalToNormalized para estos bytes (permanecerán -1)
+			i += size
+			continue
+		}
+
+		// r no es whitespace
+		if inWS {
+			// Acabamos de cerrar una secuencia de whitespace
+			if emittedAny {
+				// Emitimos un solo espacio representando toda la secuencia previa
+				b.WriteByte(' ')
+				normalizedToOriginal = append(
+					normalizedToOriginal,
+					wsStart,
+				) // convención: mapea al primer byte del span
+				normIdx++ // 1 byte
+			}
+			inWS = false
+		}
+
+		// Emitimos el rune tal cual (en bytes) y mapeamos por byte
+		var buf [utf8.UTFMax]byte
+		n := utf8.EncodeRune(buf[:], r)
+		// En teoría n == size casi siempre para UTF-8 válido. Si no, igual es seguro.
+
+		// Mapear original -> normalizado (por cada byte del rune original)
+		for j := range size {
+			if j < n {
+				originalToNormalized[i+j] = normIdx + j
+			} else {
+				// rune raro (RuneError 3 bytes vs size 1, etc.) mapeamos al primer byte normalizado
+				originalToNormalized[i+j] = normIdx
+			}
+		}
+
+		// Mapear normalizado -> original
+		for range n {
+			normalizedToOriginal = append(
+				normalizedToOriginal,
+				i,
+			) // apúntalo al inicio del rune original
+		}
+
+		b.Write(buf[:n])
+		normIdx += n
+		emittedAny = true
+		i += size
+	}
+
+	// Si terminamos en whitespace, no emitimos el espacio (evitamos trailing). Nada que hacer.
+
+	return b.String(), normalizedToOriginal, originalToNormalized
+}
+
 // --- Filesystem Helpers ---
 
 // WriteFileAtomic writes data to a file atomically.
@@ -72,8 +172,8 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // Clean up on error
-	defer tmp.Close()
+	defer func() { _ = os.Remove(tmpName) }() // Clean up on error
+	defer func() { _ = tmp.Close() }()
 
 	if _, err := tmp.Write(data); err != nil {
 		return err
@@ -132,6 +232,11 @@ func SHA1FileHex(path string) string {
 		return ""
 	}
 	return SHA1Hex(b)
+}
+
+// EscapeRegexLiteral escapes all regex metacharacters in a string.
+func EscapeRegexLiteral(s string) string {
+	return regexp.QuoteMeta(s)
 }
 
 // --- Diff Helpers ---

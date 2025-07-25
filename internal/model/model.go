@@ -17,16 +17,18 @@ type OccurrenceSpec struct {
 
 // ModificationConfig holds the configuration for a single transformation rule.
 type ModificationConfig struct {
-	RuleID          string    `json:"rule_id"`
-	Pattern         string    `json:"pattern"`
-	Replacement     string    `json:"replacement"`
-	Operation       Operation `json:"operation"`
-	Occurrences     string    `json:"occurrences"` // "first", "all", or a number
-	Multiline       bool      `json:"multiline"`
-	DotAll          bool      `json:"dot_all"`
-	Context         *Context  `json:"context"`
-	MustMatch       int       `json:"must_match"`
-	MustChangeBytes int       `json:"must_change_bytes"`
+	RuleID              string    `json:"rule_id"`
+	Pattern             string    `json:"pattern"`
+	Replacement         string    `json:"replacement"`
+	Operation           Operation `json:"operation"`
+	Occurrences         string    `json:"occurrences"` // "first", "all", or a number
+	Multiline           bool      `json:"multiline"`
+	DotAll              bool      `json:"dot_all"`
+	Context             *Context  `json:"context"`
+	MustMatch           int       `json:"must_match"`
+	MustChangeBytes     int       `json:"must_change_bytes"`
+	NormalizeWhitespace bool      `json:"normalize_whitespace"`
+	LiteralPattern      bool      `json:"literal_pattern"`
 }
 
 // Context defines constraints on the text surrounding a match.
@@ -76,5 +78,5 @@ type ToolConfig struct {
 
 const (
 	CurrentSchemaVersion = 1
-	CurrentToolVersion   = "0.2.0-refactored"
+	CurrentToolVersion   = "0.3.0-test"
 )
