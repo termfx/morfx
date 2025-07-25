@@ -15,6 +15,8 @@ test-verbose:
 test-race:
 	go test ./... $(GO_TEST_FLAGS) $(GO_RACE_FLAGS)
 
+test-one:
+	go test $(GO_TEST_FLAGS) $(filter-out $@,$(MAKECMDGOALS))
 fix:
 	goimports -w .
 	gofumpt -w .
@@ -24,5 +26,5 @@ fix:
 # 	golangci-lint run --fix || true
 
 build:
-	go build -o fileman ./cmd/fileman
+	go build -o bin/fileman ./cmd/fileman
 

@@ -156,8 +156,8 @@ func TestRunWithFlags_LiteralPattern(t *testing.T) {
 	// Test with a pattern that contains regex metacharacters, used as literal
 	cfg := model.ModificationConfig{
 		RuleID:         "literal-test",
-		Pattern:        "fmt.Println(\"Hello, World!\")",
-		Replacement:    "fmt.Println(\"Goodbye, World!\")",
+		Pattern:        "\tfmt.Println(\"Hello, World!\")", // Contains parentheses, dot, etc. and tab
+		Replacement:    "\tfmt.Println(\"Goodbye, World!\")",
 		Operation:      model.OpReplace,
 		Occurrences:    "all",
 		LiteralPattern: true,
@@ -200,11 +200,12 @@ func TestRunWithFlags_NormalizeWhitespace(t *testing.T) {
 	// Test with a pattern that has different whitespace than the content
 	cfg := model.ModificationConfig{
 		RuleID:              "normalize-test",
-		Pattern:             "func main() { fmt.Println(\"Hello, World!\") }", // Normalized pattern
-		Replacement:         "func main() { fmt.Println(\"Goodbye, World!\") }",
+		Pattern:             "fmt.Println(\"Hello, World!\")", // Normalized pattern
+		Replacement:         "fmt.Println(\"Goodbye, World!\")",
 		Operation:           model.OpReplace,
 		Occurrences:         "all",
 		NormalizeWhitespace: true, // This is the key
+		LiteralPattern:      true, // Need this because pattern contains regex metacharacters
 	}
 
 	r := &cli.Runner{Verbose: true}

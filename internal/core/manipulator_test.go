@@ -25,10 +25,10 @@ func TestManipulatorApply_NormalizeWhitespace_ReplaceSignature(t *testing.T) {
 		Multiline:           true,
 		DotAll:              false,
 		Context: &model.Context{
-			Before:       `// TODO: add error handling`,
-			After:        `{`,
-			WindowBefore: 5,
-			WindowAfter:  2,
+			Before:       ``,                            // No before context required
+			After:        `// TODO: add error handling`, // TODO should come after the match
+			WindowBefore: 0,
+			WindowAfter:  3, // Look at more lines after to find the TODO
 		},
 	}
 
@@ -125,11 +125,11 @@ func TestDedupeInsert(t *testing.T) {
 }
 
 func TestRunner_JSONErrorInvalidRegex(t *testing.T) {
-	exe := filepath.Join("..", "..", "cmd", "fileman")
+	exe := filepath.Join("..", "..", "bin", "fileman")
 	if _, err := os.Stat(exe); err != nil {
 		t.Skip("fileman binary not built; skip integration test")
 	}
-	cmd := exec.Command(exe, "--json", "--pattern", "[", "--files", "*.go")
+	cmd := exec.Command(exe, "--json", "--pattern", "[", "--file", "*.go")
 	out, _ := cmd.CombinedOutput()
 	if !bytes.Contains(out, []byte(ErrInvalidRegex)) {
 		t.Fatalf("expected json error code, got %s", string(out))

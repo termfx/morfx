@@ -58,7 +58,6 @@ func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
 	// ---------------------------------------------------------
 	//   a) Normalize original content
 	normContent, n2o, o2n := util.NormalizeWhitespace(content)
-
 	//   b) Normalize the pattern to collapse its whitespace
 	normPattern, _, _ := util.NormalizeWhitespace(pattern)
 	if cfg.LiteralPattern {

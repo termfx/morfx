@@ -151,6 +151,9 @@ func (r *Runner) processFileWithRules(path string, rules []model.ModificationCon
 		manip := core.NewManipulator(rule)
 		modified, changes, err := manip.Apply(current)
 		if err != nil {
+			if cliErr, ok := err.(core.CLIError); ok {
+				return nil, cliErr
+			}
 			return nil, core.Wrap(core.ErrParseQuery, fmt.Sprintf("applying rule %q", rule.RuleID), err)
 		}
 		if err := validateRuleContracts(rule, changes); err != nil {
@@ -203,7 +206,12 @@ func (r *Runner) processFileWithRules(path string, rules []model.ModificationCon
 // -----------------------------------------------------------------------------
 
 func (r *Runner) addFileResult(results *[]model.Result, path string, succ bool, chgs []model.Change, err error) {
-	res := model.Result{File: path, Success: succ, Changes: chgs}
+	res := model.Result{
+		File:          path,
+		Success:       succ,
+		Changes:       chgs,
+		ModifiedCount: len(chgs),
+	}
 	if err != nil {
 		if ce, ok := err.(core.CLIError); ok {
 			res.ErrorCode = model.ErrorCode(ce.Code)
