@@ -14,8 +14,21 @@ import (
 	"github.com/garaekz/fileman/internal/cli"
 	"github.com/garaekz/fileman/internal/lang"
 	"github.com/garaekz/fileman/internal/model"
+	"github.com/garaekz/fileman/internal/provider"
 	"github.com/garaekz/fileman/internal/util"
 )
+
+type SecurityThresholds struct {
+	Low    int
+	Medium int
+	High   int
+}
+
+var secThresholds = SecurityThresholds{
+	Low:    10,
+	Medium: 50,
+	High:   100,
+}
 
 // main is the entry point for morfx, the command-line tool for file transformations.
 // It parses command-line flags, builds a configuration, and runs the transformation.
@@ -28,14 +41,12 @@ func main() {
 
 	runner := &cli.Runner{}
 	var res []model.Result
+	// Handle a special case to run it Harmlessly
 	if cfg.Operation == model.OpGet && cfg.RuleID == "cli-first-arg" {
-		// Handle a special case to run it Harmlessly
 		res, err = runner.RunHarmless(files[0], cfg)
+	} else {
+		res, err = runner.Run(files, cfg)
 	}
-	// else {
-	// 	// Normal run with the provided files and configuration
-	// 	res = runner.Run(files, cfg)
-	// }
 	handleOutputAndExit(res, err, cfg)
 }
 
@@ -123,7 +134,7 @@ func buildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		return nil, nil, err
 	}
 
-	tsQuery := *query
+	tsQuery, err := translateQuery(*query, provider)
 
 	cfg := &model.Config{
 		RuleID:        "cli-operation",
@@ -146,7 +157,7 @@ func buildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		files = filterFiles(files, ignorePatterns)
 	}
 
-	const diffThreshold = 50
+	diffThreshold := secThresholds.Medium
 	if len(files) > diffThreshold && !*dryRun {
 		fmt.Fprintf(os.Stdout, "Warning: This operation affects %d files. Forcing diff preview.\n", len(files))
 		cfg.ShowDiff = true
@@ -164,6 +175,17 @@ func buildConfigFromFlags(args []string) (*model.Config, []string, error) {
 	}
 
 	return cfg, util.ExpandGlobs(files), nil
+}
+
+// translateQuery translates the DSL query into a format understood by the provider.
+func translateQuery(query string, provider provider.LanguageProvider) (string, error) {
+	// Use the provider's DSL translator to convert the query
+	tsQuery, err := provider.TranslateDSL(query)
+	if err != nil {
+		return "", fmt.Errorf("failed to translate query: %w", err)
+	}
+
+	return tsQuery, nil
 }
 
 func filterFiles(files []string, ignorePatterns []string) []string {

@@ -52,9 +52,9 @@ func getCached(cfg *model.Config) (matcher.Matcher, error) {
 	mu.RUnlock()
 
 	// slow path – build matcher
-	mt, err := buildMatcher(cfg) // existing helper in core
+	mt, err := matcher.New(cfg)
 	mu.Lock()
-	data[key] = &entry{mt: mt, err: err}
+	data[key] = &entry{mt: *mt, err: err}
 	mu.Unlock()
-	return mt, err
+	return data[key].mt, err
 }

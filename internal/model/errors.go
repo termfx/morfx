@@ -7,7 +7,7 @@ import (
 // ErrCode enumerates common error identifiers.
 const (
 	ErrInit               = "ERR_INIT"
-	ErrInvalidRegex       = "ERR_INVALID_REGEX"
+	ErrInvalidQuery       = "ERR_INVALID_QUERY"
 	ErrParseQuery         = "ERR_PARSE_QUERY"
 	ErrUnsupportedLang    = "ERR_UNSUPPORTED_LANG"
 	ErrIO                 = "ERR_IO"
@@ -18,6 +18,8 @@ const (
 	ErrMissingTarget      = "ERR_MISSING_TARGET"
 	ErrInvalidInput       = "ERR_INVALID_INPUT"
 	ErrUnknown            = "ERR_UNKNOWN"
+	ErrNoChanges          = "ERR_NO_CHANGES"
+	ErrWriteRace          = "ERR_WRITE_RACE"
 )
 
 // CLIError is a uniform error payload for both human and JSON output.

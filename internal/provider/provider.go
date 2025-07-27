@@ -24,4 +24,7 @@ type LanguageProvider interface {
 
 	// GetSitterLanguage returns the Tree-sitter language object for this provider.
 	GetSitterLanguage() *sitter.Language
+
+	// TranslateDSL translates a DSL query into a Tree-sitter query.
+	TranslateDSL(query string) (string, error)
 }
