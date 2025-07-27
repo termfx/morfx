@@ -1,0 +1,10 @@
+{
+  "path": "test.go",
+  "original_content": "package mehs\n\nimport (\n\t\"fmt\"\n\t\"log\"\n\t\"os\"\n\n\t\"github.com/garaekz/fileman/internal/util\"\n)\n\nfunc main() {\n\tfiles := []string{\"*.go\", \"test.txt\"}\n\texpandedFiles := util.ExpandGlobs(files)\n\tfmt.Println(\"Expanded files:\", expandedFiles)\n\n\tdata := []byte(\"Hello, World!\")\n\thash := util.SHA1Hex(data)\n\tfmt.Println(\"SHA1 Hash:\", hash)\n\n\tfileHash, err := util.SHA1FileHex(\"test.txt\")\n\tif err != nil {\n\t\tlog.Fatal(err)\n\t}\n\tfmt.Println(\"File SHA1 Hash:\", fileHash)\n\n\tbeforeInfo, _ := os.Stat(\"test.txt\")\n\tafterInfo, _ := os.Stat(\"test.txt\")\n\tif util.RaceDetected(beforeInfo, afterInfo) {\n\t\tfmt.Println(\"Race condition detected\")\n\t}\n}\n",
+  "modified_content": "package mehs\n\nimport (\n\t\"fmt\"\n\t\"log\"\n\t\"os\"\n\n\t\"github.com/garaekz/fileman/internal/util\"\n)\n\nfunc main() // Added by MORFX{\n\tfiles := []string{\"*.go\", \"test.txt\"}\n\texpandedFiles := util.ExpandGlobs(files)\n\tfmt.Println(\"Expanded files:\", expandedFiles)\n\n\tdata := []byte(\"Hello, World!\")\n\thash := util.SHA1Hex(data)\n\tfmt.Println(\"SHA1 Hash:\", hash)\n\n\tfileHash, err := util.SHA1FileHex(\"test.txt\")\n\tif err != nil \t// Added by MORFX{\n\t\tlog.Fatal(err)\n\t}\n\tfmt.Println(\"File SHA1 Hash:\", fileHash)\n\n\tbeforeInfo, _ := os.Stat(\"test.txt\")\n\tafterInfo, _ := os.Stat(\"test.txt\")\n\tif util.RaceDetected(beforeInfo, afterInfo) \t// Added by MORFX{\n\t\tfmt.Println(\"Race condition detected\")\n\t}\n}\n",
+  "original_sha256": "ca8ff46e5e93b132b94428949ae6e8ed363f5e137698608e73134bbb471f7d33",
+  "modified_sha256": "31041b10b41d756efcda8ab67daab2cb5e0f023ea5c85ec84ff753e32f720a70",
+  "timestamp": "2025-07-27T03:48:44.055481-07:00",
+  "operation": "modify",
+  "query": ""
+}

@@ -17,7 +17,7 @@ type Manipulator struct {
 }
 
 type entry struct {
-	mt  matcher.Matcher
+	mt  *matcher.Matcher
 	err error
 }
 
@@ -142,6 +142,9 @@ func (m *Manipulator) findMatchesBytes(b []byte) ([][]int, error) {
 	if err != nil {
 		return nil, err
 	}
+	if mat == nil {
+		return nil, nil
+	}
 
 	spans, err := mat.Find(b)
 	if err != nil {
@@ -160,8 +163,8 @@ func (m *Manipulator) findMatchesBytes(b []byte) ([][]int, error) {
 // For example, "func:Init" returns "func", "!struct:User" returns "struct".
 func extractNodeType(pattern string) string {
 	// Remove negation prefix if present
-	if strings.HasPrefix(pattern, "!") {
-		pattern = strings.TrimPrefix(pattern, "!")
+	if after, ok := strings.CutPrefix(pattern, "!"); ok {
+		pattern = after
 	}
 
 	// Split by > for parent/child relationships and take the first part

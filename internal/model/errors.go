@@ -51,5 +51,8 @@ func (e CLIError) JSON() string {
 
 // Wrap helper generates CLIError with code and wraps inner error for detail.
 func Wrap(code, msg string, inner error) error {
-	return CLIError{Code: code, Message: msg + ": " + inner.Error()}
+	if inner == nil {
+		return CLIError{Code: code, Message: msg}
+	}
+	return CLIError{Code: code, Message: msg, Detail: inner.Error()}
 }

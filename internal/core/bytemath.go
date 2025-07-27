@@ -42,7 +42,7 @@ func byteToLineRange(lineIdx []int, start, end int) (int, int) {
 
 // getCached returns a (possibly cached) matcher for the rule.
 // If not present it compiles/creates and stores atomically.
-func getCached(cfg *model.Config) (matcher.Matcher, error) {
+func getCached(cfg *model.Config) (*matcher.Matcher, error) {
 	key := cfg.CacheKey()
 	mu.RLock()
 	if e, ok := data[key]; ok {
@@ -54,7 +54,11 @@ func getCached(cfg *model.Config) (matcher.Matcher, error) {
 	// slow path – build matcher
 	mt, err := matcher.New(cfg)
 	mu.Lock()
-	data[key] = &entry{mt: *mt, err: err}
+	if err != nil {
+		data[key] = &entry{mt: nil, err: err}
+	} else {
+		data[key] = &entry{mt: mt, err: err}
+	}
 	mu.Unlock()
 	return data[key].mt, err
 }

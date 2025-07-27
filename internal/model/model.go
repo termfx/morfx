@@ -32,6 +32,7 @@ type Config struct {
 	Occurrence     OccurrenceSpec            `json:"occurrence,omitzero"` // Optional, defaults to all
 	Provider       provider.LanguageProvider // Target language (e.g., "go", "python")
 	DryRun         bool                      `json:"dry_run,omitempty"`           // If true, no files are written
+	Interactive    bool                      `json:"interactive,omitempty"`       // If true, ask for confirmation before writing
 	ShowDiff       bool                      `json:"show_diff,omitempty"`         // If true, show a unified diff of changes
 	DiffContext    int                       `json:"diff_context,omitempty"`      // Lines of context for the diff
 	Verbose        bool                      `json:"verbose,omitempty"`           // Enable verbose output

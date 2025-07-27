@@ -55,7 +55,7 @@ func TestWrap(t *testing.T) {
 	if cliErr.Code != ErrIO {
 		t.Errorf("Expected error code %s, got %s", ErrIO, cliErr.Code)
 	}
-	if cliErr.Message != "context message: inner error" {
-		t.Errorf("Expected message 'context message: inner error', got '%s'", cliErr.Message)
+	if cliErr.Message != "context message" {
+		t.Errorf("Expected message 'context message', got '%s'", cliErr.Message)
 	}
 }

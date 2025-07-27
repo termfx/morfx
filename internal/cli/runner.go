@@ -11,11 +11,30 @@ import (
 	"github.com/garaekz/fileman/internal/core"
 	"github.com/garaekz/fileman/internal/model"
 	"github.com/garaekz/fileman/internal/util"
+	"github.com/garaekz/fileman/internal/writer"
 )
 
 // Runner encapsulates the application's execution logic.
 type Runner struct {
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	writer writer.Writer
+}
+
+// NewRunner creates a new runner with the appropriate writer based on configuration.
+func NewRunner(cfg *model.Config) *Runner {
+	var w writer.Writer
+	if cfg.DryRun {
+		w = writer.NewDryRunWriter()
+	} else if cfg.Interactive {
+		w = writer.NewInteractiveWriter()
+	} else {
+		// Default to staging writer for non-destructive behavior
+		w = writer.NewStagingWriter()
+	}
+
+	return &Runner{
+		writer: w,
+	}
 }
 
 func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) {
@@ -136,27 +155,33 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 		Changes:         allChanges,
 	}
 
-	// Write back if needed
-	if original != current && !cfg.DryRun && path != "-" {
+	// Write back if needed using the Writer interface
+	if original != current && path != "-" {
 		stAfter, _ := os.Stat(path)
 		if util.RaceDetected(stBefore, stAfter) {
 			err = model.Wrap(model.ErrWriteRace, "file modified during processing", nil)
 			res.Success = false
 			res.Error = err
-
 			return res, err
 		}
-		if err := util.WriteFileAtomic(path, []byte(current), 0o644); err != nil {
+
+		if err := r.writer.WriteFile(path, []byte(current), 0o644); err != nil {
 			return res, model.Wrap(model.ErrIO, "write file", err)
 		}
-		sha1, err := util.SHA1FileHex(path)
-		if err != nil {
-			err = model.Wrap(model.ErrIO, "calculating SHA1", err)
-			res.Success = false
-			res.Error = err
-			return res, err
+
+		// Calculate SHA1 for actual writes (not dry-run)
+		if !cfg.DryRun {
+			sha1, err := util.SHA1FileHex(path)
+			if err != nil {
+				err = model.Wrap(model.ErrIO, "calculating SHA1", err)
+				res.Success = false
+				res.Error = err
+				return res, err
+			}
+			res.ModifiedSHA1 = sha1
+		} else {
+			res.ModifiedSHA1 = util.SHA1Hex([]byte(current))
 		}
-		res.ModifiedSHA1 = sha1
 	} else {
 		res.ModifiedSHA1 = res.OriginalSHA1
 	}
@@ -180,4 +205,21 @@ func (r *Runner) addFileResult(cfg *model.Config, results *[]model.Result, path 
 	}
 
 	*results = append(*results, res)
+}
+
+// WriterSummary returns a summary of what the writer did.
+func (r *Runner) WriterSummary() string {
+	return r.writer.Summary()
+}
+
+// ApplyStaged applies staged changes from .morfx/ directory.
+func (r *Runner) ApplyStaged() error {
+	commitWriter := writer.NewCommitWriter()
+	return commitWriter.ApplyStagedChanges()
+}
+
+// StagedSummary returns a summary of staged changes that would be applied.
+func (r *Runner) StagedSummary() string {
+	commitWriter := writer.NewCommitWriter()
+	return commitWriter.Summary()
 }
