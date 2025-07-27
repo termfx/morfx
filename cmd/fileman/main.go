@@ -1,248 +1,267 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"strings"
+	"path/filepath"
+
+	"github.com/spf13/pflag"
 
 	"github.com/garaekz/fileman/internal/cli"
 	"github.com/garaekz/fileman/internal/lang"
-	_ "github.com/garaekz/fileman/internal/lang/golang" // Register the Go provider
 	"github.com/garaekz/fileman/internal/model"
 	"github.com/garaekz/fileman/internal/util"
 )
 
+// main is the entry point for morfx, the command-line tool for file transformations.
+// It parses command-line flags, builds a configuration, and runs the transformation.
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
-	}
-
-	switch os.Args[1] {
-	case "ast":
-		handleASTCommand()
-	// case "regex":
-	// 	handleRegexCommand() // Future: move regex flags here
-	default:
-		// TODO: Remove this once all commands are migrated
-		handleDefaultCommand()
-	}
-}
-
-func handleASTCommand() {
-	astCmd := flag.NewFlagSet("ast", flag.ExitOnError)
-
-	// --- Flag Definitions for 'ast' subcommand ---
-	var inputFiles multiFlag
-	target := astCmd.String("target", "", `Semantic target, format: "type:name" (e.g., "function:MyFunc") (required)`)
-	langFlag := astCmd.String("lang", "go", "Language for AST matching (go, php, etc.)")
-	operation := astCmd.String("operation", "get", "Operation: get|replace|insert-before|insert-after|delete.")
-	replacement := astCmd.String("replacement", "", "Replacement string (from flag). Overridden by stdin.")
-	dedupe := astCmd.Bool("dedupe", true, "Enable auto-deduplication on insert operations.")
-
-	// Behavior and Output flags
-	dryRun := astCmd.Bool("dry-run", false, "Perform a trial run without writing any files.")
-	verbose := astCmd.Bool("verbose", false, "Enable verbose output.")
-	jsonOutput := astCmd.Bool("json", false, "Output results in JSON format.")
-	stdoutMode := astCmd.Bool("stdout", false, "Print final content to stdout (implied by op 'get').")
-	showDiff := astCmd.Bool("diff", false, "Show a unified diff of the changes.")
-	diffContext := astCmd.Int("diff-context", 3, "Lines of context for the diff.")
-	colorDiff := astCmd.Bool("color", true, "Colorize diff output.")
-	workers := astCmd.Int("workers", 0, "Number of parallel workers (0 for auto).")
-
-	astCmd.Var(&inputFiles, "file", "File(s) to process (repeatable), use '-' for stdin.")
-
-	astCmd.Parse(os.Args[2:])
-
-	// --- Validation and Config Building ---
-	if *target == "" {
-		fmt.Fprintln(os.Stderr, "Error: --target flag is required for the ast command.")
-		astCmd.Usage()
-		os.Exit(2)
-	}
-	if len(inputFiles) == 0 {
-		fmt.Fprintln(os.Stderr, "Error: at least one -file is required.")
-		astCmd.Usage()
-		os.Exit(2)
-	}
-
-	// --- Read replacement from stdin if available ---
-	finalReplacement := *replacement
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error checking stdin: %v\n", err)
-		os.Exit(1)
-	}
-	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		stdinBytes, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
-			os.Exit(1)
-		}
-		if len(stdinBytes) > 0 {
-			finalReplacement = string(stdinBytes)
-		}
-	}
-
-	parts := strings.SplitN(*target, ":", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		fmt.Fprintf(os.Stderr, "Error: invalid --target format. Expected \"type:name\".\n")
-		os.Exit(2)
-	}
-
-	query, err := lang.GetQueryForLanguage(*langFlag, parts[0], parts[1])
+	cfg, files, err := buildConfigFromFlags(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	cfg := model.ModificationConfig{
-		RuleID:      fmt.Sprintf("ast-%s-%s", *operation, *target),
-		Pattern:     query,
-		Replacement: finalReplacement,
-		Operation:   model.Operation(*operation),
-		UseAST:      true,
-		Lang:        *langFlag,
-		Dedupe:      *dedupe,
+	runner := &cli.Runner{}
+	var res []model.Result
+	if cfg.Operation == model.OpGet && cfg.RuleID == "cli-first-arg" {
+		// Handle a special case to run it Harmlessly
+		res, err = runner.RunHarmless(files[0], cfg)
 	}
-
-	runner := &cli.Runner{
-		DryRun:      *dryRun,
-		Verbose:     *verbose,
-		JSONOutput:  *jsonOutput,
-		StdoutMode:  *stdoutMode || (*operation == "get"),
-		ShowDiff:    *showDiff,
-		DiffContext: *diffContext,
-		ColorDiff:   *colorDiff,
-		Workers:     *workers,
-	}
-
-	// --- Execution ---
-	files := util.ExpandGlobs(inputFiles)
-	exitCode := runner.RunWithFlags(files, cfg, false)
-	os.Exit(exitCode)
+	// else {
+	// 	// Normal run with the provided files and configuration
+	// 	res = runner.Run(files, cfg)
+	// }
+	handleOutputAndExit(res, err, cfg)
 }
 
-// handleDefaultCommand contains the original flag logic for backward compatibility
-// or for the primary regex-based operations. It should be refactored as needed.
-func handleDefaultCommand() {
-	var (
-		// Mode flags
-		configFile = flag.String("config", "", "Path to a JSON configuration file for multi-rule processing.")
-		inputFiles multiFlag
-
-		// Single-rule config flags
-		pattern             = flag.String("pattern", "", "Regular expression pattern.")
-		patternFile         = flag.String("pattern-file", "", "Read pattern from file instead of --pattern.")
-		literalPattern      = flag.Bool("literal-pattern", false, "Treat the pattern as a literal string.")
-		normalizeWhitespace = flag.Bool("normalize-whitespace", false, "Normalize all whitespace before matching.")
-		useAST              = flag.Bool("use-ast", false, "Use AST-based structural matching instead of regex.")
-		lang                = flag.String("lang", "go", "Language for AST matching (e.g. go, python).")
-		dedupe              = flag.Bool("dedupe", true, "Enable auto-deduplication on insert operations.")
-		replacement         = flag.String("replacement", "", "Replacement string for replace/insert operations.")
-		operation           = flag.String("operation", "replace", "Operation: replace|insert-before|insert-after|delete.")
-		occurrences         = flag.String("occurrences", "all", "Occurrences to modify: first|all|<n>.")
-		ruleID              = flag.String("rule-id", "cli-rule", "Identifier for the rule in single-rule mode.")
-		mustMatch           = flag.Int("must-match", 0, "Require at least N matches for the rule to succeed.")
-		mustChange          = flag.Int("must-change-bytes", 0, "Require at least N bytes changed for the rule to succeed.")
-
-		// Behavior flags
-		dryRun        = flag.Bool("dry-run", false, "Perform a trial run without writing any files.")
-		failIfNoMatch = flag.Bool("fail-if-no-match", false, "Exit with an error code if no matches are found.")
-		stdinMode     = flag.Bool("stdin", false, "Read content from stdin (equivalent to -file -).")
-
-		// Output flags
-		verbose     = flag.Bool("verbose", false, "Enable verbose output.")
-		jsonOutput  = flag.Bool("json", false, "Output results in JSON format.")
-		stdoutMode  = flag.Bool("stdout", false, "Print the final modified content to stdout.")
-		showDiff    = flag.Bool("diff", false, "Show a unified diff of the changes.")
-		diffContext = flag.Int("diff-context", 3, "Number of context lines for the unified diff.")
-		colorDiff   = flag.Bool("color", true, "Colorize the diff output.")
-	)
-	flag.Var(&inputFiles, "file", "File(s) to process (repeatable), use '-' for stdin.")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
-		flag.PrintDefaults()
+// buildConfigFromFlags parses command-line flags and builds a configuration
+func buildConfigFromFlags(args []string) (*model.Config, []string, error) {
+	fs := pflag.NewFlagSet("morfx", pflag.ContinueOnError)
+	fs.Usage = func() {
+		printUsage(fs)
 	}
-	flag.Parse()
 
-	// Select pattern: file overrides inline
-	finalPattern := *pattern
-	if *patternFile != "" {
-		data, err := os.ReadFile(*patternFile)
+	// Define flags
+	fs.BoolP("help", "h", true, "Show this help message and exit.")
+	query := fs.StringP("query", "q", "", "DSL query for node selection (e.g., 'func:MyFunc > call:os.Getenv'). (Required)")
+	operation := fs.StringP("op", "o", "get", "Operation: get, replace, delete, insert-before, insert-after.")
+	replacement := fs.StringP("repl", "r", "", "Replacement string for replace/insert operations.")
+
+	langFlag := fs.StringP("lang", "l", "", "Target language (go, python, etc.). Inferred from file extensions if omitted.")
+	includeTests := fs.BoolP("include-tests", "t", false, "Include test files (*_test.go, etc.) in the operation.")
+	workers := fs.IntP("workers", "w", 0, "Number of concurrent workers, 0 means use all available CPUs. (Default: 0).")
+
+	force := fs.BoolP("force", "f", false, "Force apply changes without confirmation for medium-sized refactors.")
+	dryRun := fs.BoolP("dry-run", "d", false, "Perform a trial run without writing any files.")
+	showDiff := fs.BoolP("diff", "D", false, "Show a unified diff of the changes.")
+	diffContext := fs.IntP("diff-context", "C", 3, "Lines of context for the diff.")
+	verbose := fs.BoolP("verbose", "v", false, "Enable verbose output.")
+	jsonOutput := fs.BoolP("json", "j", false, "Output results in JSON format.")
+	stdout := fs.Bool("stdout", false, "Output modified content to stdout instead of writing to files.")
+
+	// Parse the flags
+	if err := fs.Parse(args); err != nil {
+		return nil, nil, err
+	}
+
+	// If the --help flag is set, show usage and return an error
+	if !fs.HasFlags() || fs.Changed("help") {
+		fs.Usage()
+		return nil, nil, flag.ErrHelp
+	}
+
+	// If only one argument is provided we take a shortcut
+	// and try to resolve the language provider based on the file extension.
+	if fs.NArg() == 1 {
+		if _, err := os.Stat(fs.Arg(0)); os.IsNotExist(err) {
+			return nil, nil, errors.New("the specified file does not exist")
+		}
+
+		if filepath.Ext(fs.Arg(0)) == "" {
+			return nil, nil, errors.New("the first argument must be a file path")
+		}
+
+		// Try to resolve the language provider based on the file extension
+		provider, err := lang.ResolveProvider("", fs.Args())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading pattern file: %v\n", err)
-			os.Exit(1)
+			return nil, nil, err
 		}
-		finalPattern = string(data)
+		// We have to clean the file and see if thats not a filtered file.
+		ignorePatterns, _ := provider.GetDefaultIgnorePatterns()
+		files := filterFiles(fs.Args(), ignorePatterns)
+		if len(files) == 0 {
+			return nil, nil, fmt.Errorf("the only provided file %s is ignored by the default ignore patterns", fs.Arg(0))
+		}
+
+		specialCfg := &model.Config{
+			RuleID:    "cli-first-arg", // Special rule ID for the first argument case
+			Provider:  provider,
+			Operation: model.Operation(*operation), // Default to 'get' operation
+		}
+
+		return specialCfg, files, nil
 	}
 
-	runner := &cli.Runner{
-		DryRun:      *dryRun,
-		Verbose:     *verbose,
-		JSONOutput:  *jsonOutput,
-		StdoutMode:  *stdoutMode,
-		ShowDiff:    *showDiff,
-		DiffContext: *diffContext,
-		ColorDiff:   *colorDiff,
+	// If no query is provided
+	if *query == "" {
+		return nil, nil, errors.New("the --query flag is required")
 	}
 
-	var exitCode int
-	if *configFile != "" {
-		if *pattern != "" || *replacement != "" || *operation != "replace" ||
-			*occurrences != "all" ||
-			*ruleID != "cli-rule" ||
-			*mustMatch != 0 ||
-			*mustChange != 0 ||
-			*literalPattern ||
-			*normalizeWhitespace {
-			fmt.Fprintln(os.Stderr, "Error: Cannot use --config with single-rule flags.")
-			os.Exit(2)
+	// File paths are expected as positional arguments after the flags
+	files := fs.Args()
+	if len(files) == 0 {
+		return nil, nil, errors.New("at least one file path is required")
+	}
+
+	provider, err := lang.ResolveProvider(*langFlag, files)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tsQuery := *query
+
+	cfg := &model.Config{
+		RuleID:        "cli-operation",
+		Pattern:       tsQuery,
+		Replacement:   *replacement,
+		Operation:     model.Operation(*operation),
+		Provider:      provider,
+		DryRun:        *dryRun,
+		ShowDiff:      *showDiff,
+		DiffContext:   *diffContext,
+		Verbose:       *verbose,
+		JSONOutput:    *jsonOutput,
+		StdoutMode:    *stdout,
+		FailIfNoMatch: !*force,
+		Workers:       *workers,
+	}
+
+	if !*includeTests {
+		ignorePatterns, _ := provider.GetDefaultIgnorePatterns()
+		files = filterFiles(files, ignorePatterns)
+	}
+
+	const diffThreshold = 50
+	if len(files) > diffThreshold && !*dryRun {
+		fmt.Fprintf(os.Stdout, "Warning: This operation affects %d files. Forcing diff preview.\n", len(files))
+		cfg.ShowDiff = true
+	}
+
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		stdinBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read from stdin: %w", err)
 		}
-		exitCode = runner.RunWithConfig(*configFile)
+		if len(stdinBytes) > 0 {
+			cfg.Replacement = string(stdinBytes)
+		}
+	}
+
+	return cfg, util.ExpandGlobs(files), nil
+}
+
+func filterFiles(files []string, ignorePatterns []string) []string {
+	var filtered []string
+	for _, file := range files {
+		isIgnored := false
+		for _, pattern := range ignorePatterns {
+			if matched, _ := filepath.Match(pattern, filepath.Base(file)); matched {
+				isIgnored = true
+				break
+			}
+		}
+		if !isIgnored {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
+}
+
+func handleOutputAndExit(res []model.Result, err error, cfg *model.Config) {
+	if err != nil {
+		printFatal(err, cfg.JSONOutput)
+	}
+	for _, r := range res {
+		printResultCLI(&r, cfg)
+	}
+}
+
+func printResultCLI(res *model.Result, cfg *model.Config) {
+	if !res.Success {
+		cliErr, ok := res.Error.(model.CLIError)
+		if !ok {
+			cliErr = model.CLIError{
+				Code:    model.ErrUnknown,
+				Message: res.Error.Error(),
+			}
+		}
+		fmt.Fprintf(os.Stderr, "✗ %s: %s (%s)\n", res.File, cliErr, cliErr.Message)
+		return
+	}
+
+	if cfg.RuleID == "cli-first-arg" {
+		// Special case for the first argument rule
+		fmt.Printf("✓ %s — No changes made (harmless mode)\n", res.File)
+		diff := util.UnifiedDiff("", res.ModifiedContent, res.File, cfg.DiffContext)
+		fmt.Print(diff)
+		return
+	}
+
+	if cfg.Verbose {
+		if res.ModifiedCount > 0 {
+			fmt.Printf("✓ %s — %d changes (%d bytes diff)\n", res.File, res.ModifiedCount, res.ChangedBytes)
+		} else {
+			fmt.Printf("✓ %s — No changes\n", res.File)
+		}
+		return
+	}
+
+	if cfg.ShowDiff && res.ModifiedCount > 0 {
+		diff := util.UnifiedDiff(res.OriginalContent, res.ModifiedContent, res.File, cfg.DiffContext)
+		fmt.Print(diff)
+		return
+	}
+
+	if cfg.StdoutMode {
+		fmt.Print(res.ModifiedContent)
+		return
+	}
+
+	if cfg.JSONOutput {
+		jsonOutput, err := json.Marshal(res)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error converting result to JSON: %v\n", err)
+			return
+		}
+		fmt.Println(string(jsonOutput))
+		return
+	}
+}
+
+func printFatal(err error, jsonOut bool) {
+	if jsonOut {
+		if ce, ok := err.(model.CLIError); ok {
+			fmt.Println(ce.JSON())
+		} else {
+			fmt.Println(model.CLIError{
+				Code:    model.ErrUnknown,
+				Message: err.Error(),
+			}.JSON())
+		}
 	} else {
-		if *stdinMode {
-			inputFiles = append(inputFiles, "-")
-		}
-		if len(inputFiles) == 0 {
-			fmt.Fprintln(os.Stderr, "Error: At least one -file or -stdin is required.")
-			flag.Usage()
-			os.Exit(2)
-		}
-
-		// Single-rule mode
-		cfg := model.ModificationConfig{
-			RuleID:              *ruleID,
-			Pattern:             finalPattern,
-			Replacement:         *replacement,
-			Operation:           model.Operation(*operation),
-			Occurrences:         *occurrences,
-			MustMatch:           *mustMatch,
-			MustChangeBytes:     *mustChange,
-			NormalizeWhitespace: *normalizeWhitespace,
-			LiteralPattern:      *literalPattern,
-			UseAST:              *useAST,
-			Lang:                *lang,
-			Dedupe:              *dedupe,
-		}
-
-		files := util.ExpandGlobs(inputFiles)
-		exitCode = runner.RunWithFlags(files, cfg, *failIfNoMatch)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 	}
-	os.Exit(exitCode)
 }
 
-func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s <command> [options]\n\n", os.Args[0])
-	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  ast      Perform structural, AST-based code manipulation.")
-	// Add other commands here
-	fmt.Fprintln(os.Stderr, "\nRun 'fileman <command> --help' for more information.")
+func printUsage(fs *pflag.FlagSet) {
+	fmt.Fprintf(os.Stderr, "\nUsage: morfx [flags] <file1> <file2> ...\n")
+	fmt.Fprintf(os.Stderr, "Quick read usage: morfx ./path/to/file1  //Reads a single file\n")
+	fmt.Fprintf(os.Stderr, "\nFlags:\n")
+	fs.PrintDefaults()
 }
-
-type multiFlag []string
-
-func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
-func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }

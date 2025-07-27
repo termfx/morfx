@@ -1,11 +1,15 @@
 package util
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 // ExpandGlobs expands a list of file paths, including those with glob patterns.
@@ -66,14 +70,45 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpFile.Name(), path)
 }
 
-// UnifiedDiff returns a unified diff of two strings.
-func UnifiedDiff(from, to string, path string, context int, color bool) string {
-	// This is a placeholder implementation. A real implementation would use a diff library.
-	return `diff --git a/` + path + ` b/` + path + `
---- a/` + path + `
-+++ b/` + path + `
-@@ -1 +1 @@
-- ` + from + `
-+ ` + to + `
-`
+// UnifiedDiff returns a unified diff of two strings in unified diff format.
+func UnifiedDiff(from, to, path string, context int) string {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(from, to, false)
+
+	// Generate diff hunks
+	var buf bytes.Buffer
+	buf.WriteString("\033[1;36m--- a/" + path + "\033[0m\n")
+	buf.WriteString("\033[1;32m+++ b/" + path + "\033[0m\n")
+
+	i, j := 0, 0
+	for _, d := range diffs {
+		switch d.Type {
+		case diffmatchpatch.DiffEqual:
+			// Context lines
+			lines := strings.Split(d.Text, "\n")
+			for k := 0; k < len(lines)-1; k++ {
+				if context > 0 {
+					buf.WriteString(" " + lines[k] + "\n")
+				}
+				i++
+				j++
+			}
+		case diffmatchpatch.DiffDelete:
+			for line := range strings.SplitSeq(d.Text, "\n") {
+				if line != "" {
+					buf.WriteString("\033[1;31m-" + line + "\033[0m\n")
+				}
+				i++
+			}
+		case diffmatchpatch.DiffInsert:
+			for line := range strings.SplitSeq(d.Text, "\n") {
+				if line != "" {
+					buf.WriteString("\033[1;32m+" + line + "\033[0m\n")
+				}
+				j++
+			}
+		}
+	}
+
+	return buf.String()
 }

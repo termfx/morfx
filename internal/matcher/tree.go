@@ -4,6 +4,8 @@ import (
 	"context"
 
 	sitter "github.com/smacker/go-tree-sitter"
+
+	"github.com/garaekz/fileman/internal/model"
 )
 
 // ASTMatcher uses Tree-sitter queries to match AST nodes.
@@ -13,17 +15,14 @@ type ASTMatcher struct {
 }
 
 // NewAST builds an ASTMatcher for the given query and language identifier.
-func NewAST(pattern, langName string) (*ASTMatcher, error) {
-	lang, ok := ResolveLanguage(langName)
-	if !ok {
-		return nil, &UnsupportedLangError{Lang: langName}
-	}
+func NewAST(cfg *model.Config) (*ASTMatcher, error) {
+	language := cfg.Provider.GetSitterLanguage()
 
-	q, err := sitter.NewQuery([]byte(pattern), lang)
+	q, err := sitter.NewQuery([]byte(cfg.Pattern), language)
 	if err != nil {
 		return nil, err
 	}
-	return &ASTMatcher{lang: lang, query: q}, nil
+	return &ASTMatcher{lang: language, query: q}, nil
 }
 
 // Find parses the source and returns the byte spans of the '@target' captures.

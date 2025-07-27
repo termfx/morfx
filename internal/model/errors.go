@@ -1,28 +1,53 @@
 package model
 
-import "errors"
-
-// Sentinel errors for programmatic checking.
-var (
-	ErrNoMatchesFound        = errors.New("no matches found")
-	ErrMustMatchFailed       = errors.New("must_match not satisfied")
-	ErrMustChangeBytesFailed = errors.New("must_change_bytes not satisfied")
-	ErrWriteRace             = errors.New("file changed on disk during operation")
-	ErrInvalidRegex          = errors.New("invalid regex")
+import (
+	"encoding/json"
 )
 
-// ErrorCode provides a machine-readable error type for JSON output.
-type ErrorCode string
-
+// ErrCode enumerates common error identifiers.
 const (
-	ECNone                  ErrorCode = ""
-	ECNoMatch               ErrorCode = "ERR_NO_MATCH"
-	ECMustMatchFailed       ErrorCode = "ERR_MUST_MATCH"
-	ECMustChangeBytesFailed ErrorCode = "ERR_MUST_CHANGE_BYTES"
-	ECWriteRace             ErrorCode = "ERR_WRITE_RACE"
-	ECInvalidRegex          ErrorCode = "ERR_INVALID_REGEX"
-	ECReadError             ErrorCode = "ERR_READ_FILE"
-	ECWriteError            ErrorCode = "ERR_WRITE_FILE"
-	ECConfigError           ErrorCode = "ERR_CONFIG"
-	ECUnknown               ErrorCode = "ERR_UNKNOWN"
+	ErrInit               = "ERR_INIT"
+	ErrInvalidRegex       = "ERR_INVALID_REGEX"
+	ErrParseQuery         = "ERR_PARSE_QUERY"
+	ErrUnsupportedLang    = "ERR_UNSUPPORTED_LANG"
+	ErrIO                 = "ERR_IO"
+	ErrInvalidConfig      = "ERR_INVALID_CONFIG"
+	ErrInvalidOccurrences = "ERR_INVALID_OCCURRENCES"
+	ErrInvalidOperation   = "ERR_INVALID_OPERATION"
+	ErrUnknownLanguage    = "ERR_UNKNOWN_LANGUAGE"
+	ErrMissingTarget      = "ERR_MISSING_TARGET"
+	ErrInvalidInput       = "ERR_INVALID_INPUT"
+	ErrUnknown            = "ERR_UNKNOWN"
 )
+
+// CLIError is a uniform error payload for both human and JSON output.
+// When printed with %s it returns Message; with %+v it returns JSON.
+type CLIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+func (e CLIError) Error() string {
+	if e.Detail != "" {
+		return e.Message + ": " + e.Detail
+	}
+	return e.Message
+}
+
+func (e CLIError) String() string {
+	if e.Detail != "" {
+		return e.Message + ": " + e.Detail
+	}
+	return e.Message
+}
+
+func (e CLIError) JSON() string {
+	b, _ := json.Marshal(e)
+	return string(b)
+}
+
+// Wrap helper generates CLIError with code and wraps inner error for detail.
+func Wrap(code, msg string, inner error) error {
+	return CLIError{Code: code, Message: msg + ": " + inner.Error()}
+}
