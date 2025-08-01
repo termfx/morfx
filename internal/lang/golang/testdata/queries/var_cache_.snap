@@ -1,0 +1,1 @@
+[(var_declaration (var_spec name: (identifier_list (identifier) @name) type: (type_identifier) @type) (#any-match? @name "^cache.*") (#match? @type ".*")) (var_declaration (var_spec_list (var_spec name: (identifier_list (identifier) @name) type: (type_identifier) @type) (#any-match? @name "^cache.*") (#match? @type ".*")))] @target

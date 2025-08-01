@@ -1,81 +1,35 @@
 # Binaries for programs and plugins
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Output of the go coverage tool
+*.coverprofile
 
 # Go workspace file
 go.work
+go.work.sum
 
-# IDE-specific files
-.vscode/
-.idea/
+# IDE/editor files
 *.swp
-*.swo
-*~
 
-# OS-specific files
+# OS generated files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
-# Local environment files
-.env
-.env.local
-.env.*.local
-
-# Build output
-build/
-dist/
+# Binary folders
 bin/
+obj/
+dist/
 
-# Temporary files
+# Temporary files and folders
 tmp/
 temp/
 
-# Log files
+# Logs
 *.log
 
-# Debug files
-debug
-__debug_bin*
-
-# Air live reload tool
-tmp/
-
-# GoLand
-.idea/
-
-# VS Code
-.vscode/
-
-# Vim
-*.swp
-*.swo
-
-# Emacs
-*~
-\#*\#
-/.emacs.desktop
-/.emacs.desktop.lock
-*.elc
-auto-save-list
-tramp
-.\#*
-
-# My brags
-*.cast
+.*/
+!.gitignore

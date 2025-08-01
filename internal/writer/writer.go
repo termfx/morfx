@@ -120,3 +120,23 @@ func (w *DiskWriter) Summary() string {
 
 	return sb.String()
 }
+
+// ReadOnlyWriter is used for get operations that don't modify files.
+// It implements the Writer interface but doesn't track any changes.
+type ReadOnlyWriter struct{}
+
+// NewReadOnlyWriter creates a new read-only writer.
+func NewReadOnlyWriter() *ReadOnlyWriter {
+	return &ReadOnlyWriter{}
+}
+
+// WriteFile does nothing for read-only operations.
+func (w *ReadOnlyWriter) WriteFile(path string, content []byte, perm os.FileMode) error {
+	// Read-only operations don't write files
+	return nil
+}
+
+// Summary returns an empty string for read-only operations.
+func (w *ReadOnlyWriter) Summary() string {
+	return ""
+}

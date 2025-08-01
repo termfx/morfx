@@ -32,7 +32,7 @@ func ReverseChanges(cs []model.Change) {
 func TakeIndent(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if r == ' ' || r == '\t' {
+		if r == ' ' || r == '	' {
 			b.WriteRune(r)
 		} else {
 			break
@@ -59,7 +59,7 @@ func SumChangedBytes(ch []model.Change) int {
 // *en bytes*:
 //
 //  1. normalizedToOriginal[nIdx] = índice byte en s que "originó" el byte nIdx en la normalizada
-//     (para runas multibyte, cada byte normalizado apunta al byte inicial del rune original).
+//     (para runas multibyte, cada byte normalizada apunta al byte inicial del rune original).
 //     Para el ' ' colapsado, apunta al primer byte de la secuencia original de whitespace.
 //  2. originalToNormalized[oIdx] = índice byte en la normalizada que corresponde a oIdx;
 //     si el byte original fue colapsado/recortado, será -1.
@@ -170,4 +170,11 @@ func NormalizeWhitespace(
 	}
 
 	return string(result), normalizedToOriginal, originalToNormalized
+}
+
+func Min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

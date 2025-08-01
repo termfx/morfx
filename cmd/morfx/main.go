@@ -364,6 +364,12 @@ func printResultCLI(res *model.Result, cfg *model.Config) {
 	if cfg.Verbose {
 		if res.ModifiedCount > 0 {
 			fmt.Printf("✓ %s — %d changes (%d bytes diff)\n", res.File, res.ModifiedCount, res.ChangedBytes)
+			// For get operations, show the matched content
+			if cfg.Operation == model.OpGet {
+				for i, change := range res.Changes {
+					fmt.Printf("  Match %d: '%s' (lines %d-%d)\n", i+1, change.New, change.LineStart, change.LineEnd)
+				}
+			}
 		} else {
 			fmt.Printf("✓ %s — No changes\n", res.File)
 		}

@@ -23,7 +23,10 @@ type Runner struct {
 // NewRunner creates a new runner with the appropriate writer based on configuration.
 func NewRunner(cfg *model.Config) *Runner {
 	var w writer.Writer
-	if cfg.DryRun {
+	if cfg.Operation == model.OpGet {
+		// For get operations, use read-only writer that doesn't show any summary
+		w = writer.NewReadOnlyWriter()
+	} else if cfg.DryRun {
 		w = writer.NewDryRunWriter()
 	} else if cfg.Interactive {
 		w = writer.NewInteractiveWriter()
@@ -38,9 +41,6 @@ func NewRunner(cfg *model.Config) *Runner {
 }
 
 func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) {
-	totalChanges := 0
-	hadError := false
-
 	var results []model.Result // for JSON output mode
 
 	jobs := make(chan string)
@@ -58,11 +58,12 @@ func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) 
 			for path := range jobs {
 				res, err := r.processFile(path, cfg)
 				if err != nil {
-					hadError = true
-					r.addFileResult(cfg, &results, path, false, nil, err)
+					// Log the error but continue processing other files
+					fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", path, err)
+					results = append(results, model.Result{File: path, Success: false, Error: err})
 					continue
 				}
-				r.addFileResult(cfg, &results, path, res.Success, res.Changes, nil)
+				results = append(results, *res)
 			}
 		}()
 	}
@@ -74,12 +75,27 @@ func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) 
 	close(jobs)
 	wg.Wait()
 
-	if hadError {
-		return nil, model.Wrap(model.ErrUnknown, "errors occurred during processing", nil)
+	// Check if any file processing resulted in an error
+	for _, res := range results {
+		if !res.Success {
+			return results, model.Wrap(model.ErrUnknown, "one or more errors occurred during processing", nil)
+		}
 	}
-	if totalChanges == 0 && cfg.FailIfNoMatch {
-		return nil, model.Wrap(model.ErrNoChanges, "no changes made", nil)
+
+	// Check if no changes were made and FailIfNoMatch is true
+	if len(results) > 0 && cfg.FailIfNoMatch {
+		// Count total modified files
+		modifiedFilesCount := 0
+		for _, res := range results {
+			if res.ModifiedCount > 0 {
+				modifiedFilesCount++
+			}
+		}
+		if modifiedFilesCount == 0 {
+			return results, model.Wrap(model.ErrNoChanges, "no changes made", nil)
+		}
 	}
+
 	return results, nil
 }
 
@@ -125,11 +141,38 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 	}
 	original := string(data)
 
-	current := original
-	var allChanges []model.Change
-
 	manip := core.NewManipulator(cfg)
-	modified, changes, err := manip.Apply(current)
+
+	// For get operations, use ApplyHarmless to show matches without making changes
+	if cfg.Operation == model.OpGet {
+		changes, err := manip.ApplyHarmless(original)
+		if err != nil {
+			if cliErr, ok := err.(model.CLIError); ok {
+				return nil, cliErr
+			}
+			return nil, model.Wrap(model.ErrParseQuery, fmt.Sprintf("applying rule %q", cfg.RuleID), err)
+		}
+
+		// Build result for get operation
+		res := &model.Result{
+			File:            path,
+			Time:            time.Now().Format(time.RFC3339),
+			SchemaVersion:   model.CurrentSchemaVersion,
+			ToolVersion:     model.CurrentToolVersion,
+			Success:         true,
+			ModifiedCount:   len(changes),
+			ChangedBytes:    0, // No actual changes for get operations
+			OriginalSHA1:    util.SHA1Hex(data),
+			OriginalContent: original,
+			ModifiedContent: original, // No modifications for get
+			Changes:         changes,
+		}
+		res.ModifiedSHA1 = res.OriginalSHA1
+		return res, nil
+	}
+
+	// For non-get operations, use the normal Apply flow
+	rewrites, err := manip.Apply(original)
 	if err != nil {
 		if cliErr, ok := err.(model.CLIError); ok {
 			return nil, cliErr
@@ -137,8 +180,7 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 		return nil, model.Wrap(model.ErrParseQuery, fmt.Sprintf("applying rule %q", cfg.RuleID), err)
 	}
 
-	current = modified
-	allChanges = append(allChanges, changes...)
+	modified, changes := core.ApplyRewrites(original, rewrites)
 
 	// Build result
 	res := &model.Result{
@@ -147,16 +189,16 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 		SchemaVersion:   model.CurrentSchemaVersion,
 		ToolVersion:     model.CurrentToolVersion,
 		Success:         true,
-		ModifiedCount:   len(allChanges),
-		ChangedBytes:    util.SumChangedBytes(allChanges),
+		ModifiedCount:   len(changes),
+		ChangedBytes:    util.SumChangedBytes(changes),
 		OriginalSHA1:    util.SHA1Hex(data),
 		OriginalContent: original,
-		ModifiedContent: current,
-		Changes:         allChanges,
+		ModifiedContent: modified,
+		Changes:         changes,
 	}
 
 	// Write back if needed using the Writer interface
-	if original != current && path != "-" {
+	if original != modified && path != "-" {
 		stAfter, _ := os.Stat(path)
 		if util.RaceDetected(stBefore, stAfter) {
 			err = model.Wrap(model.ErrWriteRace, "file modified during processing", nil)
@@ -165,7 +207,7 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 			return res, err
 		}
 
-		if err := r.writer.WriteFile(path, []byte(current), 0o644); err != nil {
+		if err := r.writer.WriteFile(path, []byte(modified), 0o644); err != nil {
 			return res, model.Wrap(model.ErrIO, "write file", err)
 		}
 
@@ -180,31 +222,13 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 			}
 			res.ModifiedSHA1 = sha1
 		} else {
-			res.ModifiedSHA1 = util.SHA1Hex([]byte(current))
+			res.ModifiedSHA1 = util.SHA1Hex([]byte(modified))
 		}
 	} else {
 		res.ModifiedSHA1 = res.OriginalSHA1
 	}
 
 	return res, nil
-}
-
-func (r *Runner) addFileResult(cfg *model.Config, results *[]model.Result, path string, succ bool, chgs []model.Change, err error) {
-	res := model.Result{
-		File:          path,
-		Success:       succ,
-		Changes:       chgs,
-		ModifiedCount: len(chgs),
-	}
-	if err != nil {
-		if ce, ok := err.(model.CLIError); ok {
-			res.Error = ce
-		} else {
-			res.Error = model.Wrap(model.ErrUnknown, "processing file", err)
-		}
-	}
-
-	*results = append(*results, res)
 }
 
 // WriterSummary returns a summary of what the writer did.

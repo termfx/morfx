@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	sitter "github.com/smacker/go-tree-sitter"
+
 	"github.com/garaekz/fileman/internal/matcher"
 	"github.com/garaekz/fileman/internal/model"
 	"github.com/garaekz/fileman/internal/util"
@@ -21,6 +23,16 @@ type entry struct {
 	err error
 }
 
+// Rewrite represents a single modification operation on the source code.
+type Rewrite struct {
+	RuleID    string
+	Start     int
+	End       int
+	NewText   []byte
+	LineStart int
+	LineEnd   int
+}
+
 var (
 	mu   sync.RWMutex
 	data = make(map[string]*entry) // key = ruleID + fingerprint(pattern/flags)
@@ -34,7 +46,7 @@ func NewManipulator(cfg *model.Config) *Manipulator {
 // ApplyHarmless is a special case for CLI testing where we run the rule without
 // actually modifying the content. It returns the changes that would be made.
 func (m *Manipulator) ApplyHarmless(content string) ([]model.Change, error) {
-	matches, err := m.findMatchesBytes([]byte(content))
+	matches, err := m.findMatches([]byte(content))
 	if err != nil {
 		return nil, err
 	}
@@ -42,102 +54,94 @@ func (m *Manipulator) ApplyHarmless(content string) ([]model.Change, error) {
 		return nil, nil
 	}
 
-	lineIdx := computeLineIndex(content)
-	b := []byte(content)
 	var changes []model.Change
-	for _, match := range matches {
-		start, end := match[0], match[1]
-		origBytes := b[start:end]
-		var newBytes []byte
+	for _, node := range matches {
+		start, end := int(node.StartByte()), int(node.EndByte())
+		matchedContent := content[start:end]
 
-		ls, le := byteToLineRange(lineIdx, start, end)
+		ls, le := int(node.StartPoint().Row)+1, int(node.EndPoint().Row)+1
 		changes = append(changes, model.Change{
 			RuleID:    m.Config.RuleID,
 			LineStart: ls,
 			LineEnd:   le,
 			Start:     start,
 			End:       end,
-			Original:  string(origBytes),
-			New:       string(newBytes),
+			Original:  "",             // Empty for get operations
+			New:       matchedContent, // Put the found content in New
 		})
 	}
 
 	return changes, nil
 }
 
-// Apply executes the rule on the content and delegates to the appropriate helpers.
-func (m *Manipulator) Apply(content string) (string, []model.Change, error) {
-	matches, err := m.findMatchesBytes([]byte(content))
+// Apply executes the rule on the content and generates a list of rewrites.
+func (m *Manipulator) Apply(content string) ([]Rewrite, error) {
+	matches, err := m.findMatches([]byte(content))
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if len(matches) == 0 {
-		return content, nil, nil
+		return nil, nil
 	}
-	lineIdx := computeLineIndex(content)
-	b := []byte(content)
-	var changes []model.Change
+	var rewrites []Rewrite
 
-	for i := len(matches) - 1; i >= 0; i-- {
-		match := matches[i]
-		start, end := match[0], match[1]
-		origBytes := b[start:end]
+	for _, node := range matches {
+		start := int(node.StartByte())
+		end := int(node.EndByte())
 		var newBytes []byte
+		rewriteStart := start // Default for replace/delete
+		rewriteEnd := end     // Default for replace/delete
 
 		switch m.Config.Operation {
 		case model.OpGet:
-			newBytes = origBytes
+			// For OpGet, we don't generate a rewrite, as it's a read-only operation.
+			continue
 		case model.OpReplace:
 			newBytes = []byte(m.Config.Replacement)
 		case model.OpInsertBefore:
 			replacement := m.Config.Replacement
-			// Ensure we add a newline after the replacement if inserting before a block-level node
 			if nodeType := extractNodeType(m.Config.Pattern); m.Config.Provider.IsBlockLevelNode(nodeType) {
 				replacement = strings.TrimSpace(replacement)
 				replacement = replacement + "\n\n"
+			} else if !strings.HasSuffix(replacement, "\n") {
+				replacement = replacement + "\n"
 			}
-			ins := preserveIndentation(content, start, replacement)
-			newBytes = append([]byte(ins), origBytes...)
+			newBytes = []byte(preserveIndentation(content, start, replacement))
+			rewriteEnd = start // Insert at 'start', so the span to replace is empty
 
 		case model.OpInsertAfter:
 			replacement := m.Config.Replacement
-			// Ensure we add a newline before the replacement if inserting after a block-level node
 			if nodeType := extractNodeType(m.Config.Pattern); m.Config.Provider.IsBlockLevelNode(nodeType) {
 				replacement = strings.TrimSpace(replacement)
 				replacement = "\n\n" + replacement
+			} else if !strings.HasPrefix(replacement, "\n") {
+				replacement = "\n" + replacement
 			}
-			ins := preserveIndentation(content, end, replacement)
-			newBytes = append(origBytes, []byte(ins)...)
+			newBytes = []byte(preserveIndentation(content, end, replacement))
+			rewriteStart = end // Insert at 'end', so the span to replace is empty
+
 		case model.OpDelete:
 			newBytes = []byte("")
 		default:
-			return "", nil, model.Wrap(model.ErrInvalidOperation, fmt.Sprintf("unknown operation: %s", m.Config.Operation), nil)
+			return nil, model.Wrap(model.ErrInvalidOperation, fmt.Sprintf("unknown operation: %s", m.Config.Operation), nil)
 		}
 
-		// For 'get', we don't actually splice the bytes.
-		if m.Config.Operation != model.OpGet {
-			b = util.Splice(b, start, end, newBytes)
-		}
-
-		ls, le := byteToLineRange(lineIdx, start, end)
-		changes = append(changes, model.Change{
+		rewrites = append(rewrites, Rewrite{
 			RuleID:    m.Config.RuleID,
-			LineStart: ls,
-			LineEnd:   le,
-			Start:     start,
-			End:       end,
-			Original:  string(origBytes),
-			New:       string(newBytes),
+			Start:     rewriteStart,
+			End:       rewriteEnd,
+			NewText:   newBytes,
+			LineStart: int(node.StartPoint().Row) + 1,
+			LineEnd:   int(node.EndPoint().Row) + 1,
 		})
 	}
 
-	util.ReverseChanges(changes)
-	return string(b), changes, nil
+	return rewrites, nil
 }
 
-// findMatchesBytes abstracts calling the selected matcher engine and returning
-// [][]int compatible with the existing applyMatches flow (start, end only).
-func (m *Manipulator) findMatchesBytes(b []byte) ([][]int, error) {
+// findMatches abstracts calling the selected matcher engine and returning
+// []*sitter.Node compatible with the existing applyMatches flow.
+func (m *Manipulator) findMatches(b []byte) ([]*sitter.Node, error) {
 	mat, err := getCached(m.Config)
 	if err != nil {
 		return nil, err
@@ -146,15 +150,42 @@ func (m *Manipulator) findMatchesBytes(b []byte) ([][]int, error) {
 		return nil, nil
 	}
 
-	spans, err := mat.Find(b)
+	nodes, err := mat.Find(b)
 	if err != nil {
 		return nil, err
 	}
-	out := make([][]int, len(spans))
-	for i, s := range spans {
-		out[i] = []int{s.Start, s.End}
+	return nodes, nil
+}
+
+// ApplyRewrites applies a slice of Rewrite operations to the original content.
+// It returns the modified content and a slice of model.Change representing the transformations.
+func ApplyRewrites(originalContent string, rewrites []Rewrite) (string, []model.Change) {
+	b := []byte(originalContent)
+	var changes []model.Change
+
+	// Sort rewrites in reverse order to apply them from end to start
+	// This prevents issues with byte offsets changing for subsequent rewrites.
+	for i, j := 0, len(rewrites)-1; i < j; i, j = i+1, j-1 {
+		rewrites[i], rewrites[j] = rewrites[j], rewrites[i]
 	}
-	return out, nil
+
+	for _, r := range rewrites {
+		origBytes := b[r.Start:r.End]
+		b = util.Splice(b, r.Start, r.End, r.NewText)
+
+		changes = append(changes, model.Change{
+			RuleID:    r.RuleID,
+			LineStart: r.LineStart,
+			LineEnd:   r.LineEnd,
+			Start:     r.Start,
+			End:       r.End,
+			Original:  string(origBytes),
+			New:       string(r.NewText),
+		})
+	}
+
+	util.ReverseChanges(changes) // Reverse again to get chronological order
+	return string(b), changes
 }
 
 // --- Helpers ---
@@ -193,12 +224,13 @@ func preserveIndentation(content string, position int, text string) string {
 	}
 
 	lines := strings.Split(text, "\n")
-	if len(lines) > 0 && lines[0] != "" {
-		lines[0] = indent + strings.TrimPrefix(lines[0], "\r")
-	}
-	for i := 1; i < len(lines); i++ {
-		if lines[i] != "" {
-			lines[i] = indent + strings.TrimPrefix(lines[i], "\r")
+	for i, line := range lines {
+		if i == 0 {
+			// First line gets the existing indentation
+			lines[i] = indent + strings.TrimPrefix(line, "\r")
+		} else if line != "" {
+			// Subsequent non-empty lines get the same indentation
+			lines[i] = indent + strings.TrimPrefix(line, "\r")
 		}
 	}
 	return strings.Join(lines, lineEnding)

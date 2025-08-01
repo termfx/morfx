@@ -14,12 +14,6 @@ type Matcher struct {
 	query *sitter.Query
 }
 
-// Result represents a byte span (inclusive start, exclusive end) in the source.
-type Result struct {
-	Start int
-	End   int
-}
-
 // New builds an Matcher for the given query and language identifier.
 func New(cfg *model.Config) (*Matcher, error) {
 	language := cfg.Provider.GetSitterLanguage()
@@ -31,8 +25,8 @@ func New(cfg *model.Config) (*Matcher, error) {
 	return &Matcher{lang: language, query: q}, nil
 }
 
-// Find parses the source and returns the byte spans of the '@target' captures.
-func (a *Matcher) Find(src []byte) ([]Result, error) {
+// Find parses the source and returns the Tree-sitter nodes of the '@target' captures.
+func (a *Matcher) Find(src []byte) ([]*sitter.Node, error) {
 	parser := sitter.NewParser()
 	parser.SetLanguage(a.lang)
 	tree, err := parser.ParseCtx(context.Background(), nil, src)
@@ -43,7 +37,7 @@ func (a *Matcher) Find(src []byte) ([]Result, error) {
 	cursor := sitter.NewQueryCursor()
 	cursor.Exec(a.query, tree.RootNode())
 
-	var res []Result
+	var nodes []*sitter.Node
 	for {
 		match, ok := cursor.NextMatch()
 		if !ok {
@@ -55,15 +49,11 @@ func (a *Matcher) Find(src []byte) ([]Result, error) {
 			captureName := a.query.CaptureNameForId(cap.Index)
 			// We only care about the final node designated as '@target'.
 			if captureName == "target" {
-				node := cap.Node
-				res = append(res, Result{
-					Start: int(node.StartByte()),
-					End:   int(node.EndByte()),
-				})
+				nodes = append(nodes, cap.Node)
 				// Found the target for this match, break inner loop to avoid duplicates.
 				break
 			}
 		}
 	}
-	return res, nil
+	return nodes, nil
 }

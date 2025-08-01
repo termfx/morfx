@@ -1,0 +1,1 @@
+[(assignment_statement left: (expression_list [(identifier) @name])) (short_var_declaration left: (expression_list [(identifier) @name]))] (#any-eq? @name "fileHash") . (call_expression function: [(identifier) (selector_expression)] @name (#eq? @name "util.SHA1FileHex")) @target

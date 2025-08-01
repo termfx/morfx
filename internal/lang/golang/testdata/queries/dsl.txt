@@ -1,0 +1,13 @@
+call:util.SHA1FileHex
+assign:fileHash > call:util.SHA1FileHex
+assign:estaMadre > call:elpack.UnaChingadera
+func:* > var:* core.ModelConfig
+struct:* > field:Secret string
+import:fmt
+func:init
+if:*
+block:*
+import:fmt
+call:Foo*Bar
+var:cache* *
+field:* core.*Config
