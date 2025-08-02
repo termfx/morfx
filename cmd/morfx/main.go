@@ -43,6 +43,7 @@ func main() {
 
 	runner := cli.NewRunner(cfg)
 	var res []model.Result
+	ctx := context.Background()
 
 	// Handle special cases
 	if cfg.RuleID == "cli-commit" {
@@ -57,7 +58,7 @@ func main() {
 	} else if cfg.Operation == model.OpGet && cfg.RuleID == "cli-first-arg" {
 		res, err = runner.RunHarmless(files[0], cfg)
 	} else {
-		res, err = runner.Run(files, cfg)
+		res, err = runner.Run(ctx, files, cfg)
 	}
 	handleOutputAndExit(res, err, cfg, runner)
 }

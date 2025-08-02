@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +17,6 @@ import (
 
 // Runner encapsulates the application's execution logic.
 type Runner struct {
-	mu     sync.RWMutex
 	writer writer.Writer
 }
 
@@ -40,30 +40,48 @@ func NewRunner(cfg *model.Config) *Runner {
 	}
 }
 
-func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) {
-	var results []model.Result // for JSON output mode
-
-	jobs := make(chan string)
-
-	var wg sync.WaitGroup
+func (r *Runner) Run(ctx context.Context, files []string, cfg *model.Config) ([]model.Result, error) {
+	var (
+		results   []model.Result
+		resultsMu sync.Mutex
+		wg        sync.WaitGroup
+		errOnce   sync.Once
+		firstErr  error
+		stopChan  = make(chan struct{})
+	)
 	numW := cfg.Workers
 	if numW < 1 {
 		numW = runtime.NumCPU()
 	}
+	jobs := make(chan string)
 
 	for i := 0; i < numW; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for path := range jobs {
-				res, err := r.processFile(path, cfg)
-				if err != nil {
-					// Log the error but continue processing other files
-					fmt.Fprintf(os.Stderr, "Error processing file %s: %v\n", path, err)
-					results = append(results, model.Result{File: path, Success: false, Error: err})
-					continue
+			for {
+				select {
+				case <-stopChan:
+					return
+				case <-ctx.Done():
+					return
+				case path, ok := <-jobs:
+					if !ok {
+						return
+					}
+					res, err := r.processFile(ctx, path, cfg)
+					resultsMu.Lock()
+					if err != nil {
+						errOnce.Do(func() {
+							firstErr = err
+							close(stopChan) // Circuit breaker: stop all workers
+						})
+						results = append(results, model.Result{File: path, Success: false, Error: err})
+					} else {
+						results = append(results, *res)
+					}
+					resultsMu.Unlock()
 				}
-				results = append(results, *res)
 			}
 		}()
 	}
@@ -71,15 +89,12 @@ func (r *Runner) Run(files []string, cfg *model.Config) ([]model.Result, error) 
 	for _, f := range files {
 		jobs <- f
 	}
-
 	close(jobs)
 	wg.Wait()
 
 	// Check if any file processing resulted in an error
-	for _, res := range results {
-		if !res.Success {
-			return results, model.Wrap(model.ErrUnknown, "one or more errors occurred during processing", nil)
-		}
+	if firstErr != nil {
+		return results, model.Wrap(model.ErrUnknown, "one or more errors occurred during processing", firstErr)
 	}
 
 	// Check if no changes were made and FailIfNoMatch is true
@@ -123,17 +138,30 @@ func (r *Runner) RunHarmless(file string, cfg *model.Config) ([]model.Result, er
 }
 
 // processFile processes a single file with the provided rules.
-func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, error) {
+func (r *Runner) processFile(ctx context.Context, path string, cfg *model.Config) (*model.Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, model.Wrap(model.ErrUnknown, "processing cancelled", ctx.Err())
+	default:
+	}
 	var data []byte
 	var err error
-	var stBefore os.FileInfo
+	// Removed unused stBefore
+	var shaBefore string
 
 	if path == "-" {
 		data, err = io.ReadAll(os.Stdin)
 	} else {
-		stBefore, err = os.Stat(path)
+		// Validate file accessibility before processing
+		f, errOpen := os.OpenFile(path, os.O_RDONLY, 0)
+		if errOpen != nil {
+			return nil, model.Wrap(model.ErrIO, "file not accessible", errOpen)
+		}
+		f.Close()
+		err = nil // Reset err for next operation
+		data, err = os.ReadFile(path)
 		if err == nil {
-			data, err = os.ReadFile(path)
+			shaBefore = util.SHA1Hex(data)
 		}
 	}
 	if err != nil {
@@ -171,6 +199,19 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 		return res, nil
 	}
 
+	// Early race detection: check content hash before expensive computation
+	if path != "-" {
+		dataNow, errRead := os.ReadFile(path)
+		shaNow := ""
+		if errRead == nil {
+			shaNow = util.SHA1Hex(dataNow)
+		}
+		if shaBefore != "" && shaNow != "" && shaBefore != shaNow {
+			err = model.Wrap(model.ErrWriteRace, "file content changed before processing", nil)
+			return &model.Result{File: path, Success: false, Error: err}, err
+		}
+	}
+
 	// For non-get operations, use the normal Apply flow
 	rewrites, err := manip.Apply(original)
 	if err != nil {
@@ -199,8 +240,13 @@ func (r *Runner) processFile(path string, cfg *model.Config) (*model.Result, err
 
 	// Write back if needed using the Writer interface
 	if original != modified && path != "-" {
-		stAfter, _ := os.Stat(path)
-		if util.RaceDetected(stBefore, stAfter) {
+		// Race detection after processing: check content hash again
+		dataAfter, errRead := os.ReadFile(path)
+		shaAfter := ""
+		if errRead == nil {
+			shaAfter = util.SHA1Hex(dataAfter)
+		}
+		if shaBefore != "" && shaAfter != "" && shaBefore != shaAfter {
 			err = model.Wrap(model.ErrWriteRace, "file modified during processing", nil)
 			res.Success = false
 			res.Error = err

@@ -29,14 +29,24 @@ type StagedChange struct {
 type StagingWriter struct {
 	stagingDir string
 	changes    []StagedChange
+	lockFile   *os.File
 }
 
 // NewStagingWriter creates a new staging writer.
 func NewStagingWriter() *StagingWriter {
-	return &StagingWriter{
+	w := &StagingWriter{
 		stagingDir: ".morfx",
 		changes:    make([]StagedChange, 0),
 	}
+	// Acquire lock on .morfx/.lock
+	lockPath := filepath.Join(w.stagingDir, ".lock")
+	os.MkdirAll(w.stagingDir, 0o755)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err == nil {
+		util.Flock(lockFile)
+		w.lockFile = lockFile
+	}
+	return w
 }
 
 // WriteFile stages a file change instead of writing it immediately.
@@ -65,6 +75,7 @@ func (w *StagingWriter) WriteFile(path string, content []byte, perm os.FileMode)
 	if err := os.MkdirAll(w.stagingDir, 0o755); err != nil {
 		return fmt.Errorf("creating staging directory: %w", err)
 	}
+	// Lock is already held by NewStagingWriter
 
 	// Save individual change file
 	changeFile := filepath.Join(w.stagingDir, w.changeFileName(path))
@@ -73,7 +84,15 @@ func (w *StagingWriter) WriteFile(path string, content []byte, perm os.FileMode)
 		return fmt.Errorf("marshaling change data: %w", err)
 	}
 
-	if err := os.WriteFile(changeFile, changeData, 0o644); err != nil {
+	// Retry mechanism for transient errors
+	for i := 0; i < 3; i++ {
+		err = os.WriteFile(changeFile, changeData, 0o644)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
 		return fmt.Errorf("writing change file: %w", err)
 	}
 
@@ -106,15 +125,25 @@ type CommitWriter struct {
 	stagingDir   string
 	appliedFiles []string
 	skippedFiles []string
+	lockFile     *os.File
 }
 
 // NewCommitWriter creates a new commit writer.
 func NewCommitWriter() *CommitWriter {
-	return &CommitWriter{
+	w := &CommitWriter{
 		stagingDir:   ".morfx",
 		appliedFiles: make([]string, 0),
 		skippedFiles: make([]string, 0),
 	}
+	// Acquire lock on .morfx/.lock
+	lockPath := filepath.Join(w.stagingDir, ".lock")
+	os.MkdirAll(w.stagingDir, 0o755)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err == nil {
+		util.Flock(lockFile)
+		w.lockFile = lockFile
+	}
+	return w
 }
 
 // WriteFile is not used by CommitWriter - it applies staged changes instead.
@@ -135,7 +164,13 @@ func (w *CommitWriter) ApplyStagedChanges() error {
 		return fmt.Errorf("reading staging directory: %w", err)
 	}
 
-	if len(entries) == 0 {
+	jsonCount := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".json") {
+			jsonCount++
+		}
+	}
+	if jsonCount == 0 {
 		return fmt.Errorf("no staged changes found")
 	}
 
@@ -145,13 +180,28 @@ func (w *CommitWriter) ApplyStagedChanges() error {
 		}
 
 		changeFile := filepath.Join(w.stagingDir, entry.Name())
-		if err := w.applyChangeFile(changeFile); err != nil {
-			return fmt.Errorf("applying change file %s: %w", changeFile, err)
+		var lastErr error
+		for i := 0; i < 3; i++ {
+			lastErr = w.applyChangeFile(changeFile)
+			if lastErr == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if lastErr != nil {
+			return fmt.Errorf("applying change file %s: %w", changeFile, lastErr)
 		}
 	}
 
 	// Clean up staging directory after successful commit
-	if err := os.RemoveAll(w.stagingDir); err != nil {
+	for i := 0; i < 3; i++ {
+		err = os.RemoveAll(w.stagingDir)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
 		return fmt.Errorf("cleaning up staging directory: %w", err)
 	}
 
