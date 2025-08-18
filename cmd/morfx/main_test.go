@@ -13,10 +13,10 @@ import (
 
 var entryPath string
 
-// TestMain locates the main entry point for the fileman CLI tool.
+// TestMain locates the main entry point for the morfx CLI tool.
 // It skips integration tests if not found.
 func TestMain(m *testing.M) {
-	path, err := filepath.Abs("cmd/fileman")
+	path, err := filepath.Abs("cmd/morfx")
 	if err == nil {
 		if _, statErr := os.Stat(path); statErr == nil {
 			entryPath = path
@@ -54,7 +54,7 @@ func assertFileContent(t *testing.T, filePath, expectedContent string) {
 
 func TestASTCommand_GetOperations(t *testing.T) {
 	if entryPath == "" {
-		t.Skip("Skipping integration test: fileman binary not found")
+		t.Skip("Skipping integration test: morfx binary not found")
 	}
 	content := `package main
 
@@ -104,7 +104,7 @@ func GetUser() {
 
 func TestASTCommand_ModificationOperations(t *testing.T) {
 	if entryPath == "" {
-		t.Skip("Skipping integration test: fileman binary not found")
+		t.Skip("Skipping integration test: morfx binary not found")
 	}
 	baseContent := `package main
 
@@ -233,7 +233,7 @@ func KeepThisOne() {}
 
 func TestASTCommand_FailureScenarios(t *testing.T) {
 	if entryPath == "" {
-		t.Skip("Skipping integration test: fileman binary not found")
+		t.Skip("Skipping integration test: morfx binary not found")
 	}
 	t.Run("InvalidTargetFormat", func(t *testing.T) {
 		cmd := exec.Command(entryPath, "ast", "--target", "invalidformat", "--file", "dummy.go")

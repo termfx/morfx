@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/garaekz/fileman/internal/util"
+	"github.com/termfx/morfx/internal/util"
 )
 
 // -----------------------------------------------------------------------------

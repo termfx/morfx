@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/garaekz/fileman/internal/provider"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/provider"
+	"github.com/termfx/morfx/internal/types"
 	sitter "github.com/smacker/go-tree-sitter"
 	{{.Package}}_sitter "github.com/smacker/go-tree-sitter/{{.SitterPackage}}"
 )

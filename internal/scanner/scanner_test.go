@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/garaekz/fileman/internal/lang/golang"
+	"github.com/termfx/morfx/internal/lang/golang"
 )
 
 func TestScannerBasic(t *testing.T) {

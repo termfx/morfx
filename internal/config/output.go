@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/garaekz/fileman/internal/model"
-	"github.com/garaekz/fileman/internal/util"
-	"github.com/garaekz/fileman/internal/writer"
+	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/util"
+	"github.com/termfx/morfx/internal/writer"
 )
 
 func PrintResultCLI(res *model.Result, cfg *model.Config) {

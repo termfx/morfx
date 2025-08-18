@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/garaekz/fileman/internal/cli"
-	"github.com/garaekz/fileman/internal/config"
-	"github.com/garaekz/fileman/internal/model"
+	"github.com/termfx/morfx/internal/cli"
+	"github.com/termfx/morfx/internal/config"
+	"github.com/termfx/morfx/internal/model"
 )
 
 // main is the entry point for morfx, the command-line tool for file transformations.

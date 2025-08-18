@@ -7,8 +7,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	golang_sitter "github.com/smacker/go-tree-sitter/golang"
 
-	"github.com/garaekz/fileman/internal/provider"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/provider"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // GoProvider implements the LanguageProvider interface for Go language support

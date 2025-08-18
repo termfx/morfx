@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/garaekz/fileman/internal/lang/golang"
-	"github.com/garaekz/fileman/internal/lang/javascript"
-	"github.com/garaekz/fileman/internal/lang/python"
-	"github.com/garaekz/fileman/internal/lang/typescript"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/lang/golang"
+	"github.com/termfx/morfx/internal/lang/javascript"
+	"github.com/termfx/morfx/internal/lang/python"
+	"github.com/termfx/morfx/internal/lang/typescript"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // LanguageRegistry manages language providers with thread-safe operations

@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/garaekz/fileman/internal/evaluator"
-	"github.com/garaekz/fileman/internal/lang/golang"
-	"github.com/garaekz/fileman/internal/lang/javascript"
-	"github.com/garaekz/fileman/internal/lang/python"
-	"github.com/garaekz/fileman/internal/lang/typescript"
-	"github.com/garaekz/fileman/internal/parser"
-	"github.com/garaekz/fileman/internal/registry"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/evaluator"
+	"github.com/termfx/morfx/internal/lang/golang"
+	"github.com/termfx/morfx/internal/lang/javascript"
+	"github.com/termfx/morfx/internal/lang/python"
+	"github.com/termfx/morfx/internal/lang/typescript"
+	"github.com/termfx/morfx/internal/parser"
+	"github.com/termfx/morfx/internal/registry"
+	"github.com/termfx/morfx/internal/types"
 )
 
 func universalMain() {

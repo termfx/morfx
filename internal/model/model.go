@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // Operation defines the type of modification to perform.

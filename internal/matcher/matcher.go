@@ -6,8 +6,8 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/garaekz/fileman/internal/model"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // Matcher uses Tree-sitter queries to match AST nodes.

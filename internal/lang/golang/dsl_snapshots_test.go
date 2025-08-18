@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/garaekz/fileman/internal/parser"
+	"github.com/termfx/morfx/internal/parser"
 )
 
 func TestDSLQuerySnapshots(t *testing.T) {

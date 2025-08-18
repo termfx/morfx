@@ -7,10 +7,10 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/garaekz/fileman/internal/db"
-	"github.com/garaekz/fileman/internal/manipulator"
-	"github.com/garaekz/fileman/internal/model"
-	"github.com/garaekz/fileman/internal/writer"
+	"github.com/termfx/morfx/internal/db"
+	"github.com/termfx/morfx/internal/manipulator"
+	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/writer"
 )
 
 type Output struct {

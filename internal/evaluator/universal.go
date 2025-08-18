@@ -7,7 +7,7 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // UniversalEvaluator provides language-agnostic query evaluation capabilities.

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/garaekz/fileman/internal/util"
+	"github.com/termfx/morfx/internal/util"
 )
 
 // Writer provides an abstraction for file writing operations.

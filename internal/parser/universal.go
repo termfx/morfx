@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // UniversalParser provides language-agnostic DSL parsing capabilities.

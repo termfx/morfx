@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 func TestNewUniversalParser(t *testing.T) {

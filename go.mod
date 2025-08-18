@@ -1,4 +1,4 @@
-module github.com/garaekz/fileman
+module github.com/termfx/morfx
 
 go 1.24.5
 

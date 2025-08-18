@@ -1,6 +1,6 @@
 package db
 
-import "github.com/garaekz/fileman/internal/types"
+import "github.com/termfx/morfx/internal/types"
 
 // Context holds database configuration that was previously imported from config
 type Context struct {

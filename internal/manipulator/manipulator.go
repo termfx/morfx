@@ -8,9 +8,9 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/garaekz/fileman/internal/matcher"
-	"github.com/garaekz/fileman/internal/model"
-	"github.com/garaekz/fileman/internal/util"
+	"github.com/termfx/morfx/internal/matcher"
+	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/util"
 )
 
 // Manipulator applies a single modification rule to content.

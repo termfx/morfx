@@ -3,7 +3,7 @@ package provider
 import (
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // NodeMapping is now an alias to types.NodeMapping

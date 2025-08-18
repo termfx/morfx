@@ -11,7 +11,7 @@ import (
 
 	ignore "github.com/sabhiram/go-gitignore"
 
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // Scanner handles recursive directory traversal with filtering capabilities.

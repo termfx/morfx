@@ -6,9 +6,9 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/garaekz/fileman/internal/evaluator"
-	"github.com/garaekz/fileman/internal/parser"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/evaluator"
+	"github.com/termfx/morfx/internal/parser"
+	"github.com/termfx/morfx/internal/types"
 )
 
 func TestProviderIntegrationWithEvaluator(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/garaekz/fileman/internal/model"
+	"github.com/termfx/morfx/internal/model"
 )
 
 // --- String and Slice Helpers ---

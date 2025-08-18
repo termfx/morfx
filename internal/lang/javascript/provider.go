@@ -7,8 +7,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	javascript_sitter "github.com/smacker/go-tree-sitter/javascript"
 
-	"github.com/garaekz/fileman/internal/provider"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/provider"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // JavaScriptProvider implements the LanguageProvider interface for JavaScript language support

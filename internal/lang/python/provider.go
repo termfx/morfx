@@ -7,8 +7,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	python_sitter "github.com/smacker/go-tree-sitter/python"
 
-	"github.com/garaekz/fileman/internal/provider"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/provider"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // PythonProvider implements the LanguageProvider interface for Python language support

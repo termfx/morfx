@@ -7,6 +7,8 @@ PKGS            := ./...
 PKG_DB         := ./internal/db
 LANG_PKG        := ./internal/lang/golang
 COVER_PROFILE   := coverage.out
+COVER_HTML      := coverage.html
+COVER_THRESHOLD := 80
 
 GO_TEST_FLAGS   := -covermode=atomic -coverpkg=./... -coverprofile=$(COVER_PROFILE)
 GO_RACE_FLAGS   := -race
@@ -29,7 +31,7 @@ NOFTS5_REGEX := ^($(subst $(space),|,$(strip $(NOFTS5_TESTS))))$$
 # -----------------------------
 # Phony targets
 # -----------------------------
-.PHONY: help test test-verbose test-race test-one fix fixtest build clean coverage coverage-html regen-snapshots gate
+.PHONY: help test test-verbose test-race test-one fix fixtest build clean coverage coverage-html coverage-check coverage-badge coverage-ci regen-snapshots gate benchmark profile quality-gate
 
 # -----------------------------
 # Help
@@ -46,9 +48,15 @@ help:
 	@echo "  build              - Build CLI into bin/morfx"
 	@echo "  clean              - Remove build artifacts and coverage"
 	@echo "  coverage           - Print coverage summary"
-	@echo "  coverage-html      - Open HTML coverage report"
+	@echo "  coverage-html      - Generate and open HTML coverage report"
+	@echo "  coverage-check     - Enforce coverage threshold ($(COVER_THRESHOLD)%)"
+	@echo "  coverage-badge     - Generate coverage badge"
+	@echo "  coverage-ci        - Generate coverage reports for CI"
 	@echo "  regen-snapshots    - Regenerate golden snapshots (SNAP_UPDATE=1)"
 	@echo "  gate               - Run the Golden Gate (composite validations)"
+	@echo "  benchmark          - Run performance benchmarks"
+	@echo "  profile            - Run CPU and memory profiling"
+	@echo "  quality-gate       - Run all quality checks (fix + test + coverage + gate)"
 
 # -----------------------------
 # Tests
@@ -79,14 +87,115 @@ test-one:
 	@if [ -z "$(PKG)" ]; then echo "Usage: make test-one PKG=./path [-run 'Regex']"; exit 2; fi
 	go test -count=1 $(PKG) $(GO_TEST_FLAGS) $(RUN)
 
+# -----------------------------
+# Coverage Analysis
+# -----------------------------
 coverage:
-	@echo "Coverage file: $(COVER_PROFILE)"
-	@([ -f $(COVER_PROFILE) ] && go tool cover -func=$(COVER_PROFILE) | tail -n1) || echo "No $(COVER_PROFILE). Run 'make test' first."
+	@echo "Coverage Analysis"
+	@echo "=================="
+	@if [ ! -f $(COVER_PROFILE) ]; then \
+		echo "No $(COVER_PROFILE) found. Running tests..."; \
+		$(MAKE) -s test; \
+	fi
+	@if [ -f $(COVER_PROFILE) ]; then \
+		echo "Coverage by Package:"; \
+		echo "-------------------"; \
+		go tool cover -func=$(COVER_PROFILE) | grep -E "(github.com/termfx/morfx/|total:)" | \
+		while IFS= read -r line; do \
+			if echo "$$line" | grep -q "total:"; then \
+				echo ""; \
+				echo "Overall Coverage:"; \
+				echo "-----------------"; \
+				echo "$$line" | awk '{printf "Total: %s\n", $$3}'; \
+			else \
+				echo "$$line" | awk '{printf "%-50s %s\n", $$1, $$3}'; \
+			fi; \
+		done; \
+	else \
+		echo "Failed to generate coverage profile"; \
+		exit 1; \
+	fi
 
 coverage-html:
-	@[ -f $(COVER_PROFILE) ] || (echo "No $(COVER_PROFILE). Run 'make test' first." && exit 2)
-	go tool cover -html=$(COVER_PROFILE) -o coverage.html
-	@echo "Coverage HTML -> coverage.html"
+	@echo "Generating HTML coverage report..."
+	@if [ ! -f $(COVER_PROFILE) ]; then \
+		echo "No $(COVER_PROFILE) found. Running tests..."; \
+		$(MAKE) -s test; \
+	fi
+	@if [ -f $(COVER_PROFILE) ]; then \
+		go tool cover -html=$(COVER_PROFILE) -o $(COVER_HTML); \
+		echo "Coverage HTML report generated: $(COVER_HTML)"; \
+		if command -v open >/dev/null 2>&1; then \
+			open $(COVER_HTML); \
+		elif command -v xdg-open >/dev/null 2>&1; then \
+			xdg-open $(COVER_HTML); \
+		else \
+			echo "Open $(COVER_HTML) in your browser to view the report"; \
+		fi; \
+	else \
+		echo "Failed to generate coverage profile"; \
+		exit 1; \
+	fi
+
+coverage-check:
+	@echo "Checking coverage threshold ($(COVER_THRESHOLD)%)..."
+	@if [ ! -f $(COVER_PROFILE) ]; then \
+		echo "No $(COVER_PROFILE) found. Running tests..."; \
+		$(MAKE) -s test; \
+	fi
+	@if [ -f $(COVER_PROFILE) ]; then \
+		COVERAGE=$$(go tool cover -func=$(COVER_PROFILE) | tail -n1 | awk '{print $$3}' | sed 's/%//'); \
+		echo "Current coverage: $${COVERAGE}%"; \
+		echo "Required coverage: $(COVER_THRESHOLD)%"; \
+		if [ "$$(echo "$${COVERAGE} < $(COVER_THRESHOLD)" | bc -l)" -eq 1 ]; then \
+			echo "❌ Coverage $${COVERAGE}% is below required $(COVER_THRESHOLD)%"; \
+			echo ""; \
+			echo "Coverage by package:"; \
+			go tool cover -func=$(COVER_PROFILE) | grep -v "total:" | sort -k3 -n | \
+			while IFS= read -r line; do \
+				PKG_COV=$$(echo "$$line" | awk '{print $$3}' | sed 's/%//'); \
+				if [ "$$(echo "$${PKG_COV} < $(COVER_THRESHOLD)" | bc -l)" -eq 1 ]; then \
+					echo "  📉 $$line"; \
+				fi; \
+			done; \
+			echo ""; \
+			echo "Please add tests to improve coverage."; \
+			exit 1; \
+		else \
+			echo "✅ Coverage $${COVERAGE}% meets required $(COVER_THRESHOLD)%"; \
+		fi; \
+	else \
+		echo "❌ Failed to generate coverage profile"; \
+		exit 1; \
+	fi
+
+coverage-badge:
+	@echo "Generating coverage badge..."
+	@if [ ! -f $(COVER_PROFILE) ]; then \
+		echo "No $(COVER_PROFILE) found. Running tests..."; \
+		$(MAKE) -s test; \
+	fi
+	@if [ -f $(COVER_PROFILE) ]; then \
+		COVERAGE=$$(go tool cover -func=$(COVER_PROFILE) | tail -n1 | awk '{print $$3}' | sed 's/%//'); \
+		COLOR="red"; \
+		if [ "$$(echo "$${COVERAGE} >= 80" | bc -l)" -eq 1 ]; then COLOR="green"; \
+		elif [ "$$(echo "$${COVERAGE} >= 60" | bc -l)" -eq 1 ]; then COLOR="yellow"; \
+		elif [ "$$(echo "$${COVERAGE} >= 40" | bc -l)" -eq 1 ]; then COLOR="orange"; \
+		fi; \
+		echo "Coverage: $${COVERAGE}% ($$COLOR)"; \
+		echo "Badge URL: https://img.shields.io/badge/coverage-$${COVERAGE}%25-$$color.svg"; \
+	fi
+
+coverage-ci:
+	@echo "Generating coverage reports for CI..."
+	@$(MAKE) -s test
+	@$(MAKE) -s coverage
+	@go tool cover -html=$(COVER_PROFILE) -o $(COVER_HTML)
+	@go tool cover -func=$(COVER_PROFILE) > coverage.txt
+	@echo "Coverage reports generated:"
+	@echo "  - $(COVER_PROFILE) (machine readable)"
+	@echo "  - $(COVER_HTML) (human readable)"
+	@echo "  - coverage.txt (summary)"
 
 # -----------------------------
 # Formatting / lint-like

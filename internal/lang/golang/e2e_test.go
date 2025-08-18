@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/garaekz/fileman/internal/evaluator"
-	"github.com/garaekz/fileman/internal/parser"
+	"github.com/termfx/morfx/internal/evaluator"
+	"github.com/termfx/morfx/internal/parser"
 )
 
 func TestE2EProviderDirect(t *testing.T) {

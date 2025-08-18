@@ -3,7 +3,7 @@ package util
 import (
 	"testing"
 
-	"github.com/garaekz/fileman/internal/model"
+	"github.com/termfx/morfx/internal/model"
 )
 
 func TestSplice(t *testing.T) {

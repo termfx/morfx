@@ -7,8 +7,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	typescript_sitter "github.com/smacker/go-tree-sitter/typescript/typescript"
 
-	"github.com/garaekz/fileman/internal/provider"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/provider"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // TypeScriptProvider implements the LanguageProvider interface for TypeScript language support

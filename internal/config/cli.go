@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/garaekz/fileman/internal/model"
+	"github.com/termfx/morfx/internal/model"
 )
 
 type SecurityThresholds struct {

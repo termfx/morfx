@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/garaekz/fileman/internal/model"
-	"github.com/garaekz/fileman/internal/registry"
-	"github.com/garaekz/fileman/internal/scanner"
-	"github.com/garaekz/fileman/internal/types"
+	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/registry"
+	"github.com/termfx/morfx/internal/scanner"
+	"github.com/termfx/morfx/internal/types"
 )
 
 // checkCommit checks if the commit flag is set and returns a configuration for commit operation.

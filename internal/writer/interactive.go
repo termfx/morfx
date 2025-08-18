@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/garaekz/fileman/internal/util"
+	"github.com/termfx/morfx/internal/util"
 )
 
 // InteractiveWriter shows diffs and asks for user confirmation before writing.
