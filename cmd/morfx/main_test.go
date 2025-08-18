@@ -117,7 +117,16 @@ func KeepThisOne() {}
 	t.Run("ReplaceFunction", func(t *testing.T) {
 		testFile := setupTestFile(t, baseContent)
 		newFunction := `func GetUser() { /* new logic */ }`
-		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "replace", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:GetUser",
+			"--operation",
+			"replace",
+			"--file",
+			testFile,
+		)
 		cmd.Stdin = strings.NewReader(newFunction)
 
 		output, err := cmd.CombinedOutput()
@@ -134,7 +143,16 @@ func KeepThisOne() {}
 
 	t.Run("DeleteFunction", func(t *testing.T) {
 		testFile := setupTestFile(t, baseContent)
-		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "delete", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:GetUser",
+			"--operation",
+			"delete",
+			"--file",
+			testFile,
+		)
 
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, "Delete command failed. Output: %s", string(output))
@@ -152,7 +170,16 @@ func KeepThisOne() {}
 		testFile := setupTestFile(t, baseContent)
 		insertedFunc := `
 func InsertedFunc() {}`
-		cmd := exec.Command(entryPath, "ast", "--target", "function:GetUser", "--operation", "insert-after", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:GetUser",
+			"--operation",
+			"insert-after",
+			"--file",
+			testFile,
+		)
 		cmd.Stdin = strings.NewReader(insertedFunc)
 
 		output, err := cmd.CombinedOutput()
@@ -175,7 +202,16 @@ func KeepThisOne() {}
 		insertedFunc := `// A new function will be inserted after this comment.
 func InsertedFunc() {}
 `
-		cmd := exec.Command(entryPath, "ast", "--target", "function:KeepThisOne", "--operation", "insert-before", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:KeepThisOne",
+			"--operation",
+			"insert-before",
+			"--file",
+			testFile,
+		)
 		cmd.Stdin = strings.NewReader(insertedFunc)
 
 		output, err := cmd.CombinedOutput()
@@ -215,7 +251,16 @@ func TestASTCommand_FailureScenarios(t *testing.T) {
 
 	t.Run("UnsupportedLanguage", func(t *testing.T) {
 		testFile := setupTestFile(t, "content")
-		cmd := exec.Command(entryPath, "ast", "--target", "function:foo", "--lang", "brainfuck", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:foo",
+			"--lang",
+			"brainfuck",
+			"--file",
+			testFile,
+		)
 		output, err := cmd.CombinedOutput()
 		require.Error(t, err, "Command should have failed but did not")
 		assert.Contains(t, string(output), "unsupported language: brainfuck")
@@ -223,10 +268,22 @@ func TestASTCommand_FailureScenarios(t *testing.T) {
 
 	t.Run("TargetNotFound", func(t *testing.T) {
 		testFile := setupTestFile(t, `package main`)
-		cmd := exec.Command(entryPath, "ast", "--target", "function:nonexistent", "--file", testFile)
+		cmd := exec.Command(
+			entryPath,
+			"ast",
+			"--target",
+			"function:nonexistent",
+			"--file",
+			testFile,
+		)
 		// This should succeed with no output and no changes
 		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "Command failed for a non-existent target. Output: %s", string(output))
+		require.NoError(
+			t,
+			err,
+			"Command failed for a non-existent target. Output: %s",
+			string(output),
+		)
 		assert.Empty(t, string(output), "Expected no output for a non-existent target")
 	})
 }

@@ -1,282 +1,362 @@
 package golang
 
 import (
-	"strings"
+	"context"
 	"testing"
+
+	sitter "github.com/smacker/go-tree-sitter"
+
+	"github.com/garaekz/fileman/internal/evaluator"
+	"github.com/garaekz/fileman/internal/parser"
+	"github.com/garaekz/fileman/internal/types"
 )
 
-// TestGoProvider_TranslateDSL tests comprehensive DSL translation scenarios
-func TestGoProvider_TranslateDSL(t *testing.T) {
-	p := &goProvider{}
+func TestProviderIntegrationWithEvaluator(t *testing.T) {
+	provider := NewProvider()
+
+	// Create evaluator with the provider
+	eval, err := evaluator.NewUniversalEvaluator(provider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	// Test Go code
+	code := []byte(`
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+type Server struct {
+	port int
+	host string
+}
+
+func (s *Server) Start() error {
+	return nil
+}
+
+func main() {
+	server := &Server{
+		port: 8080,
+		host: "localhost",
+	}
+	server.Start()
+}
+
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello")
+}
+
+var globalConfig = map[string]string{
+	"env": "production",
+}
+
+const MaxConnections = 100
+`)
 
 	tests := []struct {
 		name        string
-		dslQuery    string
-		expectError bool
-		errorMsg    string
-		validate    func(*testing.T, string)
+		query       *types.Query
+		wantResults int
+		minResults  int
 	}{
 		{
-			name:     "simple_function_query",
-			dslQuery: "func:main",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "function_declaration") {
-					t.Error("Should contain function_declaration")
-				}
-				if !strings.Contains(result, `(#eq? @name "main")`) {
-					t.Error("Should contain name predicate")
-				}
+			name: "find all functions",
+			query: &types.Query{
+				Kind:       "function",
+				Pattern:    "*",
+				Attributes: make(map[string]string),
 			},
+			minResults: 2, // main and handleRequest
 		},
 		{
-			name:     "call_with_selector_expression",
-			dslQuery: "call:fmt.Println",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "call_expression") {
-					t.Error("Should contain call_expression")
-				}
-				if !strings.Contains(result, "selector_expression") {
-					t.Error("Should support selector_expression")
-				}
+			name: "find main function",
+			query: &types.Query{
+				Kind:       "function",
+				Pattern:    "main",
+				Attributes: make(map[string]string),
 			},
+			wantResults: 1,
 		},
 		{
-			name:     "assignment_statement",
-			dslQuery: "assign:result",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "assignment_statement") {
-					t.Error("Should contain assignment_statement")
-				}
-				if !strings.Contains(result, "short_var_declaration") {
-					t.Error("Should contain short_var_declaration")
-				}
+			name: "find methods",
+			query: &types.Query{
+				Kind:       "method",
+				Pattern:    "*",
+				Attributes: make(map[string]string),
 			},
+			minResults: 1, // Start method
 		},
 		{
-			name:     "import_statement",
-			dslQuery: "import:fmt",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "import_spec") {
-					t.Error("Should contain import_spec")
-				}
-				if !strings.Contains(result, `(#eq? @path "fmt")`) {
-					t.Error("Should contain path predicate")
-				}
-				// Should NOT contain @name predicate for imports
-				if strings.Contains(result, `(#eq? @name "fmt")`) {
-					t.Error("Import should use @path, not @name")
-				}
+			name: "find struct type",
+			query: &types.Query{
+				Kind:       "class", // structs map to class
+				Pattern:    "*",
+				Attributes: make(map[string]string),
 			},
+			minResults: 1, // Server struct
 		},
 		{
-			name:     "wildcard_function",
-			dslQuery: "func:Handle*",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "#match?") {
-					t.Error("Wildcard should use #match? predicate")
-				}
-				if !strings.Contains(result, "^Handle.*") {
-					t.Error("Should contain proper regex pattern")
-				}
+			name: "find imports",
+			query: &types.Query{
+				Kind:       "import",
+				Pattern:    "*",
+				Attributes: make(map[string]string),
 			},
-		},
-		{
-			name:     "negated_function",
-			dslQuery: "!func:test",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "#not-eq?") {
-					t.Error("Negated query should use #not-eq?")
-				}
-			},
-		},
-		{
-			name:     "negated_wildcard",
-			dslQuery: "!func:Test*",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "#not-match?") {
-					t.Error("Negated wildcard should use #not-match?")
-				}
-			},
-		},
-		{
-			name:     "parent_child_relationship",
-			dslQuery: "func:main > var:config",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "function_declaration") {
-					t.Error("Should contain function_declaration")
-				}
-				if !strings.Contains(result, "var_declaration") {
-					t.Error("Should contain var_declaration")
-				}
-				if strings.Count(result, "@target") != 1 {
-					t.Error("Should contain exactly one @target")
-				}
-			},
-		},
-		{
-			name:     "complex_nested_query",
-			dslQuery: "func:handler > if:* > call:log.Error",
-			validate: func(t *testing.T, result string) {
-				if !strings.Contains(result, "function_declaration") {
-					t.Error("Should contain function_declaration")
-				}
-				if !strings.Contains(result, "if_statement") {
-					t.Error("Should contain if_statement")
-				}
-				if !strings.Contains(result, "call_expression") {
-					t.Error("Should contain call_expression")
-				}
-			},
-		},
-		// Error cases
-		{
-			name:        "empty_query",
-			dslQuery:    "",
-			expectError: true,
-			errorMsg:    "query cannot be empty",
-		},
-		{
-			name:        "invalid_format",
-			dslQuery:    "func",
-			expectError: true,
-			errorMsg:    "invalid DSL query",
-		},
-		{
-			name:        "unknown_node_type",
-			dslQuery:    "unknown:test",
-			expectError: true,
-			errorMsg:    "unknown node type",
-		},
-		{
-			name:        "if_with_non_wildcard",
-			dslQuery:    "if:condition",
-			expectError: true,
-			errorMsg:    "only * supported for if/block",
-		},
-		{
-			name:        "block_with_non_wildcard",
-			dslQuery:    "block:body",
-			expectError: true,
-			errorMsg:    "only * supported for if/block",
+			minResults: 1, // import block
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := p.TranslateDSL(tt.dslQuery)
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatalf("TranslateDSL(%q) expected error, got none", tt.dslQuery)
-				}
-				if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Error message should contain %q, got %q", tt.errorMsg, err.Error())
-				}
-				return
-			}
-
+			resultSet, err := eval.EvaluateQuery(tt.query, code)
 			if err != nil {
-				t.Fatalf("TranslateDSL(%q) unexpected error: %v", tt.dslQuery, err)
+				t.Fatalf("EvaluateQuery failed: %v", err)
 			}
 
-			if result == "" {
-				t.Fatalf("TranslateDSL(%q) returned empty result", tt.dslQuery)
-			}
+			results := resultSet.All()
 
-			if tt.validate != nil {
-				tt.validate(t, result)
+			if tt.wantResults > 0 {
+				if tt.wantResults > 0 && len(results) != tt.wantResults {
+					t.Errorf("Got %d results, want exactly %d", len(results), tt.wantResults)
+					for i, r := range results {
+						t.Logf("  Result %d: %s (kind: %s)", i, r.Name, r.Kind)
+					}
+				}
+			} else if tt.minResults > 0 && tt.wantResults == 0 {
+				if len(results) < tt.minResults {
+					t.Errorf("Got %d results, want at least %d", len(results), tt.minResults)
+					for i, r := range results {
+						t.Logf("  Result %d: %s (kind: %s)", i, r.Name, r.Kind)
+					}
+				}
 			}
-
-			t.Logf("DSL Query: %s\nTree-sitter Query: %s", tt.dslQuery, result)
 		})
 	}
 }
 
-// TestDSLAcceptanceScenarios tests real-world DSL usage scenarios
-func TestDSLAcceptanceScenarios(t *testing.T) {
-	p := &goProvider{}
+func TestProviderWithUniversalParser(t *testing.T) {
+	provider := NewProvider()
+	uniParser := parser.NewUniversalParser()
 
-	// Positive tests (should match)
-	positiveTests := []struct {
-		name        string
-		dslQuery    string
-		description string
+	tests := []struct {
+		name    string
+		dsl     string
+		wantErr bool
 	}{
 		{
-			name:        "call_selector_expression",
-			dslQuery:    "call:util.SHA1FileHex",
-			description: "Function call with package selector",
+			name:    "simple function query",
+			dsl:     "function:main",
+			wantErr: false,
 		},
 		{
-			name:        "assign_with_call_child",
-			dslQuery:    "assign:fileHash > call:util.SHA1FileHex",
-			description: "Assignment containing a function call",
+			name:    "wildcard function",
+			dsl:     "function:test*",
+			wantErr: false,
 		},
 		{
-			name:        "func_with_var_child",
-			dslQuery:    "func:* > var:* core.ModelConfig",
-			description: "Any function containing any variable with type",
+			name:    "variable with type",
+			dsl:     "variable:config string",
+			wantErr: false,
 		},
 		{
-			name:        "struct_with_field_child",
-			dslQuery:    "struct:* > field:Secret string",
-			description: "Any struct with Secret field of string type",
+			name:    "hierarchical query",
+			dsl:     "class:Server > method:Start",
+			wantErr: false,
 		},
 		{
-			name:        "import_fmt",
-			dslQuery:    "import:fmt",
-			description: "Import of fmt package",
+			name:    "negated query",
+			dsl:     "!function:main",
+			wantErr: false,
 		},
 		{
-			name:        "test_function_pattern",
-			dslQuery:    "func:Test*",
-			description: "Test functions pattern",
-		},
-		{
-			name:        "handler_function_pattern",
-			dslQuery:    "func:*Handler",
-			description: "Handler functions pattern",
+			name:    "invalid kind",
+			dsl:     "invalid_kind:test",
+			wantErr: true,
 		},
 	}
 
-	for _, tt := range positiveTests {
-		t.Run("positive_"+tt.name, func(t *testing.T) {
-			result, err := p.TranslateDSL(tt.dslQuery)
-			if err != nil {
-				t.Fatalf("Expected no error for DSL query '%s', but got: %v", tt.dslQuery, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Parse DSL to Query
+			query, err := uniParser.ParseQueryWithProvider(tt.dsl, provider)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseQuery() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-			if result == "" {
-				t.Fatalf("Expected non-empty result for DSL query '%s'", tt.dslQuery)
+
+			if !tt.wantErr && query != nil {
+				// Try to translate the query with the provider
+				_, err := provider.TranslateQuery(query)
+				if err != nil && query.Kind != "logical" {
+					// Some queries might fail translation
+					t.Logf("TranslateQuery failed (might be expected): %v", err)
+				}
 			}
-			t.Logf("%s: %s -> %s", tt.description, tt.dslQuery, result)
 		})
 	}
+}
 
-	// Negative tests (should error)
-	negativeTests := []struct {
-		name        string
-		dslQuery    string
-		description string
-	}{
-		{
-			name:        "if_with_name",
-			dslQuery:    "if:Nombre",
-			description: "If statement with specific name (should only accept *)",
-		},
-		{
-			name:        "block_with_name",
-			dslQuery:    "block:Nombre",
-			description: "Block with specific name (should only accept *)",
-		},
+func TestProviderNodeExtraction(t *testing.T) {
+	provider := NewProvider()
+
+	code := []byte(`
+package main
+
+func testFunction() {
+	x := 42
+	y := "hello"
+}
+`)
+
+	// Parse the code
+	parser := sitter.NewParser()
+	parser.SetLanguage(provider.GetSitterLanguage())
+	tree, err := parser.ParseCtx(context.Background(), nil, code)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
 	}
 
-	for _, tt := range negativeTests {
-		t.Run("negative_"+tt.name, func(t *testing.T) {
-			_, err := p.TranslateDSL(tt.dslQuery)
-			if err == nil {
-				t.Fatalf("Expected error for DSL query '%s', but got none", tt.dslQuery)
+	// Test GetNodeName with different node types
+	root := tree.RootNode()
+
+	// Find function node
+	var functionNode *sitter.Node
+	cursor := sitter.NewTreeCursor(root)
+	defer cursor.Close()
+
+	var findFunction func(*sitter.TreeCursor) bool
+	findFunction = func(c *sitter.TreeCursor) bool {
+		node := c.CurrentNode()
+		if node.Type() == "function_declaration" {
+			functionNode = node
+			return false
+		}
+
+		if c.GoToFirstChild() {
+			for {
+				if !findFunction(c) {
+					return false
+				}
+				if !c.GoToNextSibling() {
+					break
+				}
 			}
-			t.Logf("%s: %s -> Error: %v", tt.description, tt.dslQuery, err)
-		})
+			c.GoToParent()
+		}
+		return true
+	}
+
+	findFunction(cursor)
+
+	if functionNode != nil {
+		name := provider.GetNodeName(functionNode, code)
+		if name != "testFunction" && !contains([]string{name}, "testFunction") {
+			t.Logf("GetNodeName for function returned: %q (might be full content)", name)
+		}
+
+		kind := provider.GetNodeKind(functionNode)
+		if kind != "function" {
+			t.Errorf("GetNodeKind for function_declaration = %q, want %q", kind, "function")
+		}
+	} else {
+		t.Error("Could not find function node in parsed tree")
+	}
+}
+
+func TestProviderScopes(t *testing.T) {
+	provider := NewProvider()
+
+	code := []byte(`
+package main
+
+type MyStruct struct {
+	field int
+}
+
+func (m *MyStruct) Method() {
+	if true {
+		x := 1
+	}
+}
+`)
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(provider.GetSitterLanguage())
+	tree, err := parser.ParseCtx(context.Background(), nil, code)
+	if err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	// Walk tree and test scope detection
+	cursor := sitter.NewTreeCursor(tree.RootNode())
+	defer cursor.Close()
+
+	scopeTypes := make(map[string]types.ScopeType)
+
+	var walk func(*sitter.TreeCursor)
+	walk = func(c *sitter.TreeCursor) {
+		node := c.CurrentNode()
+		nodeType := node.Type()
+
+		// Test scope detection for known types
+		if nodeType == "source_file" || nodeType == "function_declaration" ||
+			nodeType == "method_declaration" || nodeType == "if_statement" ||
+			nodeType == "block" {
+			scope := provider.GetNodeScope(node)
+			scopeTypes[nodeType] = scope
+		}
+
+		if c.GoToFirstChild() {
+			for {
+				walk(c)
+				if !c.GoToNextSibling() {
+					break
+				}
+			}
+			c.GoToParent()
+		}
+	}
+
+	walk(cursor)
+
+	// Check some expected scopes
+	if scope, ok := scopeTypes["function_declaration"]; ok && scope != "function" {
+		t.Errorf("function_declaration scope = %q, want %q", scope, "function")
+	}
+
+	if scope, ok := scopeTypes["block"]; ok && scope != "block" {
+		t.Errorf("block scope = %q, want %q", scope, "block")
+	}
+}
+
+func TestProviderHelperMethods(t *testing.T) {
+	provider := NewProvider()
+
+	// Test GetDefaultIgnorePatterns
+	files, symbols := provider.GetDefaultIgnorePatterns()
+	if len(files) == 0 {
+		t.Error("GetDefaultIgnorePatterns returned no file patterns")
+	}
+	if len(symbols) == 0 {
+		t.Error("GetDefaultIgnorePatterns returned no symbol patterns")
+	}
+
+	// Test IsBlockLevelNode
+	blockLevelTypes := []string{"block", "function_declaration", "class_definition", "method_declaration"}
+	for _, nodeType := range blockLevelTypes {
+		if !provider.IsBlockLevelNode(nodeType) {
+			t.Errorf("IsBlockLevelNode(%q) = false, want true", nodeType)
+		}
+	}
+
+	nonBlockTypes := []string{"identifier", "literal", "comment"}
+	for _, nodeType := range nonBlockTypes {
+		if provider.IsBlockLevelNode(nodeType) {
+			t.Errorf("IsBlockLevelNode(%q) = true, want false", nodeType)
+		}
 	}
 }

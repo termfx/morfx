@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/garaekz/fileman/internal/provider"
+	"github.com/garaekz/fileman/internal/types"
 )
 
 // Operation defines the type of modification to perform.
@@ -16,6 +16,7 @@ const (
 	OpInsertAfter  Operation = "insert-after"
 	OpDelete       Operation = "delete"
 	OpGet          Operation = "get"
+	OpCommit       Operation = "commit"
 )
 
 // OccurrenceSpec defines how many occurrences of a pattern to modify.
@@ -25,22 +26,22 @@ type OccurrenceSpec struct {
 
 // Config holds the configuration for a single transformation rule.
 type Config struct {
-	RuleID         string                    `json:"rule_id"`
-	Pattern        string                    `json:"pattern"`
-	Replacement    string                    `json:"replacement"`
-	Operation      Operation                 `json:"operation"`
-	Occurrence     OccurrenceSpec            `json:"occurrence,omitzero"` // Optional, defaults to all
-	Provider       provider.LanguageProvider // Target language (e.g., "go", "python")
-	DryRun         bool                      `json:"dry_run,omitempty"`           // If true, no files are written
-	Interactive    bool                      `json:"interactive,omitempty"`       // If true, ask for confirmation before writing
-	ShowDiff       bool                      `json:"show_diff,omitempty"`         // If true, show a unified diff of changes
-	DiffContext    int                       `json:"diff_context,omitempty"`      // Lines of context for the diff
-	Verbose        bool                      `json:"verbose,omitempty"`           // Enable verbose output
-	JSONOutput     bool                      `json:"json_output,omitempty"`       // If true, output results in JSON format
-	StdoutMode     bool                      `json:"stdout_mode,omitempty"`       // If true, output modified content to stdout
-	ExitCodeNoDiff int                       `json:"exit_code_no_diff,omitempty"` // Exit code
-	FailIfNoMatch  bool                      `json:"fail_if_no_match,omitempty"`  // If true, fail if no matches found
-	Workers        int                       `json:"workers,omitempty"`           // Number of concurrent workers (default: runtime.NumCPU())
+	RuleID         string                 `json:"rule_id"`
+	Pattern        string                 `json:"pattern"`
+	Replacement    string                 `json:"replacement"`
+	Operation      Operation              `json:"operation"`
+	Occurrence     OccurrenceSpec         `json:"occurrence,omitzero"` // Optional, defaults to all
+	Provider       types.LanguageProvider // Target language (e.g., "go", "python")
+	DryRun         bool                   `json:"dry_run,omitempty"`           // If true, no files are written
+	Interactive    bool                   `json:"interactive,omitempty"`       // If true, ask for confirmation before writing
+	ShowDiff       bool                   `json:"show_diff,omitempty"`         // If true, show a unified diff of changes
+	DiffContext    int                    `json:"diff_context,omitempty"`      // Lines of context for the diff
+	Verbose        bool                   `json:"verbose,omitempty"`           // Enable verbose output
+	JSONOutput     bool                   `json:"json_output,omitempty"`       // If true, output results in JSON format
+	StdoutMode     bool                   `json:"stdout_mode,omitempty"`       // If true, output modified content to stdout
+	ExitCodeNoDiff int                    `json:"exit_code_no_diff,omitempty"` // Exit code
+	FailIfNoMatch  bool                   `json:"fail_if_no_match,omitempty"`  // If true, fail if no matches found
+	Workers        int                    `json:"workers,omitempty"`           // Number of concurrent workers (default: runtime.NumCPU())
 }
 
 // Context defines constraints on the text surrounding a match.

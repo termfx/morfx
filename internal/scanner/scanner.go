@@ -11,7 +11,7 @@ import (
 
 	ignore "github.com/sabhiram/go-gitignore"
 
-	"github.com/garaekz/fileman/internal/provider"
+	"github.com/garaekz/fileman/internal/types"
 )
 
 // Scanner handles recursive directory traversal with filtering capabilities.
@@ -21,7 +21,7 @@ type Scanner struct {
 	includeGlobs   []string
 	excludeGlobs   []string
 	noGitignore    bool
-	provider       provider.LanguageProvider
+	provider       types.LanguageProvider
 	gitignore      *ignore.GitIgnore
 }
 
@@ -32,7 +32,7 @@ type Config struct {
 	IncludeGlobs   []string
 	ExcludeGlobs   []string
 	NoGitignore    bool
-	Provider       provider.LanguageProvider
+	Provider       types.LanguageProvider
 }
 
 // New creates a new scanner with the given configuration.

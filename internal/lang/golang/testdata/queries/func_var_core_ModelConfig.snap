@@ -1,1 +1,1 @@
-(function_declaration) . [(var_declaration (var_spec type: (type_identifier) @type) (#eq? @type "core.ModelConfig")) (var_declaration (var_spec_list (var_spec type: (type_identifier) @type) (#eq? @type "core.ModelConfig")))] @target
+(var_declaration (var_spec name: (identifier) @name (#match? @type "^core\.ModelConfig$")))

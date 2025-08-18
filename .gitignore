@@ -18,6 +18,7 @@ go.work.sum
 
 # OS generated files
 .DS_Store
+.env
 
 # Binary folders
 bin/

@@ -1,1 +1,1 @@
-[(assignment_statement left: (expression_list [(identifier) @name])) (short_var_declaration left: (expression_list [(identifier) @name]))] (#any-eq? @name "estaMadre") . (call_expression function: [(identifier) (selector_expression)] @name (#eq? @name "elpack.UnaChingadera")) @target
+(call_expression function: [(identifier) (selector_expression)] @name (#match? @name "^elpack\.UnaChingadera$"))

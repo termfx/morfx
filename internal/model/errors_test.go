@@ -13,7 +13,10 @@ func TestCLIError_Error(t *testing.T) {
 
 	errWithDetail := CLIError{Code: "TEST_CODE", Message: "Test message", Detail: "Some detail"}
 	if errWithDetail.Error() != "Test message: Some detail" {
-		t.Errorf("Expected error message 'Test message: Some detail', got '%s'", errWithDetail.Error())
+		t.Errorf(
+			"Expected error message 'Test message: Some detail', got '%s'",
+			errWithDetail.Error(),
+		)
 	}
 }
 
@@ -47,7 +50,8 @@ func TestWrap(t *testing.T) {
 	innerErr := errors.New("inner error")
 	wrappedErr := Wrap(ErrIO, "context message", innerErr)
 
-	cliErr, ok := wrappedErr.(CLIError)
+	var cliErr CLIError
+	ok := errors.As(wrappedErr, &cliErr)
 	if !ok {
 		t.Fatalf("Expected CLIError, got %T", wrappedErr)
 	}

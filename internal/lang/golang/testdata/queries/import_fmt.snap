@@ -1,1 +1,1 @@
-(import_spec path: (interpreted_string_literal) @path (#eq? @path "fmt")) @target
+(import_declaration (import_spec_list (import_spec path: (interpreted_string_literal) @name (#match? @name "^fmt$"))))

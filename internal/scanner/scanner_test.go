@@ -26,7 +26,7 @@ func TestScannerBasic(t *testing.T) {
 	}
 
 	cfg := Config{
-		Provider: golang.New(),
+		Provider: golang.NewProvider(),
 	}
 	s := New(cfg)
 
@@ -59,14 +59,13 @@ func TestScannerWithGitignore(t *testing.T) {
 	// Create test files
 	testFiles := []string{"main.go", "ignored.go", "temp.tmp"}
 	for _, file := range testFiles {
-		err := os.WriteFile(file, []byte("package main"), 0o644)
-		if err != nil {
-			t.Fatalf("Failed to create test file %s: %v", file, err)
+		if writeErr := os.WriteFile(file, []byte("package main"), 0o644); writeErr != nil {
+			t.Fatalf("Failed to create test file %s: %v", file, writeErr)
 		}
 	}
 
 	cfg := Config{
-		Provider:    golang.New(),
+		Provider:    golang.NewProvider(),
 		NoGitignore: false,
 	}
 	s := New(cfg)
@@ -104,14 +103,14 @@ func TestScannerNoGitignore(t *testing.T) {
 	// Create test files
 	testFiles := []string{"main.go", "ignored.go"}
 	for _, file := range testFiles {
-		err := os.WriteFile(file, []byte("package main"), 0o644)
-		if err != nil {
-			t.Fatalf("Failed to create test file %s: %v", file, err)
+		writeErr := os.WriteFile(file, []byte("package main"), 0o644)
+		if writeErr != nil {
+			t.Fatalf("Failed to create test file %s: %v", file, writeErr)
 		}
 	}
 
 	cfg := Config{
-		Provider:    golang.New(),
+		Provider:    golang.NewProvider(),
 		NoGitignore: true, // Disable gitignore filtering
 	}
 	s := New(cfg)
@@ -145,7 +144,7 @@ func TestScannerIncludeExclude(t *testing.T) {
 	}
 
 	cfg := Config{
-		Provider:     golang.New(),
+		Provider:     golang.NewProvider(),
 		IncludeGlobs: []string{"test_*.go"},
 	}
 	s := New(cfg)
@@ -191,7 +190,7 @@ func TestScannerMaxBytes(t *testing.T) {
 	}
 
 	cfg := Config{
-		Provider: golang.New(),
+		Provider: golang.NewProvider(),
 		MaxBytes: 100, // Only allow files smaller than 100 bytes
 	}
 	s := New(cfg)
@@ -242,7 +241,7 @@ func TestScannerDirectorySkipping(t *testing.T) {
 	}
 
 	cfg := Config{
-		Provider: golang.New(),
+		Provider: golang.NewProvider(),
 	}
 	s := New(cfg)
 

@@ -12,13 +12,6 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-// Flock acquires an exclusive lock on a file (best effort, cross-platform).
-func Flock(f *os.File) {
-	// On Unix, use syscall.Flock. On others, best effort (noop).
-	// This is a stub for demonstration; production should use golang.org/x/sys/unix or github.com/gofrs/flock
-	// For now, do nothing for cross-platform compatibility.
-}
-
 // ExpandGlobs expands a list of file paths, including those with glob patterns.
 func ExpandGlobs(files []string) []string {
 	var expandedFiles []string

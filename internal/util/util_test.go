@@ -77,7 +77,15 @@ func TestSplice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := Splice(tt.b, tt.start, tt.end, tt.replacement)
 			if string(result) != string(tt.expected) {
-				t.Errorf("Splice(%q, %d, %d, %q) = %q; want %q", tt.b, tt.start, tt.end, tt.replacement, result, tt.expected)
+				t.Errorf(
+					"Splice(%q, %d, %d, %q) = %q; want %q",
+					tt.b,
+					tt.start,
+					tt.end,
+					tt.replacement,
+					result,
+					tt.expected,
+				)
 			}
 		})
 	}

@@ -1,1 +1,1 @@
-(field_declaration type: (type_identifier) @type (#match? @type "^core\..*Config$")) @target
+(field_declaration name: (field_identifier_list (field_identifier) @name) type: (type_identifier) @type (#match? @type "^core\..*Config$"))
