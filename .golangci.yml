@@ -285,7 +285,7 @@ issues:
 
 output:
   formats:
-    - format: colored-line-number
+    colored-line-number: {}
   print-issued-line: true
   print-linter-name: true
   uniq-by-line: true
