@@ -242,7 +242,7 @@ func TestWildcardPatternConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
 			// Test the wildcard conversion logic
-			regex := p.(*GoProvider).convertWildcardToRegex(tt.pattern)
+			regex := p.(*GoProvider).ConvertWildcardToRegex(tt.pattern)
 			matched := strings.HasPrefix(regex, "^") && strings.HasSuffix(regex, "$")
 			if !matched {
 				t.Errorf("convertWildcardToRegex(%q) didn't anchor pattern", tt.pattern)

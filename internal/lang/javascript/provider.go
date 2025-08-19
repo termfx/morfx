@@ -7,8 +7,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	javascript_sitter "github.com/smacker/go-tree-sitter/javascript"
 
+	"github.com/termfx/morfx/internal/core"
 	"github.com/termfx/morfx/internal/provider"
-	"github.com/termfx/morfx/internal/types"
 )
 
 // JavaScriptProvider implements the LanguageProvider interface for JavaScript language support
@@ -28,92 +28,94 @@ func (p *JavaScriptProvider) Initialize() {
 	// Define how universal kinds map to JavaScript AST
 	mappings := []provider.NodeMapping{
 		{
-			Kind:        "function",
+			Kind:        core.KindFunction,
 			NodeTypes:   []string{"function_declaration", "function", "arrow_function", "generator_function_declaration"},
 			NameCapture: "@name",
-			Template:    `[(function_declaration name: (identifier) @name %s) (function name: (identifier) @name %s) (generator_function_declaration name: (identifier) @name %s)]`,
+			Template:    `[(function_declaration name: (identifier) @name) (function name: (identifier) @name) (generator_function_declaration name: (identifier) @name)] %s`,
 		},
 		{
-			Kind:        "class",
+			Kind:        core.KindClass,
 			NodeTypes:   []string{"class_declaration", "class"},
 			NameCapture: "@name",
-			Template:    `[(class_declaration name: (identifier) @name %s) (class name: (identifier) @name %s)]`,
+			Template:    `[(class_declaration name: (identifier) @name) (class name: (identifier) @name)] %s`,
 		},
 		{
-			Kind:        "method",
+			Kind:        core.KindMethod,
 			NodeTypes:   []string{"method_definition"},
 			NameCapture: "@name",
-			Template:    `(method_definition name: (property_identifier) @name %s)`,
+			Template:    `(method_definition name: (property_identifier) @name) %s`,
 		},
 		{
-			Kind:        "variable",
+			Kind:        core.KindVariable,
 			NodeTypes:   []string{"variable_declarator", "lexical_declaration"},
 			NameCapture: "@name",
-			Template:    `[(variable_declarator name: (identifier) @name %s) (lexical_declaration (variable_declarator name: (identifier) @name %s))]`,
+			Template:    `[(variable_declarator name: (identifier) @name) (lexical_declaration (variable_declarator name: (identifier) @name))] %s`,
 		},
 		{
-			Kind:        "import",
+			Kind:        core.KindImport,
 			NodeTypes:   []string{"import_statement"},
 			NameCapture: "@source",
-			Template:    `(import_statement source: (string) @source %s)`,
+			Template:    `(import_statement source: (string) @source) %s`,
 		},
 		{
-			Kind:        "constant",
+			Kind:        core.KindConstant,
 			NodeTypes:   []string{"lexical_declaration"},
 			NameCapture: "@name",
-			// const declarations
-			Template: `(lexical_declaration kind: "const" (variable_declarator name: (identifier) @name %s))`,
+			Template:    `(lexical_declaration (variable_declarator name: (identifier) @name)) %s`,
+			Attributes: map[string]string{
+				"kind": "const",
+			},
 		},
 		{
-			Kind:        "field",
+			Kind:        core.KindField,
 			NodeTypes:   []string{"field_definition", "public_field_definition"},
 			NameCapture: "@name",
-			Template:    `[(field_definition property: (property_identifier) @name %s) (public_field_definition name: (property_identifier) @name %s)]`,
+			Template:    `[(field_definition name: (property_identifier) @name) (public_field_definition name: (property_identifier) @name)] %s`,
 		},
 		{
-			Kind:        "call",
+			Kind:        core.KindCall,
 			NodeTypes:   []string{"call_expression"},
 			NameCapture: "@name",
-			Template:    `(call_expression function: [(identifier) (member_expression)] @name %s)`,
+			Template:    `(call_expression function: [(identifier) (member_expression)] @name) %s`,
 		},
 		{
-			Kind:        "assignment",
+			Kind:        core.KindAssignment,
 			NodeTypes:   []string{"assignment_expression", "augmented_assignment_expression"},
 			NameCapture: "@name",
-			Template:    `[(assignment_expression left: (_) @name %s) (augmented_assignment_expression left: (_) @name %s)]`,
+			Template:    `[(assignment_expression left: (_) @name) (augmented_assignment_expression left: (_) @name)] %s`,
 		},
 		{
-			Kind:        "condition",
+			Kind:        core.KindCondition,
 			NodeTypes:   []string{"if_statement", "ternary_expression", "switch_statement"},
 			NameCapture: "@condition",
-			Template:    `[(if_statement condition: (_) @condition %s) (ternary_expression condition: (_) @condition %s) (switch_statement value: (_) @condition %s)]`,
+			Template:    `[(if_statement condition: (_) @condition) (ternary_expression condition: (_) @condition) (switch_statement value: (_) @condition)] %s`,
 		},
 		{
-			Kind:        "loop",
+			Kind:        core.KindLoop,
 			NodeTypes:   []string{"for_statement", "for_in_statement", "while_statement", "do_statement"},
 			NameCapture: "@loop",
 			Template:    `[(for_statement) (for_in_statement) (while_statement) (do_statement)] @loop %s`,
 		},
 		{
-			Kind:        "block",
+			Kind:        core.KindBlock,
 			NodeTypes:   []string{"statement_block"},
 			NameCapture: "@block",
 			Template:    `(statement_block) @block %s`,
 		},
 		{
-			Kind:        "comment",
+			Kind:        core.KindComment,
 			NodeTypes:   []string{"comment"},
 			NameCapture: "@comment",
 			Template:    `(comment) @comment %s`,
 		},
 		{
-			Kind:        "decorator",
+			Kind:        core.KindDecorator,
 			NodeTypes:   []string{"decorator"},
 			NameCapture: "@name",
-			Template:    `(decorator (identifier) @name %s)`,
+			Template:    `(decorator (identifier) @name) %s`,
 		},
 		{
-			Kind:        "type",
+			Kind:        core.KindType,
 			NodeTypes:   []string{"type_annotation", "type_identifier"},
 			NameCapture: "@type",
 			Template:    `[(type_annotation) (type_identifier)] @type %s`,
@@ -144,7 +146,18 @@ func (p *JavaScriptProvider) GetSitterLanguage() *sitter.Language {
 }
 
 // TranslateQuery translates a universal query to JavaScript-specific Tree-sitter query
-func (p *JavaScriptProvider) TranslateQuery(q *types.Query) (string, error) {
+func (p *JavaScriptProvider) TranslateQuery(q *core.Query) (string, error) {
+	// Handle logical operations
+	if q.Operator == "AND" || q.Operator == "OR" {
+		return p.translateLogicalQuery(q)
+	}
+	if q.Operator == "NOT" {
+		return p.translateNegatedQuery(q)
+	}
+	if q.Operator == "HIERARCHY" {
+		return p.translateHierarchicalQuery(q)
+	}
+
 	mappings := p.TranslateKind(q.Kind)
 	if len(mappings) == 0 {
 		return "", fmt.Errorf("unsupported node kind: %s", q.Kind)
@@ -153,7 +166,7 @@ func (p *JavaScriptProvider) TranslateQuery(q *types.Query) (string, error) {
 	// Build query based on pattern and attributes
 	var queries []string
 	for _, mapping := range mappings {
-		query := p.buildQueryFromMapping(mapping, q)
+		query := p.BuildQueryFromMapping(mapping, q)
 		if query != "" {
 			queries = append(queries, query)
 		}
@@ -166,109 +179,167 @@ func (p *JavaScriptProvider) TranslateQuery(q *types.Query) (string, error) {
 	return strings.Join(queries, "\n"), nil
 }
 
-// buildQueryFromMapping constructs a Tree-sitter query from a mapping and query
-func (p *JavaScriptProvider) buildQueryFromMapping(mapping provider.NodeMapping, q *types.Query) string {
-	// Handle pattern matching
-	patternConstraint := ""
-	if q.Pattern != "" && q.Pattern != "*" {
-		// Convert wildcard patterns to regex
-		regexPattern := p.convertWildcardToRegex(q.Pattern)
-		patternConstraint = fmt.Sprintf(`(#match? %s "%s")`, mapping.NameCapture, regexPattern)
+// translateLogicalQuery handles AND/OR operations by combining multiple queries
+func (p *JavaScriptProvider) translateLogicalQuery(q *core.Query) (string, error) {
+	if len(q.Children) < 2 {
+		return "", fmt.Errorf("logical query must have at least 2 children")
 	}
 
-	// Handle type constraints
-	typeConstraint := ""
-	if typeAttr, hasType := q.Attributes["type"]; hasType && mapping.TypeCapture != "" {
-		typeRegex := p.convertWildcardToRegex(typeAttr)
-		typeConstraint = fmt.Sprintf(`(#match? %s "%s")`, mapping.TypeCapture, typeRegex)
+	var subQueries []string
+	for _, child := range q.Children {
+		childQuery, err := p.TranslateQuery(&child)
+		if err != nil {
+			return "", fmt.Errorf("error translating child query: %w", err)
+		}
+		if childQuery != "" {
+			subQueries = append(subQueries, childQuery)
+		}
+	}
+
+	if len(subQueries) == 0 {
+		return "", fmt.Errorf("no valid sub-queries generated")
+	}
+
+	// For tree-sitter queries, we combine them with newlines
+	// The evaluation logic will handle AND/OR semantics at the result level
+	return strings.Join(subQueries, "\n"), nil
+}
+
+// translateNegatedQuery handles NOT operations
+func (p *JavaScriptProvider) translateNegatedQuery(q *core.Query) (string, error) {
+	// For NOT operations, we still generate the positive query
+	// The negation is handled at the evaluation level
+	// Create a copy without the NOT operator
+	childQuery := *q
+	childQuery.Operator = ""
+	
+	return p.TranslateQuery(&childQuery)
+}
+
+// translateHierarchicalQuery handles parent > child relationships
+func (p *JavaScriptProvider) translateHierarchicalQuery(q *core.Query) (string, error) {
+	if len(q.Children) != 1 {
+		return "", fmt.Errorf("hierarchical query must have exactly 1 parent")
+	}
+
+	parent := &q.Children[0]
+	
+	// Get parent mappings
+	parentMappings := p.TranslateKind(parent.Kind)
+	if len(parentMappings) == 0 {
+		return "", fmt.Errorf("unsupported parent node kind: %s", parent.Kind)
+	}
+	
+	// Get child mappings
+	childMappings := p.TranslateKind(q.Kind)
+	if len(childMappings) == 0 {
+		return "", fmt.Errorf("unsupported child node kind: %s", q.Kind)
+	}
+
+	var queries []string
+	for _, parentMapping := range parentMappings {
+		for _, childMapping := range childMappings {
+			// Build hierarchical query
+			query := p.buildHierarchicalQuery(parentMapping, parent, childMapping, q)
+			if query != "" {
+				queries = append(queries, query)
+			}
+		}
+	}
+
+	if len(queries) == 0 {
+		return "", fmt.Errorf("no valid hierarchical queries generated")
+	}
+
+	return strings.Join(queries, "\n"), nil
+}
+
+// buildHierarchicalQuery constructs a tree-sitter query for parent-child relationships
+func (p *JavaScriptProvider) buildHierarchicalQuery(parentMapping provider.NodeMapping, parent *core.Query, childMapping provider.NodeMapping, child *core.Query) string {
+	// Build pattern constraint for parent
+	parentConstraint := ""
+	if parent.Pattern != "" && parent.Pattern != "*" {
+		regexPattern := p.ConvertWildcardToRegex(parent.Pattern)
+		parentConstraint = fmt.Sprintf(`(#match? %s "%s")`, parentMapping.NameCapture, regexPattern)
+	}
+
+	// Build pattern constraint for child
+	childConstraint := ""
+	if child.Pattern != "" && child.Pattern != "*" {
+		regexPattern := p.ConvertWildcardToRegex(child.Pattern)
+		childConstraint = fmt.Sprintf(`(#match? %s "%s")`, childMapping.NameCapture, regexPattern)
 	}
 
 	// Combine constraints
 	constraints := []string{}
-	if patternConstraint != "" {
-		constraints = append(constraints, patternConstraint)
+	if parentConstraint != "" {
+		constraints = append(constraints, parentConstraint)
 	}
-	if typeConstraint != "" {
-		constraints = append(constraints, typeConstraint)
+	if childConstraint != "" {
+		constraints = append(constraints, childConstraint)
 	}
-
+	
 	constraintStr := strings.Join(constraints, " ")
 
-	// Special handling for templates with multiple %s placeholders
-	if strings.Count(mapping.Template, "%s") > 1 {
-		// For templates with multiple placeholders, use the same constraint for all
-		placeholders := make([]any, strings.Count(mapping.Template, "%s"))
-		for i := range placeholders {
-			placeholders[i] = constraintStr
+	// Build the hierarchical query pattern
+	// This is a simplified approach - in practice, you'd need more sophisticated nesting
+	for _, parentType := range parentMapping.NodeTypes {
+		for _, childType := range childMapping.NodeTypes {
+			if parentType == "class_declaration" && (childType == "method_definition" || childType == "field_definition" || childType == "public_field_definition") {
+				return fmt.Sprintf(`(%s body: (class_body (%s %s %s)))`,
+					parentType, childType, childMapping.NameCapture, constraintStr)
+			}
+			if parentType == "function_declaration" && childType == "variable_declarator" {
+				return fmt.Sprintf(`(%s body: (statement_block (lexical_declaration (variable_declarator %s %s))))`,
+					parentType, childMapping.NameCapture, constraintStr)
+			}
 		}
-		return fmt.Sprintf(mapping.Template, placeholders...)
 	}
 
-	return fmt.Sprintf(mapping.Template, constraintStr)
-}
-
-// convertWildcardToRegex converts wildcard patterns to regex
-func (p *JavaScriptProvider) convertWildcardToRegex(pattern string) string {
-	// Escape regex special characters except * and ?
-	escaped := strings.ReplaceAll(pattern, ".", "\\.")
-	escaped = strings.ReplaceAll(escaped, "+", "\\+")
-	escaped = strings.ReplaceAll(escaped, "^", "\\^")
-	escaped = strings.ReplaceAll(escaped, "$", "\\$")
-	escaped = strings.ReplaceAll(escaped, "(", "\\(")
-	escaped = strings.ReplaceAll(escaped, ")", "\\)")
-	escaped = strings.ReplaceAll(escaped, "[", "\\[")
-	escaped = strings.ReplaceAll(escaped, "]", "\\]")
-	escaped = strings.ReplaceAll(escaped, "{", "\\{")
-	escaped = strings.ReplaceAll(escaped, "}", "\\}")
-	escaped = strings.ReplaceAll(escaped, "|", "\\|")
-
-	// Convert wildcards to regex
-	escaped = strings.ReplaceAll(escaped, "*", ".*")
-	escaped = strings.ReplaceAll(escaped, "?", ".")
-
-	// Anchor the pattern
-	return "^" + escaped + "$"
+	// Generic hierarchical pattern
+	return fmt.Sprintf(`(%s (%s %s %s))`,
+		parentMapping.NodeTypes[0], childMapping.NodeTypes[0], childMapping.NameCapture, constraintStr)
 }
 
 // GetNodeKind determines the universal kind of a Tree-sitter node
-func (p *JavaScriptProvider) GetNodeKind(node *sitter.Node) types.NodeKind {
+func (p *JavaScriptProvider) GetNodeKind(node *sitter.Node) core.NodeKind {
 	switch node.Type() {
 	case "function_declaration", "function", "arrow_function", "generator_function_declaration":
-		return "function"
+		return core.KindFunction
 	case "class_declaration", "class":
-		return "class"
+		return core.KindClass
 	case "method_definition":
-		return "method"
+		return core.KindMethod
 	case "variable_declarator":
-		return "variable"
+		return core.KindVariable
 	case "lexical_declaration":
 		// Check if it's a const
 		if p.isConstDeclaration(node) {
-			return "constant"
+			return core.KindConstant
 		}
-		return "variable"
+		return core.KindVariable
 	case "import_statement", "import_specifier":
-		return "import"
+		return core.KindImport
 	case "field_definition", "public_field_definition":
-		return "field"
+		return core.KindField
 	case "call_expression":
-		return "call"
+		return core.KindCall
 	case "assignment_expression", "augmented_assignment_expression":
-		return "assignment"
+		return core.KindAssignment
 	case "if_statement", "ternary_expression", "switch_statement":
-		return "condition"
+		return core.KindCondition
 	case "for_statement", "for_in_statement", "while_statement", "do_statement":
-		return "loop"
+		return core.KindLoop
 	case "statement_block":
-		return "block"
+		return core.KindBlock
 	case "comment":
-		return "comment"
+		return core.KindComment
 	case "decorator":
-		return "decorator"
+		return core.KindDecorator
 	case "type_annotation", "type_identifier":
-		return "type"
+		return core.KindType
 	default:
-		return types.NodeKind(node.Type()) // Fallback to node type
+		return core.NodeKind(node.Type()) // Fallback to node type
 	}
 }
 
@@ -305,21 +376,21 @@ func (p *JavaScriptProvider) GetNodeName(node *sitter.Node, source []byte) strin
 }
 
 // GetNodeScope provides JavaScript-specific scope detection
-func (p *JavaScriptProvider) GetNodeScope(node *sitter.Node) types.ScopeType {
+func (p *JavaScriptProvider) GetNodeScope(node *sitter.Node) core.ScopeType {
 	switch node.Type() {
 	case "program":
-		return "file"
+		return core.ScopeFile
 	case "class_declaration", "class":
-		return "class"
+		return core.ScopeClass
 	case "function_declaration", "function", "arrow_function", "method_definition":
-		return "function"
+		return core.ScopeFunction
 	case "statement_block", "if_statement", "for_statement", "while_statement":
-		return "block"
+		return core.ScopeBlock
 	default:
 		if node.Parent() != nil {
 			return p.GetNodeScope(node.Parent())
 		}
-		return "file"
+		return core.ScopeFile
 	}
 }
 
@@ -414,4 +485,73 @@ func (p *JavaScriptProvider) isConstDeclaration(node *sitter.Node) bool {
 		}
 	}
 	return false
+}
+
+// QuickCheck performs basic syntax and semantic checks on JavaScript code
+func (p *JavaScriptProvider) QuickCheck(source []byte) []core.QuickCheckDiagnostic {
+	var diagnostics []core.QuickCheckDiagnostic
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(p.GetSitterLanguage())
+	tree := parser.Parse(nil, source)
+	defer tree.Close()
+
+	// Check for syntax errors
+	p.checkForErrors(tree.RootNode(), source, &diagnostics)
+
+	// Check for basic semantic issues
+	p.checkBasicSemantics(tree.RootNode(), source, &diagnostics)
+
+	return diagnostics
+}
+
+// checkForErrors recursively checks for ERROR nodes in the syntax tree
+func (p *JavaScriptProvider) checkForErrors(node *sitter.Node, source []byte, diagnostics *[]core.QuickCheckDiagnostic) {
+	if node.Type() == "ERROR" {
+		*diagnostics = append(*diagnostics, core.QuickCheckDiagnostic{
+			Severity: "error",
+			Message:  "Syntax error",
+			Line:     int(node.StartPoint().Row) + 1,
+			Column:   int(node.StartPoint().Column) + 1,
+			Code:     "syntax-error",
+		})
+	}
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		p.checkForErrors(node.Child(i), source, diagnostics)
+	}
+}
+
+// checkBasicSemantics performs basic semantic checks
+func (p *JavaScriptProvider) checkBasicSemantics(node *sitter.Node, source []byte, diagnostics *[]core.QuickCheckDiagnostic) {
+	// Check for function declarations without bodies
+	if node.Type() == "function_declaration" {
+		if body := node.ChildByFieldName("body"); body == nil {
+			*diagnostics = append(*diagnostics, core.QuickCheckDiagnostic{
+				Severity: "error",
+				Message:  "Function declaration missing body",
+				Line:     int(node.StartPoint().Row) + 1,
+				Column:   int(node.StartPoint().Column) + 1,
+				Code:     "missing-function-body",
+			})
+		}
+	}
+
+	// Check for class declarations without bodies
+	if node.Type() == "class_declaration" {
+		if body := node.ChildByFieldName("body"); body == nil {
+			*diagnostics = append(*diagnostics, core.QuickCheckDiagnostic{
+				Severity: "error",
+				Message:  "Class declaration missing body",
+				Line:     int(node.StartPoint().Row) + 1,
+				Column:   int(node.StartPoint().Column) + 1,
+				Code:     "missing-class-body",
+			})
+		}
+	}
+
+	// Recursively check child nodes
+	for i := 0; i < int(node.ChildCount()); i++ {
+		p.checkBasicSemantics(node.Child(i), source, diagnostics)
+	}
 }
