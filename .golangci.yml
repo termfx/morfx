@@ -1,0 +1,407 @@
+version: "2"
+
+# Global timeout for linters
+deadline: 5m
+
+# Enable automatic fixes where possible
+fix: false
+
+linters:
+  # Disable default linters to have explicit control
+  disable-all: true
+
+  # Enable production-ready linters
+  enable:
+    # Base linters (always recommended)
+    - gofmt # Standard formatting
+    - goimports # Import organization
+    - govet # Standard go vet checks
+    - ineffassign # Detect ineffective assignments
+    - misspell # Spelling mistakes
+    - typecheck # Type checking errors
+    - unused # Detect unused code
+    - deadcode # Detect dead code
+    - varcheck # Find unused global variables and constants
+    - structcheck # Find unused struct fields
+
+    # Security linters
+    - gosec # Security checks
+    - G101 # Look for hardcoded credentials
+    - G102 # Bind to all interfaces
+    - G103 # Audit the use of unsafe block
+    - G104 # Audit errors not checked
+    - G105 # Audit the use of math/big.Int.Exp
+    - G106 # Audit the use of ssh.InsecureIgnoreHostKey
+
+    # Error handling linters
+    - errcheck # Check for unchecked errors
+    - errorlint # Error handling best practices
+    - wrapcheck # Check error wrapping
+    - nilerr # Check returning nil even with non-nil error
+    - nilnil # Check returning nil, nil
+
+    # Code quality linters
+    - revive # Configurable Go linting
+    - gocritic # Comprehensive code critic
+    - staticcheck # Advanced static analysis
+    - goconst # Find repeated strings for constants
+    - goheader # Check file headers
+    - gocognit # Cognitive complexity
+    - gocyclo # Cyclomatic complexity
+    - cyclop # Package-level cyclomatic complexity
+    - funlen # Function length checking
+    - nestif # Nested if statements
+    - lll # Line length limit
+    - whitespace # Whitespace issues
+    - wsl # Whitespace linter (empty lines)
+
+    # Performance linters
+    - prealloc # Find slice declarations that could be preallocated
+    - bodyclose # Check HTTP response body closed
+    - rowserrcheck # Check SQL rows.Err
+    - sqlclosecheck # Check SQL Close() called
+    - unconvert # Remove unnecessary type conversions
+    - unparam # Find unused function parameters
+
+    # Style and consistency linters
+    - gofumpt # Stricter gofmt
+    - gci # Import organization
+    - golines # Long line formatting
+    - asciicheck # Non-ASCII identifiers
+    - bidichk # Bidirectional unicode characters
+    - decorder # Check declaration order
+    - gofmt # Go formatting
+    - goimports # Import formatting
+    - grouper # Import grouping
+    - importas # Import aliasing
+    - makezero # Make slice initialization
+    - nakedret # Naked returns
+    - nolintlint # Nolint directive usage
+    - predeclared # Predeclared identifier shadowing
+    - tagliatelle # Struct tag naming
+    - thelper # Test helper detection
+    - tparallel # Parallel test detection
+    - godot # Comment punctuation
+
+    # Specific to Go best practices
+    - contextcheck # Context usage patterns
+    - durationcheck # Duration multiplication checks
+    - exhaustive # Enum switch exhaustiveness
+    - forbidigo # Forbid specific patterns
+    - forcetypeassert # Force type assertions
+    - gomoddirectives # Go mod directives
+    - ifshort # If statement shortening
+    - ireturn # Interface return types
+    - maintidx # Maintainability index
+    - mirror # Wrong mirror usage
+    - nosprintfhostport # Sprint host port
+    - promlinter # Prometheus metrics
+    - reassign # Variable reassignment
+    - testableexamples # Testable examples
+    - testpackage # Test package naming
+    - usestdlibvars # Use stdlib constants
+    - wastedassign # Wasted assignments
+
+linters-settings:
+  # Error handling configuration
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprint
+      - fmt.Fprintln
+      - fmt.Print
+      - fmt.Printf
+      - fmt.Println
+
+  # Revive configuration
+  revive:
+    ignore-generated-header: true
+    severity: warning
+    confidence: 0.8
+    rules:
+      # Code quality rules
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+      - name: early-return
+      - name: unconditional-recursion
+      - name: modifies-parameter
+      - name: constant-logical-expr
+      - name: bool-literal-in-expr
+      - name: range-val-in-closure
+      - name: comment-spacings
+      - name: string-of-int
+      - name: string-format
+      - name: struct-tag
+      - name: atomic
+      - name: empty-lines
+      - name: line-length-limit
+        arguments: [100]
+      - name: cognitive-complexity
+        arguments: [15]
+      - name: cyclomatic
+        arguments: [10]
+      - name: max-public-structs
+        arguments: [5]
+      - name: function-result-limit
+        arguments: [3]
+      - name: argument-limit
+        arguments: [5]
+      - name: function-length
+        arguments: [50, 75]
+      - name: file-header
+        arguments: ["// Copyright \\d{4}.*"]
+
+  # Gocritic configuration
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - security
+      - style
+    disabled-checks:
+      - dupImport # Handled by goimports
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+    settings:
+      captLocal:
+        paramsOnly: true
+      rangeValCopy:
+        sizeThreshold: 64
+      underef:
+        skipRecvDeref: true
+
+  # Complexity thresholds
+  gocognit:
+    min-complexity: 15
+
+  gocyclo:
+    min-complexity: 10
+
+  cyclop:
+    max-complexity: 10
+    package-average: 5.0
+    skip-tests: true
+
+  funlen:
+    lines: 75
+    statements: 50
+    ignore-comments: true
+
+  nestif:
+    min-complexity: 4
+
+  maintidx:
+    under: 20
+
+  # Line length and formatting
+  lll:
+    line-length: 100
+
+  golines:
+    max-len: 100
+    base-formatter: gofumpt
+
+  gofumpt:
+    extra-rules: true
+    lang-version: "1.24"
+    module-path: github.com/termfx/morfx
+
+  # Import organization
+  gci:
+    sections:
+      - standard # Standard library
+      - default # Everything else
+      - prefix(github.com/termfx/morfx) # Local imports
+    skip-generated: true
+    custom-order: true
+
+  goimports:
+    local-prefixes: github.com/termfx/morfx
+
+  # Performance linters
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+
+  # Security settings
+  gosec:
+    severity: medium
+    confidence: medium
+    includes:
+      - G101 # Look for hardcoded credentials
+      - G102 # Bind to all interfaces
+      - G103 # Audit the use of unsafe block
+      - G104 # Audit errors not checked
+      - G105 # Audit the use of math/big.Int.Exp
+      - G106 # Audit the use of ssh.InsecureIgnoreHostKey
+      - G107 # Url provided to HTTP request as taint input
+      - G108 # Profiling endpoint automatically exposed
+      - G109 # Potential Integer overflow made by strconv.Atoi result conversion
+      - G110 # Potential DoS vulnerability via decompression bomb
+      - G201 # SQL query construction using format string
+      - G202 # SQL query construction using string concatenation
+      - G203 # Use of unescaped data in HTML templates
+      - G204 # Audit use of command execution
+      - G301 # Poor file permissions used when creating a directory
+      - G302 # Poor file permissions used with chmod
+      - G303 # Creating tempfile using a predictable path
+      - G304 # File path provided as taint input
+      - G305 # File traversal when extracting zip archive
+      - G306 # Poor file permissions used when writing to a file
+      - G307 # Deferring a method which returns an error
+      - G401 # Detect the usage of DES, RC4, MD5 or SHA1
+      - G402 # Look for bad TLS connection settings
+      - G403 # Ensure minimum RSA key length of 2048 bits
+      - G404 # Insecure random number source (rand)
+      - G501 # Import blacklist: crypto/md5
+      - G502 # Import blacklist: crypto/des
+      - G503 # Import blacklist: crypto/rc4
+      - G504 # Import blacklist: net/http/cgi
+      - G505 # Import blacklist: crypto/sha1
+      - G601 # Implicit memory aliasing of items from a range statement
+    excludes:
+      - G104 # Allow unchecked errors in test files
+
+  # Test-specific settings
+  testpackage:
+    skip-regexp: '(export|internal)_test\.go'
+
+  thelper:
+    test:
+      first: true
+      name: true
+      begin: true
+    benchmark:
+      first: true
+      name: true
+      begin: true
+
+# Issue filtering and exclusions
+issues:
+  # Set the maximum number of issues to report
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+  # Show only new issues for existing codebases
+  new: false
+
+  # Fix found issues automatically where possible
+  fix: false
+
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+        - funlen
+        - lll
+        - maintidx
+        - gocognit
+
+    # Exclude some linters from running on example files
+    - path: example_.*\.go
+      linters:
+        - errcheck
+        - goconst
+
+    # Exclude generated files
+    - path: \.gen\.go$
+      linters:
+        - lll
+        - gofmt
+        - gofumpt
+        - gci
+
+    # Allow long lines in go:generate comments
+    - source: "^//go:generate "
+      linters:
+        - lll
+
+    # Exclude shadow warnings for err variables
+    - text: 'shadow: declaration of "err"'
+      linters:
+        - govet
+
+    # Allow dot imports in tests
+    - path: _test\.go
+      text: "should not use dot imports"
+      linters:
+        - revive
+
+    # Allow naked returns in short functions
+    - text: "naked return"
+      linters:
+        - nakedret
+      where: "func.* \\{$"
+
+  exclude-files:
+    - ".*\\.gen\\.go$"
+    - "vendor/.*"
+    - "third_party/.*"
+    - "testdata/.*"
+
+  exclude:
+    # Exclude common false positives
+    - "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*printf?|os\\.(Un)?Setenv). is not checked"
+    - "exported function .* should have comment or be unexported"
+    - "package comment should be of the form"
+    - "comment on exported .* should be of the form"
+
+# Output configuration
+output:
+  format: colored-line-number
+  print-issued-line: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  build-tags:
+    - sqlite_fts5
+    - integration
+  skip-dirs:
+    - vendor
+    - testdata
+    - third_party
+    - .git
+  skip-files:
+    - ".*\\.gen\\.go$"
+    - "mock_.*\\.go$"
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  go: "1.24"

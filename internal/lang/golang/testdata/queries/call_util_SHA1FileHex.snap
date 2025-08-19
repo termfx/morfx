@@ -1,0 +1,1 @@
+(call_expression function: [(identifier) (selector_expression)] @name (#match? @name "^util\.SHA1FileHex$"))
