@@ -166,6 +166,16 @@ func TestRollbackCrashResume(t *testing.T) {
 		_ = os.RemoveAll(".morfx") // Clean for subtest
 		cmd := exec.Command(os.Args[0], "-test.run=TestRollbackCrashResumeCPA")
 		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "MORFX_CRASH_POINT=CP-A")
+		// Ensure encryption environment variables are passed to helper process
+		if encMode := os.Getenv("MORFX_ENCRYPTION_MODE"); encMode != "" {
+			cmd.Env = append(cmd.Env, "MORFX_ENCRYPTION_MODE="+encMode)
+		}
+		if encAlgo := os.Getenv("MORFX_ENCRYPTION_ALGO"); encAlgo != "" {
+			cmd.Env = append(cmd.Env, "MORFX_ENCRYPTION_ALGO="+encAlgo)
+		}
+		if masterKey := os.Getenv("MORFX_MASTER_KEY"); masterKey != "" {
+			cmd.Env = append(cmd.Env, "MORFX_MASTER_KEY="+masterKey)
+		}
 		cmd.Dir = "."
 		out, err := cmd.CombinedOutput()
 		if e, ok := err.(*exec.ExitError); ok && e.ExitCode() == 137 {
@@ -232,6 +242,16 @@ func TestRollbackCrashResume(t *testing.T) {
 		_ = os.RemoveAll(".morfx") // Clean for subtest
 		cmd := exec.Command(os.Args[0], "-test.run=TestRollbackCrashResumeCPB")
 		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "MORFX_CRASH_POINT=CP-B")
+		// Ensure encryption environment variables are passed to helper process
+		if encMode := os.Getenv("MORFX_ENCRYPTION_MODE"); encMode != "" {
+			cmd.Env = append(cmd.Env, "MORFX_ENCRYPTION_MODE="+encMode)
+		}
+		if encAlgo := os.Getenv("MORFX_ENCRYPTION_ALGO"); encAlgo != "" {
+			cmd.Env = append(cmd.Env, "MORFX_ENCRYPTION_ALGO="+encAlgo)
+		}
+		if masterKey := os.Getenv("MORFX_MASTER_KEY"); masterKey != "" {
+			cmd.Env = append(cmd.Env, "MORFX_MASTER_KEY="+masterKey)
+		}
 		cmd.Dir = "."
 		out, err := cmd.CombinedOutput()
 		if e, ok := err.(*exec.ExitError); ok && e.ExitCode() == 137 {

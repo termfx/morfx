@@ -488,8 +488,19 @@ func AppendDiagnostics(db *sql.DB, opID string, list []map[string]any) error {
 
 func GetRunSummary(db *sql.DB, runID string) (map[string]any, error) {
 	summary := make(map[string]any)
+
+	// Get basic run information
+	var repo, branch string
+	err := db.QueryRow(`SELECT repo, branch FROM runs WHERE id = ?`, runID).Scan(&repo, &branch)
+	if err != nil {
+		return nil, fmt.Errorf("GetRunSummary basic info: %w", err)
+	}
+	summary["id"] = runID
+	summary["repo"] = repo
+	summary["branch"] = branch
+
 	var opCount int64
-	err := db.QueryRow(`SELECT COUNT(*) FROM operations WHERE run_id = ?`, runID).Scan(&opCount)
+	err = db.QueryRow(`SELECT COUNT(*) FROM operations WHERE run_id = ?`, runID).Scan(&opCount)
 	if err != nil {
 		return nil, fmt.Errorf("GetRunSummary op_count: %w", err)
 	}

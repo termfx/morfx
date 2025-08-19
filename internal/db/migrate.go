@@ -27,7 +27,17 @@ func Migrate(db *sql.DB) error {
 		started_at INTEGER NOT NULL,
 		finished_at INTEGER,
 		metrics_json TEXT,
-		next_op_seq INTEGER DEFAULT 0
+		next_op_seq INTEGER DEFAULT 0,
+		-- Morfx Core Spec additions
+		engine_version TEXT,
+		total_operations INTEGER DEFAULT 0,
+		total_files INTEGER DEFAULT 0,
+		total_bytes_processed INTEGER DEFAULT 0,
+		total_lines_processed INTEGER DEFAULT 0,
+		total_matches_found INTEGER DEFAULT 0,
+		total_edits_applied INTEGER DEFAULT 0,
+		total_overlaps_detected INTEGER DEFAULT 0,
+		fuzzy_matches_used INTEGER DEFAULT 0
 	);
 	CREATE INDEX IF NOT EXISTS idx_runs_status_started_at ON runs (status, started_at DESC);
 
@@ -54,6 +64,25 @@ func Migrate(db *sql.DB) error {
 		started_at INTEGER NOT NULL,
 		finished_at INTEGER,
 		stats_json TEXT,
+		-- Morfx Core Spec additions
+		language TEXT,
+		query TEXT,
+		operation TEXT,
+		replacement TEXT,
+		resolved_operation TEXT,
+		code_hash_before TEXT,
+		code_hash_after TEXT,
+		bytes_processed INTEGER DEFAULT 0,
+		lines_processed INTEGER DEFAULT 0,
+		matches_found INTEGER DEFAULT 0,
+		edits_applied INTEGER DEFAULT 0,
+		overlaps_detected INTEGER DEFAULT 0,
+		fuzzy_used BOOLEAN DEFAULT FALSE,
+		fuzzy_original_query TEXT,
+		fuzzy_resolved_query TEXT,
+		fuzzy_confidence REAL,
+		fuzzy_distance INTEGER,
+		duration_ms INTEGER,
 		FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
 		FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 	);
@@ -69,9 +98,20 @@ func Migrate(db *sql.DB) error {
 		reverse_blob BLOB,
 		bytes_added INTEGER,
 		bytes_removed INTEGER,
+		-- Encryption fields (Morfx Core Spec)
 		enc_algo TEXT NOT NULL DEFAULT 'PLAINTEXT',
 		key_version INTEGER NOT NULL DEFAULT 0,
 		nonce BLOB,
+		aad BLOB,
+		-- Additional patch metadata
+		diff_unified TEXT,
+		start_byte INTEGER,
+		end_byte INTEGER,
+		lines_added INTEGER DEFAULT 0,
+		lines_removed INTEGER DEFAULT 0,
+		compression_algo TEXT DEFAULT 'NONE',
+		original_size INTEGER,
+		compressed_size INTEGER,
 		FOREIGN KEY (op_id) REFERENCES operations(id) ON DELETE CASCADE,
 		FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 	);
@@ -105,8 +145,45 @@ func Migrate(db *sql.DB) error {
 		key_version INTEGER PRIMARY KEY,
 		created_at INTEGER NOT NULL,
 		algo TEXT NOT NULL,
-		key_hash BLOB NOT NULL
+		key_hash BLOB NOT NULL,
+		-- Morfx Core Spec encryption additions
+		key_material BLOB NOT NULL,
+		rotated_at INTEGER,
+		is_active INTEGER DEFAULT 1,
+		derivation_salt BLOB,
+		derivation_info TEXT
 	);
+	
+	-- Create table for edit conflicts and overlaps
+	CREATE TABLE IF NOT EXISTS edit_conflicts (
+		id TEXT PRIMARY KEY,
+		op_id TEXT NOT NULL,
+		conflict_type TEXT NOT NULL,
+		start_byte INTEGER NOT NULL,
+		end_byte INTEGER NOT NULL,
+		conflicting_op_id TEXT,
+		resolution TEXT,
+		created_at INTEGER NOT NULL,
+		FOREIGN KEY (op_id) REFERENCES operations(id) ON DELETE CASCADE,
+		FOREIGN KEY (conflicting_op_id) REFERENCES operations(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_edit_conflicts_op_id ON edit_conflicts (op_id);
+	
+	-- Create table for fuzzy match details
+	CREATE TABLE IF NOT EXISTS fuzzy_matches (
+		id TEXT PRIMARY KEY,
+		op_id TEXT NOT NULL,
+		original_query TEXT NOT NULL,
+		resolved_query TEXT NOT NULL,
+		confidence REAL NOT NULL,
+		distance INTEGER NOT NULL,
+		algorithm TEXT NOT NULL,
+		variations_tried INTEGER DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		FOREIGN KEY (op_id) REFERENCES operations(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_fuzzy_matches_op_id ON fuzzy_matches (op_id);
+	CREATE INDEX IF NOT EXISTS idx_fuzzy_matches_confidence ON fuzzy_matches (confidence DESC);
 	`
 
 	_, err = db.Exec(sqlStmt)
