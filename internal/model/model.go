@@ -14,6 +14,7 @@ const (
 	OpReplace      Operation = "replace"
 	OpInsertBefore Operation = "insert-before"
 	OpInsertAfter  Operation = "insert-after"
+	OpAppendToBody Operation = "append-to-body"
 	OpDelete       Operation = "delete"
 	OpGet          Operation = "get"
 	OpCommit       Operation = "commit"
@@ -42,6 +43,13 @@ type Config struct {
 	ExitCodeNoDiff int                    `json:"exit_code_no_diff,omitempty"` // Exit code
 	FailIfNoMatch  bool                   `json:"fail_if_no_match,omitempty"`  // If true, fail if no matches found
 	Workers        int                    `json:"workers,omitempty"`           // Number of concurrent workers (default: runtime.NumCPU())
+
+	// New fields from Morfx Core Spec
+	Fuzz            bool `json:"fuzz,omitempty"`              // Enable fuzzy matching
+	MaxFuzzDistance int  `json:"max_fuzz_distance,omitempty"` // Maximum edit distance for fuzzy matching
+	SkipValidation  bool `json:"skip_validation,omitempty"`   // Skip snippet validation
+	SkipFormat      bool `json:"skip_format,omitempty"`       // Skip code formatting
+	SkipImports     bool `json:"skip_imports,omitempty"`      // Skip import organization
 }
 
 // Context defines constraints on the text surrounding a match.

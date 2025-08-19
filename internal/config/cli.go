@@ -32,6 +32,8 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 
 	// Define flags
 	fs.BoolP("help", "h", true, "Show this help message and exit.")
+
+	// Core Input flags
 	fs.StringP(
 		"query",
 		"q",
@@ -42,16 +44,53 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		"op",
 		"o",
 		"get",
-		"Operation: get, replace, delete, insert-before, insert-after.",
+		"Operation: get, replace, delete, insert-before, insert-after, append-to-body.",
 	)
 	fs.StringP("repl", "r", "", "Replacement string for replace/insert operations.")
-
 	fs.StringP(
-		"lang",
+		"language",
 		"l",
 		"",
 		"Target language (go, python, etc.). Inferred from file extensions if omitted.",
 	)
+
+	// InputOptions flags
+	fs.BoolP("dry-run", "d", false, "Perform a trial run without writing any files.")
+	fs.BoolP(
+		"interactive",
+		"i",
+		false,
+		"Enable interactive mode for confirmations.",
+	)
+	fs.BoolP(
+		"fuzz",
+		"z",
+		false,
+		"Enable fuzzy matching when exact matches fail.",
+	)
+	fs.IntP(
+		"max-fuzz-distance",
+		"",
+		3,
+		"Maximum edit distance for fuzzy matching (default: 3).",
+	)
+	fs.Bool(
+		"skip-validation",
+		false,
+		"Skip snippet validation during operations.",
+	)
+	fs.Bool(
+		"skip-format",
+		false,
+		"Skip code formatting after operations.",
+	)
+	fs.Bool(
+		"skip-imports",
+		false,
+		"Skip import organization after operations.",
+	)
+
+	// Legacy compatibility flags
 	fs.BoolP(
 		"include-tests",
 		"t",
@@ -64,19 +103,19 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		0,
 		"Number of concurrent workers, 0 means use all available CPUs. (Default: 0).",
 	)
-
 	fs.BoolP(
 		"force",
 		"f",
 		false,
 		"Force apply changes without confirmation for medium-sized refactors.",
 	)
-	fs.BoolP("dry-run", "d", false, "Perform a trial run without writing any files.")
 	fs.Bool(
 		"commit",
 		false,
 		"Write changes to disk (overrides default dry-run behavior).",
 	)
+
+	// Output control flags
 	showDiff := fs.BoolP("diff", "D", false, "Show a unified diff of the changes.")
 	diffContext := fs.IntP("diff-context", "C", 3, "Lines of context for the diff.")
 	verbose := fs.BoolP("verbose", "v", false, "Enable verbose output.")
@@ -87,7 +126,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		"Output modified content to stdout instead of writing to files.",
 	)
 
-	// New flags for recursive scanning and filtering
+	// File scanning and filtering flags
 	fs.String("root", "", "Root directory for scanning (default: current directory).")
 	fs.StringSlice("include", nil, "Include file patterns (glob).")
 	fs.StringSlice("exclude", nil, "Exclude file patterns (glob).")
@@ -105,6 +144,15 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		return nil, nil, err
 	}
 
+	// Get flag values
+	dryRun, _ := fs.GetBool("dry-run")
+	interactive, _ := fs.GetBool("interactive")
+	fuzz, _ := fs.GetBool("fuzz")
+	maxFuzzDistance, _ := fs.GetInt("max-fuzz-distance")
+	skipValidation, _ := fs.GetBool("skip-validation")
+	skipFormat, _ := fs.GetBool("skip-format")
+	skipImports, _ := fs.GetBool("skip-imports")
+
 	op := model.Operation(*operation)
 	cfg := &model.Config{
 		RuleID:      fmt.Sprintf("cli-operation-%s", op),
@@ -115,6 +163,15 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		JSONOutput:  *jsonOutput,
 		StdoutMode:  *stdout,
 		Workers:     *workers,
+
+		// Map new flags to config
+		DryRun:          dryRun,
+		Interactive:     interactive,
+		Fuzz:            fuzz,
+		MaxFuzzDistance: maxFuzzDistance,
+		SkipValidation:  skipValidation,
+		SkipFormat:      skipFormat,
+		SkipImports:     skipImports,
 	}
 
 	return validateFlags(fs, cfg)
@@ -154,13 +211,17 @@ func validateFlags(fs *pflag.FlagSet, cfg *model.Config) (*model.Config, []strin
 		return nil, nil, fmt.Errorf("resolving language provider: %w", err)
 	}
 
-	// Determine the execution mode
-	isDryRun := false // Default to staging mode (non-destructive)
-	isInteractive := false
+	// Determine the execution mode - use the values already set in cfg
+	isDryRun := cfg.DryRun
+	isInteractive := cfg.Interactive
 
+	// Override if explicit flags are set
 	if fs.Changed("dry-run") {
 		isDryRun = true       // Explicit --dry-run always enables dry-run
 		isInteractive = false // and disables interactive mode
+	}
+	if fs.Changed("interactive") {
+		isInteractive = true
 	}
 
 	// For 'get' operations, don't fail if no matches found

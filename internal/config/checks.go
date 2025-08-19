@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/termfx/morfx/internal/model"
+	"github.com/termfx/morfx/internal/provider"
 	"github.com/termfx/morfx/internal/registry"
 	"github.com/termfx/morfx/internal/scanner"
-	"github.com/termfx/morfx/internal/types"
 )
 
 // checkCommit checks if the commit flag is set and returns a configuration for commit operation.
@@ -63,25 +63,25 @@ func resolveTargets(fs *pflag.FlagSet) ([]string, error) {
 }
 
 // resolveProviderAndFiles resolves the language provider and files based on command-line flags.
-func resolveProviderAndFiles(fs *pflag.FlagSet, targets []string) (types.LanguageProvider, []string, error) {
+func resolveProviderAndFiles(fs *pflag.FlagSet, targets []string) (provider.LanguageProvider, []string, error) {
 	codeLang, err := fs.GetString("lang")
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting language: %w", err)
 	}
 	cfg := buildScannerConfig(fs)
 
-	var provider types.LanguageProvider
+	var prov provider.LanguageProvider
 	var files []string
 	if codeLang != "" {
 		// Try to get provider from registry
 		// (assumes registry is initialized elsewhere)
-		provider, err = registry.GetProvider(codeLang)
+		prov, err = registry.GetProvider(codeLang)
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolving language provider: %w", err)
 		}
 	}
 	// At this point provider is either resolved or nil
-	cfg.Provider = provider
+	cfg.Provider = prov
 	s := scanner.New(cfg)
 
 	files, err = s.ScanTargets(context.Background(), targets)
@@ -95,12 +95,12 @@ func resolveProviderAndFiles(fs *pflag.FlagSet, targets []string) (types.Languag
 	}
 
 	// If not resolved by now, resolve provider based on files
-	if provider == nil {
+	if prov == nil {
 		// Try to detect from file extension
 		// (assumes registry is initialized elsewhere)
 		if len(files) > 0 {
 			ext := filepath.Ext(files[0])
-			provider, err = registry.GetProviderByExtension(ext)
+			prov, err = registry.GetProviderByExtension(ext)
 		} else {
 			err = errors.New("no files provided")
 		}
@@ -109,7 +109,7 @@ func resolveProviderAndFiles(fs *pflag.FlagSet, targets []string) (types.Languag
 		}
 	}
 
-	return provider, files, nil
+	return prov, files, nil
 }
 
 // resolveReplacement resolves the replacement text from command-line flags.
