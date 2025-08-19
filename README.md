@@ -54,6 +54,78 @@ Choosing the right tool is critical. Here's where `morfx` fits in your arsenal:
 - **🧪 Golden Snapshot Testing:** Built-in support for snapshot testing to validate your transformations against "golden" versions.
 - **🔧 Extensibility:** Easily extend `morfx` with new languages, providers, and transformations.
 
+## 🏗️ Plugin Architecture
+
+morfx achieves true language agnosticism through a sophisticated plugin architecture where the core engine operates on universal abstractions, completely decoupled from specific programming languages.
+
+### Universal DSL Across Languages
+
+The same DSL syntax works seamlessly across all supported languages. Write once, run everywhere:
+
+```bash
+# Python developers using familiar terms
+morfx "def:test* & class:User" *.py
+
+# Go developers using Go vocabulary
+morfx "func:Test* & struct:User" *.go
+
+# JavaScript developers with their style
+morfx "function:test* & class:User" *.js
+
+# Universal syntax works everywhere
+morfx "function:test* & class:User" *.{py,go,js,ts}
+```
+
+### Zero-Coupling Design
+
+- **Core Engine**: Knows nothing about specific languages
+- **Universal Parser**: Accepts all common programming terms (`func`/`def`/`function`)
+- **Language Providers**: Handle language-specific AST translation
+- **Dynamic Loading**: Add new languages via plugins without recompilation
+
+### Efficient Operator Design
+
+Optimized for CLI efficiency with single-character primary operators:
+
+```bash
+# Primary operators (most efficient)
+morfx "func:Test* & !struct:mock"        # & | ! >
+
+# Familiar aliases also supported
+morfx "func:Test* && not struct:mock"    # && || not
+morfx "func:Test* and not struct:mock"   # and or not
+```
+
+### Cross-Language Query Examples
+
+The plugin architecture enables powerful cross-language operations:
+
+```bash
+# Find all test functions across languages
+morfx "function:test*" src/
+
+# Complex queries work identically everywhere
+morfx "(def:parse* | func:compile*) & !import:deprecated" .
+
+# Hierarchical queries understand language structure
+morfx "class:Controller > method:handle*" src/
+```
+
+### Extensibility
+
+Adding new language support is straightforward:
+
+- **Built-in Languages**: Go, Python, JavaScript, TypeScript
+- **Plugin Support**: Load additional languages from `.so` files
+- **Provider Interface**: Implement one interface, get full integration
+- **Community Plugins**: Extend to any language with a Tree-sitter grammar
+
+For detailed information about the architecture and creating custom providers, see:
+
+- **[Plugin Architecture Guide](docs/architecture/PLUGIN_ARCHITECTURE.md)** - Deep dive into the zero-coupling design
+- **[Creating Providers Guide](docs/guides/CREATING_PROVIDERS.md)** - Step-by-step provider development
+- **[DSL Reference](docs/api/DSL_REFERENCE.md)** - Complete syntax and examples
+
 ## 🚀 Quick Start
 
 Let's say you want to rename every instance of a variable `oldVar` to `newVar` inside a specific function, `doSomething`.
