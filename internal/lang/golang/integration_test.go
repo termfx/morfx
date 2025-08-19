@@ -112,13 +112,13 @@ const MaxConnections = 100
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resultSet, err := eval.EvaluateQuery(tt.query, code)
+			resultSet, err := eval.Evaluate(tt.query, code)
 			if err != nil {
 				t.Fatalf("EvaluateQuery failed: %v", err)
 			}
 
-			results := resultSet.All()
-
+			results := resultSet.Results
+	
 			if tt.wantResults > 0 {
 				if tt.wantResults > 0 && len(results) != tt.wantResults {
 					t.Errorf("Got %d results, want exactly %d", len(results), tt.wantResults)
@@ -182,7 +182,7 @@ func TestProviderWithUniversalParser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Parse DSL to Query
-			query, err := uniParser.ParseQueryWithProvider(tt.dsl, provider)
+			query, err := uniParser.ParseQuery(tt.dsl)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseQuery() error = %v, wantErr %v", err, tt.wantErr)
 				return

@@ -37,8 +37,8 @@ func TestDSLQuerySnapshots(t *testing.T) {
 		}
 
 		t.Run(line, func(t *testing.T) {
-			// Parse the DSL query using Go-specific provider
-			query, err := uniParser.ParseQueryWithProvider(line, provider)
+			// Parse the DSL query
+			query, err := uniParser.ParseQuery(line)
 			if err != nil {
 				t.Fatalf("Failed to parse DSL %q: %v", line, err)
 			}

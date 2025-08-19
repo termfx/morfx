@@ -166,21 +166,21 @@ const (
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Parse DSL
-			query, err := uniParser.ParseQueryWithProvider(tc.dsl, provider)
+			query, err := uniParser.ParseQuery(tc.dsl)
 			if err != nil {
 				t.Fatalf("Failed to parse DSL %q: %v", tc.dsl, err)
 			}
 
 			// Evaluate query
-			resultSet, err := eval.EvaluateQuery(query, code)
+			resultSet, err := eval.Evaluate(query, code)
 			if err != nil {
 				t.Fatalf("Failed to evaluate query: %v", err)
 			}
 
 			// Check result count
-			if len(resultSet.All()) < tc.wantMinCount {
-				t.Errorf("Got %d results, want at least %d", len(resultSet.All()), tc.wantMinCount)
-				for i, r := range resultSet.All() {
+			if len(resultSet.Results) < tc.wantMinCount {
+				t.Errorf("Got %d results, want at least %d", len(resultSet.Results), tc.wantMinCount)
+				for i, r := range resultSet.Results {
 					t.Logf("  Result %d: %q (kind: %s, line: %d)",
 						i, r.Name, r.Kind, r.Location.StartLine)
 				}
@@ -189,7 +189,7 @@ const (
 			// Check specific names if provided
 			if len(tc.checkNames) > 0 {
 				foundNames := make(map[string]bool)
-				for _, r := range resultSet.All() {
+				for _, r := range resultSet.Results {
 					foundNames[r.Name] = true
 				}
 
@@ -249,7 +249,7 @@ var y = 2
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, err := uniParser.ParseQueryWithProvider(tt.dsl, provider)
+			query, err := uniParser.ParseQuery(tt.dsl)
 			if err != nil {
 				t.Fatalf("Failed to parse DSL: %v", err)
 			}
@@ -260,9 +260,9 @@ var y = 2
 				var totalResults int
 				for _, child := range query.Children {
 					childCopy := child // Make a copy
-					rs, err := eval.EvaluateQuery(&childCopy, code)
+					rs, err := eval.Evaluate(&childCopy, code)
 					if err == nil {
-						totalResults += len(rs.All())
+						totalResults += len(rs.Results)
 					}
 				}
 
@@ -270,13 +270,13 @@ var y = 2
 					t.Errorf("Got %d total results, want at least %d", totalResults, tt.wantMinCount)
 				}
 			} else {
-				rs, err := eval.EvaluateQuery(query, code)
+				rs, err := eval.Evaluate(query, code)
 				if err != nil && !strings.Contains(tt.dsl, "!") {
 					t.Fatalf("Failed to evaluate: %v", err)
 				}
 
-				if rs != nil && len(rs.All()) < tt.wantMinCount {
-					t.Errorf("Got %d results, want at least %d", len(rs.All()), tt.wantMinCount)
+				if rs != nil && len(rs.Results) < tt.wantMinCount {
+					t.Errorf("Got %d results, want at least %d", len(rs.Results), tt.wantMinCount)
 				}
 			}
 		})
@@ -297,15 +297,15 @@ func testFunc() {
 }
 `, 100)) // Repeat to create larger file
 
-	query, _ := uniParser.ParseQueryWithProvider("function:test*", provider)
+	query, _ := uniParser.ParseQuery("function:test*")
 
 	// This is a basic performance check, not a benchmark
-	resultSet, err := eval.EvaluateQuery(query, code)
+	resultSet, err := eval.Evaluate(query, code)
 	if err != nil {
 		t.Fatalf("Failed to evaluate: %v", err)
 	}
 
-	if len(resultSet.All()) == 0 {
+	if len(resultSet.Results) == 0 {
 		t.Error("Expected to find functions in repeated code")
 	}
 
