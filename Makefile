@@ -60,32 +60,38 @@ help:
 
 # -----------------------------
 # Tests
+# Note: All test targets source .env file to load encryption keys
 # -----------------------------
 test:
 	@$(MAKE) -s test-fts5
 	@$(MAKE) -s test-no-fts5
 
 test-fts5:
-	@MORFX_ENCRYPTION_MODE=off \
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+	  MORFX_ENCRYPTION_MODE=off \
 	  go test -count=1 -tags sqlite_fts5 $(PKGS) $(GO_TEST_FLAGS)
 
 test-no-fts5:
 	@echo "Running NO-FTS5 tests: $(NOFTS5_TESTS)"
-	@MORFX_FORCE_NO_FTS5=1 MORFX_ENCRYPTION_MODE=blob MORFX_MASTER_KEY=0123456789abcdef0123456789abcdef \
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+	  MORFX_FORCE_NO_FTS5=1 MORFX_ENCRYPTION_MODE=blob \
 		go test -count=1 $(PKG_DB) -run '$(NOFTS5_REGEX)' $(GO_TEST_FLAGS)
 
 test-verbose:
-	go test -count=1 -tags sqlite_fts5 $(PKGS) $(GO_TEST_FLAGS) $(GO_VERBOSE)
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+	  go test -count=1 -tags sqlite_fts5 $(PKGS) $(GO_TEST_FLAGS) $(GO_VERBOSE)
 
 test-race:
-	go test -count=1 -tags sqlite_fts5 $(PKGS) $(GO_TEST_FLAGS) $(GO_RACE_FLAGS)
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+	  go test -count=1 -tags sqlite_fts5 $(PKGS) $(GO_TEST_FLAGS) $(GO_RACE_FLAGS)
 
 # Usage:
 #   make test-one PKG=./internal/lang/golang -run 'TestName'
 #   make test-one PKG=./internal/lang/golang
 test-one:
 	@if [ -z "$(PKG)" ]; then echo "Usage: make test-one PKG=./path [-run 'Regex']"; exit 2; fi
-	go test -count=1 $(PKG) $(GO_TEST_FLAGS) $(RUN)
+	@set -a && [ -f .env ] && . ./.env && set +a; \
+	  go test -count=1 $(PKG) $(GO_TEST_FLAGS) $(RUN)
 
 # -----------------------------
 # Coverage Analysis
