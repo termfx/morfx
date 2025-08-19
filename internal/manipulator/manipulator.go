@@ -158,8 +158,15 @@ func (m *Manipulator) start() (*model.Result, error) {
 
 	// Apply all rewrites to the original content
 	modified, changes := applyRewrites(m.Original, rewrites)
-	res.ModifiedContent = modified
-	res.ModifiedSHA1 = util.SHA1Hex([]byte(modified))
+
+	// Post-processing pipeline: OrganizeImports → Format → QuickCheck
+	processed, err := m.postProcess(modified)
+	if err != nil {
+		return nil, fmt.Errorf("post-processing failed: %w", err)
+	}
+
+	res.ModifiedContent = processed
+	res.ModifiedSHA1 = util.SHA1Hex([]byte(processed))
 	res.ChangedBytes = util.SumChangedBytes(changes)
 	return res, nil
 }
@@ -259,6 +266,39 @@ func preserveIndentation(content string, position int, text string) string {
 		}
 	}
 	return strings.Join(lines, lineEnding)
+}
+
+// postProcess applies the post-processing pipeline: OrganizeImports → Format → QuickCheck
+func (m *Manipulator) postProcess(content string) (string, error) {
+	if m.Config.Provider == nil {
+		return content, nil
+	}
+
+	source := []byte(content)
+
+	// Step 1: Organize imports
+	organized, err := m.Config.Provider.OrganizeImports(source)
+	if err != nil {
+		return content, fmt.Errorf("organize imports failed: %w", err)
+	}
+
+	// Step 2: Format code
+	formatted, err := m.Config.Provider.Format(organized)
+	if err != nil {
+		return string(organized), fmt.Errorf("format failed: %w", err)
+	}
+
+	// Step 3: Quick check for syntax errors
+	diagnostics := m.Config.Provider.QuickCheck(formatted)
+
+	// If there are critical diagnostics, return an error
+	for _, diag := range diagnostics {
+		if diag.Severity == "error" {
+			return string(formatted), fmt.Errorf("syntax error after post-processing: %s at line %d", diag.Message, diag.Line)
+		}
+	}
+
+	return string(formatted), nil
 }
 
 // getCached returns a (possibly cached) matcher for the rule.
