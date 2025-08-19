@@ -1,48 +1,22 @@
 package types
 
-import sitter "github.com/smacker/go-tree-sitter"
+import (
+	"github.com/termfx/morfx/internal/core"
+	"github.com/termfx/morfx/internal/provider"
+)
 
-// LanguageProvider defines the contract for language-specific operations.
-// This interface is in the types package to avoid circular dependencies.
-type LanguageProvider interface {
-	// Basic metadata
-	Lang() string         // "go", "python", "php"
-	Aliases() []string    // Alternative names
-	Extensions() []string // File extensions
-	GetSitterLanguage() *sitter.Language
+// Type aliases for core contracts to maintain compatibility
+type (
+	NodeMapping          = core.NodeMapping
+	ProviderCapabilities = core.ProviderCapabilities
+	QueryOptions         = core.QueryOptions
+	QuickCheckDiagnostic = core.QuickCheckDiagnostic
+)
 
-	// DSL Translation - the heart of the provider
-	TranslateKind(kind NodeKind) []NodeMapping
-	TranslateQuery(q *Query) (string, error)
-
-	// Language-specific DSL support
-	NormalizeDSLKind(dslKind string) NodeKind // Translate language DSL to universal
-	GetSupportedDSLKinds() []string           // Return language-specific DSL vocabulary
-
-	// Parsing helpers
-	ParseAttributes(node *sitter.Node, source []byte) map[string]string
-	GetNodeKind(node *sitter.Node) NodeKind
-	GetNodeName(node *sitter.Node, source []byte) string
-
-	// Language-specific optimizations (optional)
-	OptimizeQuery(q *Query) *Query
-	EstimateQueryCost(q *Query) int
-
-	// Scope detection
-	GetNodeScope(node *sitter.Node) ScopeType
-	FindEnclosingScope(node *sitter.Node, scope ScopeType) *sitter.Node
-
-	// Code structure helpers
-	IsBlockLevelNode(nodeType string) bool
-	GetDefaultIgnorePatterns() (files []string, symbols []string)
-}
-
-// NodeMapping maps universal kinds to language-specific AST nodes
-type NodeMapping struct {
-	Kind        NodeKind
-	NodeTypes   []string          // AST node types in this language
-	NameCapture string            // How to capture the name
-	TypeCapture string            // How to capture the type
-	Template    string            // Tree-sitter query template
-	Attributes  map[string]string // Additional captures
-}
+// LanguageProvider is now an alias to the new provider.LanguageProvider interface.
+// This maintains backward compatibility while the new minimal interface in
+// internal/provider/contract.go becomes the primary definition.
+//
+// DEPRECATED: Use provider.LanguageProvider directly. This alias exists for
+// backward compatibility and will be removed in a future version.
+type LanguageProvider = provider.LanguageProvider

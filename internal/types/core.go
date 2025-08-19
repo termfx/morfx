@@ -4,69 +4,74 @@ import (
 	"fmt"
 
 	sitter "github.com/smacker/go-tree-sitter"
+
+	"github.com/termfx/morfx/internal/core"
 )
 
-// Universal DSL concepts that ALL languages must map
-type NodeKind string
+// Type aliases for core contracts to maintain compatibility
+// These allow existing code to continue working while using the new pure contracts
+type (
+	NodeKind  = core.NodeKind
+	Query     = core.Query
+	ScopeType = core.ScopeType
+	Location  = core.Location
+)
+
+// Constants are re-exported for backward compatibility
+const (
+	KindFunction   = core.KindFunction
+	KindVariable   = core.KindVariable
+	KindClass      = core.KindClass
+	KindMethod     = core.KindMethod
+	KindImport     = core.KindImport
+	KindConstant   = core.KindConstant
+	KindField      = core.KindField
+	KindCall       = core.KindCall
+	KindAssignment = core.KindAssignment
+	KindCondition  = core.KindCondition
+	KindLoop       = core.KindLoop
+	KindBlock      = core.KindBlock
+	KindComment    = core.KindComment
+	KindDecorator  = core.KindDecorator
+	KindType       = core.KindType
+	KindInterface  = core.KindInterface
+	KindEnum       = core.KindEnum
+	KindParameter  = core.KindParameter
+	KindReturn     = core.KindReturn
+	KindThrow      = core.KindThrow
+	KindTryCatch   = core.KindTryCatch
+)
 
 const (
-	KindFunction   NodeKind = "function"
-	KindVariable   NodeKind = "variable"
-	KindClass      NodeKind = "class"
-	KindMethod     NodeKind = "method"
-	KindImport     NodeKind = "import"
-	KindConstant   NodeKind = "constant"
-	KindField      NodeKind = "field"
-	KindCall       NodeKind = "call"
-	KindAssignment NodeKind = "assignment"
-	KindCondition  NodeKind = "condition"
-	KindLoop       NodeKind = "loop"
-	KindBlock      NodeKind = "block"
-	KindComment    NodeKind = "comment"
-	KindDecorator  NodeKind = "decorator"
-	KindType       NodeKind = "type"
+	ScopeFile      = core.ScopeFile
+	ScopeClass     = core.ScopeClass
+	ScopeFunction  = core.ScopeFunction
+	ScopeBlock     = core.ScopeBlock
+	ScopeNamespace = core.ScopeNamespace
+	ScopePackage   = core.ScopePackage
 )
 
-// Universal query structure - no language specifics
-type Query struct {
-	Kind       NodeKind          // Universal node kind
-	Pattern    string            // Name/identifier pattern
-	Attributes map[string]string // type, visibility, etc.
-	Operator   string            // &&, ||, >, !
-	Children   []Query           // Nested queries
-	Scope      ScopeType         // Where to apply operations
-	Raw        string            // Original DSL string
-}
-
-// Scope types universal across languages
-type ScopeType string
-
-const (
-	ScopeFile      ScopeType = "file"
-	ScopeClass     ScopeType = "class"
-	ScopeFunction  ScopeType = "function"
-	ScopeBlock     ScopeType = "block"
-	ScopeNamespace ScopeType = "namespace"
-)
-
-// Result is language-agnostic
+// Result extends the core Result with tree-sitter specific functionality
+// This bridges the gap between pure contracts and tree-sitter implementation
 type Result struct {
-	Node     *sitter.Node
-	Kind     NodeKind
-	Name     string
-	Location Location
-	Metadata map[string]any
+	*core.Result
+	Node *sitter.Node // Tree-sitter node for language-specific operations
 }
 
-type Location struct {
-	File      string
-	StartLine int
-	EndLine   int
-	StartCol  int
-	EndCol    int
+// NewResult creates a new Result from core.Result and sitter.Node
+func NewResult(coreResult *core.Result, node *sitter.Node) *Result {
+	return &Result{
+		Result: coreResult,
+		Node:   node,
+	}
 }
 
-// ResultSet manages a collection of results
+// ToCoreResult converts this Result to a pure core.Result
+func (r *Result) ToCoreResult() *core.Result {
+	return r.Result
+}
+
+// ResultSet manages a collection of results with tree-sitter nodes
 type ResultSet struct {
 	results []*Result
 	index   map[string]*Result // For fast lookups
@@ -120,4 +125,16 @@ func (rs *ResultSet) Merge(other *ResultSet) *ResultSet {
 		merged.Add(result)
 	}
 	return merged
+}
+
+// ToCoreResultSet converts this ResultSet to a core.ResultSet
+func (rs *ResultSet) ToCoreResultSet() *core.ResultSet {
+	coreResults := make([]*core.Result, len(rs.results))
+	for i, result := range rs.results {
+		coreResults[i] = result.ToCoreResult()
+	}
+	return &core.ResultSet{
+		Results:      coreResults,
+		TotalMatches: len(coreResults),
+	}
 }
