@@ -1,0 +1,264 @@
+# Pre-commit hooks configuration for morfx
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+default_stages: [commit]
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
+minimum_pre_commit_version: 3.0.0
+
+repos:
+  # Built-in hooks for basic file validation
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        description: Remove trailing whitespace from files
+
+      - id: end-of-file-fixer
+        name: Fix End of Files
+        description: Ensure files end with a newline
+
+      - id: check-yaml
+        name: Check YAML
+        description: Validate YAML file syntax
+
+      - id: check-json
+        name: Check JSON
+        description: Validate JSON file syntax
+
+      - id: check-toml
+        name: Check TOML
+        description: Validate TOML file syntax
+
+      - id: check-xml
+        name: Check XML
+        description: Validate XML file syntax
+
+      - id: check-added-large-files
+        name: Check for Large Files
+        description: Prevent giant files from being committed
+        args: ["--maxkb=1024"]
+
+      - id: check-case-conflict
+        name: Check Case Conflict
+        description: Check for files with case conflicts
+
+      - id: check-merge-conflict
+        name: Check Merge Conflicts
+        description: Check for merge conflict markers
+
+      - id: check-executables-have-shebangs
+        name: Check Executables Have Shebangs
+        description: Ensure executables have proper shebangs
+
+      - id: mixed-line-ending
+        name: Mixed Line Ending
+        description: Replace or check mixed line endings
+        args: ["--fix=lf"]
+
+      - id: check-docstring-first
+        name: Check Docstring First
+        description: Checks a common error of defining a docstring after code
+
+      - id: detect-private-key
+        name: Detect Private Key
+        description: Detect private keys in committed files
+
+  # Go-specific formatting and imports
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: Go Format
+        description: Run gofmt to format Go code
+
+      - id: go-imports
+        name: Go Imports
+        description: Run goimports to organize imports
+        args: [-local, github.com/termfx/morfx]
+
+      - id: go-mod-tidy
+        name: Go Mod Tidy
+        description: Run go mod tidy to clean up module dependencies
+
+      - id: go-vet-mod
+        name: Go Vet
+        description: Run go vet with module support
+
+      - id: go-unit-tests-mod
+        name: Go Unit Tests
+        description: Run go test for all packages
+        stages: [pre-push]
+        args: [-v, -race, -cover]
+
+      - id: go-build-mod
+        name: Go Build
+        description: Run go build to check compilation
+
+      - id: go-mod-vendor
+        name: Go Mod Vendor
+        description: Run go mod vendor if vendor/ exists
+        files: go\.mod$
+
+      - id: golangci-lint-mod
+        name: golangci-lint
+        description: Run golangci-lint
+        args: [--fix=false, --timeout=5m]
+
+  # Additional Go tools with custom configurations
+  - repo: local
+    hooks:
+      - id: gofumpt
+        name: gofumpt (Enhanced Go Format)
+        entry: bash -c 'command -v gofumpt >/dev/null 2>&1 || go install mvdan.cc/gofumpt@latest; gofumpt -w .'
+        language: system
+        files: \.go$
+        description: Run gofumpt for stricter Go formatting
+
+      - id: gci
+        name: gci (Go Import Organizer)
+        entry: bash -c 'command -v gci >/dev/null 2>&1 || go install github.com/daixiang0/gci@latest; gci write -s standard -s default -s "prefix($(go list -m))" .'
+        language: system
+        files: \.go$
+        description: Organize Go imports with gci
+
+      - id: govulncheck
+        name: govulncheck (Vulnerability Scanner)
+        entry: bash -c 'command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest; govulncheck ./...'
+        language: system
+        files: go\.(mod|sum)$
+        stages: [pre-push]
+        description: Check for known vulnerabilities in Go dependencies
+
+      - id: staticcheck
+        name: staticcheck (Advanced Static Analysis)
+        entry: bash -c 'command -v staticcheck >/dev/null 2>&1 || go install honnef.co/go/tools/cmd/staticcheck@latest; staticcheck ./...'
+        language: system
+        files: \.go$
+        description: Run staticcheck for advanced static analysis
+
+      - id: go-test-coverage
+        name: Go Test Coverage Check
+        entry: bash
+        language: system
+        stages: [pre-push]
+        files: \.go$
+        args:
+          - -c
+          - |
+            set -e
+            echo "Running test coverage check..."
+
+            # Run tests with coverage
+            go test -count=1 -tags sqlite_fts5 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+
+            # Check coverage threshold
+            COVERAGE=$(go tool cover -func=coverage.out | tail -n1 | awk '{print $3}' | sed 's/%//')
+            THRESHOLD=80
+
+            echo "Current coverage: ${COVERAGE}%"
+            echo "Required coverage: ${THRESHOLD}%"
+
+            # Compare coverage (handle decimal comparison)
+            if (( $(echo "${COVERAGE} < ${THRESHOLD}" | bc -l) )); then
+                echo "❌ Coverage ${COVERAGE}% is below required ${THRESHOLD}%"
+                exit 1
+            else
+                echo "✅ Coverage ${COVERAGE}% meets required ${THRESHOLD}%"
+            fi
+        description: Ensure test coverage meets minimum threshold of 80%
+
+      - id: go-test-race
+        name: Go Race Condition Check
+        entry: bash -c 'go test -race -short ./...'
+        language: system
+        stages: [pre-push]
+        files: \.go$
+        description: Run tests with race detection
+
+      - id: go-generate-check
+        name: Go Generate Check
+        entry: bash
+        language: system
+        files: \.go$
+        args:
+          - -c
+          - |
+            set -e
+            # Check if go generate produces any changes
+            go generate ./...
+            if ! git diff --quiet; then
+                echo "❌ go generate produced changes. Please run 'go generate ./...' and commit the results."
+                git diff
+                exit 1
+            fi
+            echo "✅ go generate check passed"
+        description: Ensure go generate does not produce uncommitted changes
+
+      - id: morfx-golden-tests
+        name: morfx Golden Tests
+        entry: bash -c 'make gate'
+        language: system
+        stages: [pre-push]
+        files: '(\.go$|testdata/.*\.snap$)'
+        description: Run morfx golden test suite
+
+      - id: check-go-mod-replace
+        name: Check go.mod replace directives
+        entry: bash
+        language: system
+        files: go\.mod$
+        args:
+          - -c
+          - |
+            if grep -q "^replace " go.mod; then
+                echo "❌ go.mod contains replace directives. These should not be committed to main branch:"
+                grep "^replace " go.mod
+                exit 1
+            fi
+            echo "✅ No replace directives in go.mod"
+        description: Prevent committing go.mod with replace directives
+
+      - id: check-todos
+        name: Check TODO/FIXME comments
+        entry: bash
+        language: system
+        files: \.go$
+        stages: [pre-push]
+        args:
+          - -c
+          - |
+            TODO_COUNT=$(grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.go" . | wc -l || echo "0")
+            if [ "$TODO_COUNT" -gt 20 ]; then
+                echo "❌ Too many TODO/FIXME comments ($TODO_COUNT). Please address some before committing."
+                echo "Current TODO/FIXME comments:"
+                grep -rn "TODO\|FIXME\|XXX\|HACK" --include="*.go" . | head -10
+                exit 1
+            fi
+            echo "✅ TODO/FIXME count ($TODO_COUNT) is acceptable"
+        description: Limit the number of TODO/FIXME comments
+
+      - id: check-license-headers
+        name: Check License Headers
+        entry: bash
+        language: system
+        files: \.go$
+        args:
+          - -c
+          - |
+            MISSING_LICENSE=()
+            for file in $(find . -name "*.go" -not -path "./vendor/*" -not -path "./testdata/*"); do
+                if ! head -n 5 "$file" | grep -q "Copyright\|License\|SPDX"; then
+                    MISSING_LICENSE+=("$file")
+                fi
+            done
+
+            if [ ${#MISSING_LICENSE[@]} -gt 0 ]; then
+                echo "❌ Files missing license headers:"
+                printf '%s\n' "${MISSING_LICENSE[@]}"
+                echo "Please add appropriate license headers to these files."
+                exit 1
+            fi
+            echo "✅ All Go files have license headers"
+        description: Ensure Go files have appropriate license headers
