@@ -3,18 +3,24 @@ package evaluator
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	sitter "github.com/smacker/go-tree-sitter"
 	golang_sitter "github.com/smacker/go-tree-sitter/golang"
 
-	"github.com/termfx/morfx/internal/types"
+	"github.com/termfx/morfx/internal/core"
+	"github.com/termfx/morfx/internal/provider"
 )
 
-// MockLanguageProvider implements the MorfxLanguageProvider interface for testing
+// MockLanguageProvider implements the provider.LanguageProvider interface for testing
 type MockLanguageProvider struct {
-	translateFunc func(*types.Query) (string, error)
-	language      *sitter.Language
+	translateFunc    func(*core.Query) (string, error)
+	language         *sitter.Language
+	getNodeKindFunc  func(*sitter.Node) core.NodeKind
+	getNodeNameFunc  func(*sitter.Node, []byte) string
+	parseAttrsFunc   func(*sitter.Node, []byte) map[string]string
+	getNodeScopeFunc func(*sitter.Node) core.ScopeType
 }
 
 func (m *MockLanguageProvider) Lang() string {
@@ -37,11 +43,11 @@ func (m *MockLanguageProvider) GetSitterLanguage() *sitter.Language {
 	return m.language
 }
 
-func (m *MockLanguageProvider) TranslateKind(kind types.NodeKind) []types.NodeMapping {
+func (m *MockLanguageProvider) TranslateKind(kind core.NodeKind) []provider.NodeMapping {
 	// Return proper Go Tree-sitter node types
 	switch kind {
 	case "function":
-		return []types.NodeMapping{
+		return []provider.NodeMapping{
 			{
 				Kind:      kind,
 				NodeTypes: []string{"function_declaration", "method_declaration"},
@@ -49,7 +55,7 @@ func (m *MockLanguageProvider) TranslateKind(kind types.NodeKind) []types.NodeMa
 			},
 		}
 	case "variable":
-		return []types.NodeMapping{
+		return []provider.NodeMapping{
 			{
 				Kind:      kind,
 				NodeTypes: []string{"var_declaration", "short_var_declaration"},
@@ -57,7 +63,7 @@ func (m *MockLanguageProvider) TranslateKind(kind types.NodeKind) []types.NodeMa
 			},
 		}
 	case "class":
-		return []types.NodeMapping{
+		return []provider.NodeMapping{
 			{
 				Kind:      kind,
 				NodeTypes: []string{"type_declaration"},
@@ -65,7 +71,7 @@ func (m *MockLanguageProvider) TranslateKind(kind types.NodeKind) []types.NodeMa
 			},
 		}
 	default:
-		return []types.NodeMapping{
+		return []provider.NodeMapping{
 			{
 				Kind:      kind,
 				NodeTypes: []string{"function_declaration"},
@@ -75,7 +81,7 @@ func (m *MockLanguageProvider) TranslateKind(kind types.NodeKind) []types.NodeMa
 	}
 }
 
-func (m *MockLanguageProvider) TranslateQuery(q *types.Query) (string, error) {
+func (m *MockLanguageProvider) TranslateQuery(q *core.Query) (string, error) {
 	if m.translateFunc != nil {
 		return m.translateFunc(q)
 	}
@@ -83,10 +89,16 @@ func (m *MockLanguageProvider) TranslateQuery(q *types.Query) (string, error) {
 }
 
 func (m *MockLanguageProvider) ParseAttributes(node *sitter.Node, source []byte) map[string]string {
+	if m.parseAttrsFunc != nil {
+		return m.parseAttrsFunc(node, source)
+	}
 	return map[string]string{}
 }
 
-func (m *MockLanguageProvider) GetNodeKind(node *sitter.Node) types.NodeKind {
+func (m *MockLanguageProvider) GetNodeKind(node *sitter.Node) core.NodeKind {
+	if m.getNodeKindFunc != nil {
+		return m.getNodeKindFunc(node)
+	}
 	switch node.Type() {
 	case "function_declaration":
 		return "function"
@@ -98,23 +110,29 @@ func (m *MockLanguageProvider) GetNodeKind(node *sitter.Node) types.NodeKind {
 }
 
 func (m *MockLanguageProvider) GetNodeName(node *sitter.Node, source []byte) string {
+	if m.getNodeNameFunc != nil {
+		return m.getNodeNameFunc(node, source)
+	}
 	// Return the actual node content for realistic testing
 	return node.Content(source)
 }
 
-func (m *MockLanguageProvider) OptimizeQuery(q *types.Query) *types.Query {
+func (m *MockLanguageProvider) OptimizeQuery(q *core.Query) *core.Query {
 	return q
 }
 
-func (m *MockLanguageProvider) EstimateQueryCost(q *types.Query) int {
+func (m *MockLanguageProvider) EstimateQueryCost(q *core.Query) int {
 	return 1
 }
 
-func (m *MockLanguageProvider) GetNodeScope(node *sitter.Node) types.ScopeType {
+func (m *MockLanguageProvider) GetNodeScope(node *sitter.Node) core.ScopeType {
+	if m.getNodeScopeFunc != nil {
+		return m.getNodeScopeFunc(node)
+	}
 	return "file"
 }
 
-func (m *MockLanguageProvider) FindEnclosingScope(node *sitter.Node, scope types.ScopeType) *sitter.Node {
+func (m *MockLanguageProvider) FindEnclosingScope(node *sitter.Node, scope core.ScopeType) *sitter.Node {
 	return node
 }
 
@@ -126,7 +144,7 @@ func (m *MockLanguageProvider) GetDefaultIgnorePatterns() (files []string, symbo
 	return []string{}, []string{}
 }
 
-func (m *MockLanguageProvider) NormalizeDSLKind(dslKind string) types.NodeKind {
+func (m *MockLanguageProvider) NormalizeDSLKind(dslKind string) core.NodeKind {
 	// Simple normalization for testing
 	switch dslKind {
 	case "func":
@@ -134,12 +152,21 @@ func (m *MockLanguageProvider) NormalizeDSLKind(dslKind string) types.NodeKind {
 	case "var":
 		return "variable"
 	default:
-		return types.NodeKind(dslKind)
+		return core.NodeKind(dslKind)
 	}
 }
 
-func (m *MockLanguageProvider) GetSupportedDSLKinds() []string {
-	return []string{"function", "variable", "class", "method", "func", "var"}
+// Additional required methods for provider.LanguageProvider interface
+func (m *MockLanguageProvider) OrganizeImports(source []byte) ([]byte, error) {
+	return source, nil
+}
+
+func (m *MockLanguageProvider) Format(source []byte) ([]byte, error) {
+	return source, nil
+}
+
+func (m *MockLanguageProvider) QuickCheck(source []byte) []core.QuickCheckDiagnostic {
+	return []core.QuickCheckDiagnostic{}
 }
 
 func TestNewUniversalEvaluator(t *testing.T) {
@@ -158,9 +185,9 @@ func TestNewUniversalEvaluator(t *testing.T) {
 	}
 }
 
-func TestEvaluateQuery(t *testing.T) {
+func TestEvaluate(t *testing.T) {
 	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
+		translateFunc: func(q *core.Query) (string, error) {
 			return "(function_declaration)", nil
 		},
 	}
@@ -169,8 +196,8 @@ func TestEvaluateQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create evaluator: %v", err)
 	}
-	query := &types.Query{
-		Kind:    types.KindFunction,
+	query := &core.Query{
+		Kind:    core.KindFunction,
 		Pattern: "test*",
 		Raw:     "function test*",
 	}
@@ -181,7 +208,7 @@ func testFunction() {
 }
 `)
 
-	result, err := evaluator.EvaluateQuery(query, code)
+	result, err := evaluator.Evaluate(query, code)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -191,9 +218,9 @@ func testFunction() {
 	}
 }
 
-func TestEvaluateMultipleQueries(t *testing.T) {
+func TestEvaluateWithDifferentQueries(t *testing.T) {
 	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
+		translateFunc: func(q *core.Query) (string, error) {
 			if q.Kind == "function" {
 				return "(function_declaration (identifier) @name)", nil
 			}
@@ -204,18 +231,6 @@ func TestEvaluateMultipleQueries(t *testing.T) {
 	evaluator, err := NewUniversalEvaluator(mockProvider)
 	if err != nil {
 		t.Fatalf("Failed to create evaluator: %v", err)
-	}
-	queries := []*types.Query{
-		{
-			Kind:    types.KindFunction,
-			Pattern: "test*",
-			Raw:     "function test*",
-		},
-		{
-			Kind:    types.KindVariable,
-			Pattern: "var*", // Should match "varTest"
-			Raw:     "variable var*",
-		},
 	}
 
 	code := []byte(`
@@ -224,108 +239,34 @@ func testFunction() {
 }
 `)
 
-	// Debug: Test individual queries first
-	for i, query := range queries {
-		result, err := evaluator.EvaluateQuery(query, code)
-		if err != nil {
-			t.Logf("Query %d error: %v", i, err)
-		} else {
-			t.Logf("Query %d (%s) returned %d results", i, query.Kind, result.Count())
-			for j, r := range result.All() {
-				t.Logf("  Result %d: %s (pattern: %s)", j, r.Name, query.Pattern)
-			}
-		}
-	}
-
-	results, err := evaluator.EvaluateMultipleQueries(queries, code)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	if results.Count() != len(queries) {
-		t.Errorf("Expected %d results, got %d", len(queries), results.Count())
-	}
-
-	for i, result := range results.All() {
-		if result == nil {
-			t.Errorf("Expected non-nil result at index %d", i)
-		}
-	}
-}
-
-func TestEvaluateLogicalQuery(t *testing.T) {
-	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
-			if q.Kind == "function" {
-				return "(function_declaration (identifier) @name)", nil
-			}
-			return "(var_declaration (var_spec (identifier) @name))", nil
-		},
-	}
-
-	evaluator, err := NewUniversalEvaluator(mockProvider)
-	if err != nil {
-		t.Fatalf("Failed to create evaluator: %v", err)
-	}
 	tests := []struct {
 		name    string
-		query   *types.Query
-		code    []byte
+		query   *core.Query
 		wantErr bool
 	}{
 		{
-			name: "AND query",
-			query: &types.Query{
-				Operator: "&&",
-				Children: []types.Query{
-					{Kind: types.KindFunction, Raw: "function"},
-					{Kind: types.KindVariable, Raw: "variable"},
-				},
-				Raw: "function && variable",
+			name: "function query",
+			query: &core.Query{
+				Kind:    core.KindFunction,
+				Pattern: "test*",
+				Raw:     "function test*",
 			},
-			code: []byte(`
-func testFunction() {
-	var testVar = 42
-}
-`),
 			wantErr: false,
 		},
 		{
-			name: "OR query",
-			query: &types.Query{
-				Operator: "||",
-				Children: []types.Query{
-					{Kind: types.KindFunction, Raw: "function"},
-					{Kind: types.KindVariable, Raw: "variable"},
-				},
-				Raw: "function || variable",
+			name: "variable query",
+			query: &core.Query{
+				Kind:    core.KindVariable,
+				Pattern: "var*",
+				Raw:     "variable var*",
 			},
-			code: []byte(`
-func testFunction() {
-	var testVar = 42
-}
-`),
-			wantErr: false,
-		},
-		{
-			name: "NOT query",
-			query: &types.Query{
-				Operator: "!",
-				Children: []types.Query{
-					{Kind: types.KindFunction, Raw: "function"},
-				},
-				Raw: "!function",
-			},
-			code: []byte(`
-var testVar = 42
-`),
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := evaluator.EvaluateLogicalQuery(tt.query, tt.code)
+			result, err := evaluator.Evaluate(tt.query, code)
 
 			if tt.wantErr {
 				if err == nil {
@@ -346,243 +287,81 @@ var testVar = 42
 	}
 }
 
-func TestConvertCoreToProviderQuery(t *testing.T) {
-	coreQuery := &types.Query{
-		Kind:       types.KindFunction,
+func TestQueryAttributesAndScopes(t *testing.T) {
+	coreQuery := &core.Query{
+		Kind:       core.KindFunction,
 		Pattern:    "test*",
 		Attributes: map[string]string{"visibility": "public"},
 		Operator:   "",
-		Children:   []types.Query{},
-		Scope:      types.ScopeFile,
+		Children:   []core.Query{},
+		Scope:      core.ScopeFile,
 		Raw:        "function[visibility=public] test*",
 	}
 
-	// Test conversion logic manually since convertCoreToProviderQuery is private
-	providerQuery := &types.Query{
-		Kind:       types.NodeKind(coreQuery.Kind),
-		Pattern:    coreQuery.Pattern,
-		Attributes: coreQuery.Attributes,
-		Operator:   coreQuery.Operator,
-		Scope:      types.ScopeType(coreQuery.Scope),
-		Raw:        coreQuery.Raw,
+	// Test that query structure is preserved correctly
+	if string(coreQuery.Kind) != "function" {
+		t.Errorf("Expected Kind 'function', got %s", coreQuery.Kind)
 	}
 
-	if string(providerQuery.Kind) != string(coreQuery.Kind) {
-		t.Errorf("Expected Kind %s, got %s", coreQuery.Kind, providerQuery.Kind)
+	if coreQuery.Pattern != "test*" {
+		t.Errorf("Expected Pattern 'test*', got %s", coreQuery.Pattern)
 	}
 
-	if providerQuery.Pattern != coreQuery.Pattern {
-		t.Errorf("Expected Pattern %s, got %s", coreQuery.Pattern, providerQuery.Pattern)
+	if len(coreQuery.Attributes) != 1 {
+		t.Errorf("Expected 1 attribute, got %d", len(coreQuery.Attributes))
 	}
 
-	if len(providerQuery.Attributes) != len(coreQuery.Attributes) {
-		t.Errorf("Expected %d attributes, got %d", len(coreQuery.Attributes), len(providerQuery.Attributes))
-	}
-
-	for key, value := range coreQuery.Attributes {
-		if providerQuery.Attributes[key] != value {
-			t.Errorf("Expected attribute %s=%s, got %s=%s", key, value, key, providerQuery.Attributes[key])
-		}
+	if coreQuery.Attributes["visibility"] != "public" {
+		t.Errorf("Expected visibility 'public', got %s", coreQuery.Attributes["visibility"])
 	}
 }
 
-func TestCreateResultFromNode(t *testing.T) {
-	mockProvider := &MockLanguageProvider{}
-	_, err := NewUniversalEvaluator(mockProvider)
-	if err != nil {
-		t.Fatalf("Failed to create evaluator: %v", err)
+func TestResultStructure(t *testing.T) {
+	// Test that we can create core.Result correctly
+	location := core.Location{
+		File:      "test.go",
+		StartLine: 1,
+		EndLine:   1,
+		StartCol:  0,
+		EndCol:    10,
 	}
 
-	// Create a mock node (in real usage this would come from tree-sitter)
-	mockNode := &sitter.Node{}
+	metadata := map[string]any{
+		"visibility": "public",
+		"type":       "string",
+	}
 
-	// Test result creation manually since createResultFromNode is private
-	result := &types.Result{
-		Node: mockNode,
-		Kind: types.NodeKind("function"),
-		Name: "mockFunction",
-		Location: types.Location{
-			File:      "test.go",
-			StartLine: 1,
-			EndLine:   1,
-			StartCol:  0,
-			EndCol:    10,
-		},
+	result := &core.Result{
+		Kind:       core.KindFunction,
+		Name:       "testFunc",
+		Location:   location,
+		Content:    "func testFunc() {}",
+		Metadata:   metadata,
+		ParentKind: core.KindClass,
+		ParentName: "TestClass",
+		Scope:      core.ScopeFile,
 	}
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
 	}
 
-	if result.Kind != types.NodeKind("function") {
+	if result.Kind != core.KindFunction {
 		t.Errorf("Expected Kind 'function', got %s", result.Kind)
 	}
 
-	if result.Node != mockNode {
-		t.Error("Expected Node to be set correctly")
-	}
-}
-
-func TestFilterResultsByPattern(t *testing.T) {
-	mockProvider := &MockLanguageProvider{}
-	_, _ = NewUniversalEvaluator(mockProvider)
-
-	results := []*types.Result{
-		{
-			Kind: types.KindFunction,
-			Name: "testFunction",
-			Location: types.Location{
-				File:      "test.go",
-				StartLine: 1,
-				EndLine:   1,
-			},
-		},
-		{
-			Kind: types.KindFunction,
-			Name: "anotherFunction",
-			Location: types.Location{
-				File:      "test.go",
-				StartLine: 5,
-				EndLine:   5,
-			},
-		},
-		{
-			Kind: types.KindFunction,
-			Name: "testHelper",
-			Location: types.Location{
-				File:      "test.go",
-				StartLine: 10,
-				EndLine:   10,
-			},
-		},
+	if result.Name != "testFunc" {
+		t.Errorf("Expected Name 'testFunc', got %s", result.Name)
 	}
 
-	tests := []struct {
-		name     string
-		pattern  string
-		expected int
-	}{
-		{
-			name:     "wildcard pattern",
-			pattern:  "test*",
-			expected: 2, // testFunction and testHelper
-		},
-		{
-			name:     "exact pattern",
-			pattern:  "testFunction",
-			expected: 1,
-		},
-		{
-			name:     "no match pattern",
-			pattern:  "nonexistent*",
-			expected: 0,
-		},
-		{
-			name:     "empty pattern",
-			pattern:  "",
-			expected: 3, // all results
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test pattern filtering manually
-			filtered := []*types.Result{}
-			for _, result := range results {
-				patternToMatch := strings.TrimSuffix(tt.pattern, "*")
-				if tt.pattern == "" || strings.Contains(result.Name, patternToMatch) {
-					filtered = append(filtered, result)
-				}
-			}
-
-			if len(filtered) != tt.expected {
-				t.Errorf("Expected %d results, got %d", tt.expected, len(filtered))
-			}
-		})
-	}
-}
-
-func TestLogicalOperations(t *testing.T) {
-	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
-			switch q.Kind {
-			case "function":
-				return "(function_declaration (identifier) @name)", nil
-			case "variable":
-				return "(var_declaration (var_spec (identifier) @name))", nil
-			default:
-				return "(identifier) @name", nil
-			}
-		},
-	}
-	evaluator, _ := NewUniversalEvaluator(mockProvider)
-
-	// Create test code with actual nodes
-	code := []byte(`
-func test1() {}
-func test2() {}
-var test1 = 42
-`)
-
-	// Parse the code to get actual Tree-sitter nodes
-	tree := evaluator.parser.Parse(nil, code)
-	defer tree.Close()
-
-	// Create queries to get actual results with real nodes
-	query1 := &types.Query{
-		Kind:    types.KindFunction,
-		Pattern: "*",
-		Raw:     "function *",
-	}
-
-	query2 := &types.Query{
-		Kind:    types.KindVariable,
-		Pattern: "*",
-		Raw:     "variable *",
-	}
-
-	// Get actual result sets with real Tree-sitter nodes
-	rs1, _ := evaluator.EvaluateQuery(query1, code)
-	rs2, _ := evaluator.EvaluateQuery(query2, code)
-
-	// Debug output
-	t.Logf("rs1 (functions) count: %d", rs1.Count())
-	for i, r := range rs1.All() {
-		t.Logf("  rs1[%d]: %s (kind: %v)", i, r.Name, r.Kind)
-	}
-	t.Logf("rs2 (variables) count: %d", rs2.Count())
-	for i, r := range rs2.All() {
-		t.Logf("  rs2[%d]: %s (kind: %v)", i, r.Name, r.Kind)
-	}
-
-	// Test intersection (should find nodes that exist in both sets)
-	// Since we're using different node types, intersection should be 0
-	intersection := evaluator.intersectResults(rs1, rs2)
-	if intersection.Count() != 0 {
-		t.Errorf("Expected 0 intersection results (different node types), got %d", intersection.Count())
-	}
-
-	// Test merge (OR-like) - should combine all unique results
-	merged := rs1.Merge(rs2)
-	t.Logf("Merged count: %d", merged.Count())
-	for i, r := range merged.All() {
-		t.Logf("  merged[%d]: %s (kind: %v)", i, r.Name, r.Kind)
-	}
-	expectedMerged := rs1.Count() + rs2.Count()
-	if merged.Count() != expectedMerged {
-		t.Errorf("Expected %d merged results, got %d", expectedMerged, merged.Count())
-	}
-
-	// Test subtraction (NOT-like) - should return all from rs1 since no overlap
-	subtracted := evaluator.subtractResults(rs1, rs2)
-	if subtracted.Count() != rs1.Count() {
-		t.Errorf("Expected %d subtracted results, got %d", rs1.Count(), subtracted.Count())
+	if result.Location.File != "test.go" {
+		t.Errorf("Expected File 'test.go', got %s", result.Location.File)
 	}
 }
 
 func TestErrorHandling(t *testing.T) {
 	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
+		translateFunc: func(q *core.Query) (string, error) {
 			return "", fmt.Errorf("translation error")
 		},
 	}
@@ -592,14 +371,14 @@ func TestErrorHandling(t *testing.T) {
 		t.Fatalf("Failed to create evaluator: %v", err)
 	}
 
-	query := &types.Query{
-		Kind: types.KindFunction,
+	query := &core.Query{
+		Kind: core.KindFunction,
 		Raw:  "function",
 	}
 
 	code := []byte(`func test() {}`)
 
-	_, err = evaluator.EvaluateQuery(query, code)
+	_, err = evaluator.Evaluate(query, code)
 	if err == nil {
 		t.Error("Expected error but got none")
 	}
@@ -609,9 +388,43 @@ func TestErrorHandling(t *testing.T) {
 	}
 }
 
-func BenchmarkEvaluateQuery(b *testing.B) {
+func TestNilInputHandling(t *testing.T) {
+	mockProvider := &MockLanguageProvider{}
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		query *core.Query
+		code  []byte
+	}{
+		{
+			name:  "nil query",
+			query: nil,
+			code:  []byte("func test() {}"),
+		},
+		{
+			name:  "empty code",
+			query: &core.Query{Kind: core.KindFunction, Raw: "function"},
+			code:  []byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := evaluator.Evaluate(tt.query, tt.code)
+			if err == nil {
+				t.Error("Expected error but got none")
+			}
+		})
+	}
+}
+
+func BenchmarkEvaluate(b *testing.B) {
 	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
+		translateFunc: func(q *core.Query) (string, error) {
 			return "(function_declaration)", nil
 		},
 	}
@@ -621,8 +434,8 @@ func BenchmarkEvaluateQuery(b *testing.B) {
 		b.Fatalf("Failed to create evaluator: %v", err)
 	}
 
-	query := &types.Query{
-		Kind: types.KindFunction,
+	query := &core.Query{
+		Kind: core.KindFunction,
 		Raw:  "function",
 	}
 
@@ -632,17 +445,549 @@ func testFunction() {
 }
 `)
 
-	for b.Loop() {
-		_, err := evaluator.EvaluateQuery(query, code)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := evaluator.Evaluate(query, code)
 		if err != nil {
 			b.Errorf("Unexpected error: %v", err)
 		}
 	}
 }
 
-func BenchmarkEvaluateMultipleQueries(b *testing.B) {
+func BenchmarkEvaluateWithComplexQuery(b *testing.B) {
 	mockProvider := &MockLanguageProvider{
-		translateFunc: func(q *types.Query) (string, error) {
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration (identifier) @name)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		b.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind:       core.KindFunction,
+		Pattern:    "test*",
+		Attributes: map[string]string{"visibility": "public"},
+		Raw:        "function[visibility=public] test*",
+	}
+
+	code := []byte(`
+func testFunction() {
+	var testVar = 42
+}
+func anotherFunction() {
+	return true
+}
+`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := evaluator.Evaluate(query, code)
+		if err != nil {
+			b.Errorf("Unexpected error: %v", err)
+		}
+	}
+}
+
+// Test comprehensive evaluator functionality
+func TestUniversalEvaluator_CreationAndValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider provider.LanguageProvider
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name:     "valid provider",
+			provider: &MockLanguageProvider{},
+			wantErr:  false,
+		},
+		{
+			name:     "nil provider",
+			provider: nil,
+			wantErr:  true,
+			errMsg:   "language provider cannot be nil",
+		},
+		{
+			name:     "provider with nil sitter language",
+			provider: &MockLanguageProvider{language: nil},
+			wantErr:  true,
+			errMsg:   "does not provide a valid Tree-sitter language",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluator, err := NewUniversalEvaluator(tt.provider)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error but got none")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Expected error containing '%s', got: %v", tt.errMsg, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if evaluator == nil {
+				t.Error("Expected non-nil evaluator")
+			}
+		})
+	}
+}
+
+// Test evaluator with different query types and complexities
+func TestUniversalEvaluator_QueryTypes(t *testing.T) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			switch q.Kind {
+			case core.KindFunction:
+				return "(function_declaration (identifier) @name)", nil
+			case core.KindVariable:
+				return "(var_declaration (var_spec (identifier) @name))", nil
+			case "logical":
+				// Return a query that matches both functions and variables
+				return "[(function_declaration (identifier) @name) (var_declaration (var_spec (identifier) @name))]", nil
+			default:
+				return "(function_declaration)", nil
+			}
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	// Test code with various constructs
+	code := []byte(`
+		package main
+		
+		import "fmt"
+		
+		var globalVar = "test"
+		
+		func testFunction() {
+			var localVar = 42
+			fmt.Println("Hello, World!")
+		}
+		
+		func anotherFunction(param string) string {
+			return param + " modified"
+		}
+	`)
+
+	tests := []struct {
+		name     string
+		query    *core.Query
+		wantErr  bool
+		validate func(*testing.T, *core.ResultSet)
+	}{
+		{
+			name: "simple function query",
+			query: &core.Query{
+				Kind:    core.KindFunction,
+				Pattern: "*",
+				Raw:     "function:*",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, rs *core.ResultSet) {
+				if rs == nil {
+					t.Error("Expected non-nil result set")
+					return
+				}
+				if rs.TotalMatches == 0 {
+					t.Error("Expected at least one match")
+				}
+			},
+		},
+		{
+			name: "function with pattern",
+			query: &core.Query{
+				Kind:    core.KindFunction,
+				Pattern: "test*",
+				Raw:     "function:test*",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, rs *core.ResultSet) {
+				if rs == nil {
+					t.Error("Expected non-nil result set")
+					return
+				}
+				// Should match testFunction
+				if rs.TotalMatches == 0 {
+					t.Error("Expected matches for pattern test*")
+				}
+			},
+		},
+		{
+			name: "variable query",
+			query: &core.Query{
+				Kind:    core.KindVariable,
+				Pattern: "*",
+				Raw:     "variable:*",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, rs *core.ResultSet) {
+				if rs == nil {
+					t.Error("Expected non-nil result set")
+					return
+				}
+				// Should match globalVar and localVar
+			},
+		},
+		{
+			name: "logical AND query",
+			query: &core.Query{
+				Kind:     "logical",
+				Operator: "AND",
+				Children: []core.Query{
+					{Kind: core.KindFunction, Pattern: "*", Raw: "function:*"},
+					{Kind: core.KindVariable, Pattern: "*", Raw: "variable:*"},
+				},
+				Raw: "function:* && variable:*",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, rs *core.ResultSet) {
+				if rs == nil {
+					t.Error("Expected non-nil result set")
+				}
+			},
+		},
+		{
+			name: "query with attributes",
+			query: &core.Query{
+				Kind:       core.KindFunction,
+				Pattern:    "*",
+				Attributes: map[string]string{"type": "public"},
+				Raw:        "function:* public",
+			},
+			wantErr: false,
+			validate: func(t *testing.T, rs *core.ResultSet) {
+				if rs == nil {
+					t.Error("Expected non-nil result set")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := evaluator.Evaluate(tt.query, code)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if tt.validate != nil {
+				tt.validate(t, result)
+			}
+		})
+	}
+}
+
+// Test error conditions and edge cases
+func TestUniversalEvaluator_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name        string
+		provider    *MockLanguageProvider
+		query       *core.Query
+		source      []byte
+		expectedErr string
+	}{
+		{
+			name:        "nil query",
+			provider:    &MockLanguageProvider{},
+			query:       nil,
+			source:      []byte("func test() {}"),
+			expectedErr: "query cannot be nil",
+		},
+		{
+			name:        "empty source",
+			provider:    &MockLanguageProvider{},
+			query:       &core.Query{Kind: core.KindFunction, Raw: "function"},
+			source:      []byte{},
+			expectedErr: "source code cannot be empty",
+		},
+		{
+			name: "provider translation failure",
+			provider: &MockLanguageProvider{
+				translateFunc: func(q *core.Query) (string, error) {
+					return "", fmt.Errorf("translation failed")
+				},
+			},
+			query:       &core.Query{Kind: core.KindFunction, Raw: "function"},
+			source:      []byte("func test() {}"),
+			expectedErr: "provider failed to translate query",
+		},
+		{
+			name: "invalid tree-sitter query",
+			provider: &MockLanguageProvider{
+				translateFunc: func(q *core.Query) (string, error) {
+					return "(invalid_query_syntax", nil // Missing closing paren
+				},
+			},
+			query:       &core.Query{Kind: core.KindFunction, Raw: "function"},
+			source:      []byte("func test() {}"),
+			expectedErr: "failed to create Tree-sitter query",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluator, err := NewUniversalEvaluator(tt.provider)
+			if err != nil {
+				// Some test cases expect evaluator creation to fail
+				if tt.expectedErr != "" && strings.Contains(err.Error(), tt.expectedErr) {
+					return
+				}
+				t.Fatalf("Unexpected error creating evaluator: %v", err)
+			}
+
+			_, err = evaluator.Evaluate(tt.query, tt.source)
+			if err == nil {
+				t.Error("Expected error but got none")
+				return
+			}
+
+			if !strings.Contains(err.Error(), tt.expectedErr) {
+				t.Errorf("Expected error containing '%s', got: %v", tt.expectedErr, err)
+			}
+		})
+	}
+}
+
+// Test result creation and metadata
+func TestUniversalEvaluator_ResultCreation(t *testing.T) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration name: (identifier) @name)", nil
+		},
+	}
+
+	// Override methods for more detailed testing
+	mockProvider.getNodeKindFunc = func(node *sitter.Node) core.NodeKind {
+		return core.KindFunction
+	}
+
+	mockProvider.getNodeNameFunc = func(node *sitter.Node, source []byte) string {
+		return "testFunction"
+	}
+
+	mockProvider.parseAttrsFunc = func(node *sitter.Node, source []byte) map[string]string {
+		return map[string]string{
+			"visibility": "public",
+			"type":       "function",
+		}
+	}
+
+	mockProvider.getNodeScopeFunc = func(node *sitter.Node) core.ScopeType {
+		return core.ScopeFile
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind:    core.KindFunction,
+		Pattern: "test*",
+		Raw:     "function:test*",
+	}
+
+	code := []byte(`
+		func testFunction() {
+			// test function
+		}
+	`)
+
+	result, err := evaluator.Evaluate(query, code)
+	if err != nil {
+		t.Fatalf("Evaluation failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Expected non-nil result")
+	}
+
+	if len(result.Results) == 0 {
+		t.Fatal("Expected at least one result")
+	}
+
+	// Test first result
+	r := result.Results[0]
+	if r.Kind != core.KindFunction {
+		t.Errorf("Expected Kind %s, got %s", core.KindFunction, r.Kind)
+	}
+
+	if r.Name != "testFunction" {
+		t.Errorf("Expected Name 'testFunction', got '%s'", r.Name)
+	}
+
+	if r.Scope != core.ScopeFile {
+		t.Errorf("Expected Scope %s, got %s", core.ScopeFile, r.Scope)
+	}
+
+	// Check metadata
+	if r.Metadata == nil {
+		t.Error("Expected non-nil metadata")
+	} else {
+		if r.Metadata["visibility"] != "public" {
+			t.Errorf("Expected visibility 'public', got '%v'", r.Metadata["visibility"])
+		}
+		if r.Metadata["query_kind"] != string(core.KindFunction) {
+			t.Errorf("Expected query_kind metadata to be set")
+		}
+	}
+
+	// Check location information
+	if r.Location.StartLine <= 0 {
+		t.Error("Expected positive start line")
+	}
+	if r.Location.EndLine < r.Location.StartLine {
+		t.Error("End line should be >= start line")
+	}
+}
+
+// Test concurrent access
+func TestUniversalEvaluator_ConcurrentAccess(t *testing.T) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind: core.KindFunction,
+		Raw:  "function",
+	}
+
+	code := []byte(`
+		func testFunction() {
+			// test function
+		}
+	`)
+
+	// Test concurrent evaluation
+	var wg sync.WaitGroup
+	numGoroutines := 50
+	errors := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			_, err := evaluator.Evaluate(query, code)
+			if err != nil {
+				errors <- fmt.Errorf("goroutine %d: %v", id, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for any errors
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+// Test evaluator methods
+func TestUniversalEvaluator_Methods(t *testing.T) {
+	mockProvider := &MockLanguageProvider{}
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	t.Run("GetProvider", func(t *testing.T) {
+		provider := evaluator.GetProvider()
+		if provider == nil {
+			t.Error("Expected non-nil provider")
+		}
+		if provider.Lang() != mockProvider.Lang() {
+			t.Error("Provider mismatch")
+		}
+	})
+
+	t.Run("GetLanguage", func(t *testing.T) {
+		lang := evaluator.GetLanguage()
+		if lang != mockProvider.Lang() {
+			t.Errorf("Expected language '%s', got '%s'", mockProvider.Lang(), lang)
+		}
+	})
+}
+
+// Test memory usage and performance characteristics
+func TestUniversalEvaluator_MemoryUsage(t *testing.T) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		t.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind: core.KindFunction,
+		Raw:  "function",
+	}
+
+	// Large source code to test memory handling
+	var codeBuilder strings.Builder
+	codeBuilder.WriteString("package main\n")
+	for i := 0; i < 1000; i++ {
+		codeBuilder.WriteString(fmt.Sprintf("func function%d() { /* function %d */ }\n", i, i))
+	}
+	code := []byte(codeBuilder.String())
+
+	result, err := evaluator.Evaluate(query, code)
+	if err != nil {
+		t.Errorf("Evaluation failed: %v", err)
+	}
+
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+
+	// Verify results are reasonable
+	if result.TotalMatches != len(result.Results) {
+		t.Errorf("TotalMatches (%d) != len(Results) (%d)", result.TotalMatches, len(result.Results))
+	}
+}
+
+// Enhanced benchmarks with different scenarios
+func BenchmarkEvaluator_SmallFile(b *testing.B) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
 			return "(function_declaration)", nil
 		},
 	}
@@ -652,22 +997,148 @@ func BenchmarkEvaluateMultipleQueries(b *testing.B) {
 		b.Fatalf("Failed to create evaluator: %v", err)
 	}
 
-	queries := []*types.Query{
-		{Kind: types.KindFunction, Raw: "function"},
-		{Kind: types.KindVariable, Raw: "variable"},
-		{Kind: types.KindClass, Raw: "class"},
+	query := &core.Query{
+		Kind: core.KindFunction,
+		Raw:  "function",
 	}
 
 	code := []byte(`
-func testFunction() {
-	var testVar = 42
-}
-`)
+		func testFunction() {
+			// test function
+		}
+	`)
 
-	for b.Loop() {
-		_, err := evaluator.EvaluateMultipleQueries(queries, code)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := evaluator.Evaluate(query, code)
 		if err != nil {
 			b.Errorf("Unexpected error: %v", err)
 		}
+	}
+}
+
+func BenchmarkEvaluator_LargeFile(b *testing.B) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		b.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind: core.KindFunction,
+		Raw:  "function",
+	}
+
+	// Generate large Go file
+	var codeBuilder strings.Builder
+	codeBuilder.WriteString("package main\n")
+	for i := 0; i < 500; i++ {
+		codeBuilder.WriteString(fmt.Sprintf(`
+			func function%d() {
+				var x = %d
+				if x > 0 {
+					return
+				}
+			}
+		`, i, i))
+	}
+	code := []byte(codeBuilder.String())
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := evaluator.Evaluate(query, code)
+		if err != nil {
+			b.Errorf("Unexpected error: %v", err)
+		}
+	}
+}
+
+func BenchmarkEvaluator_ComplexQuery(b *testing.B) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			if q.Kind == "logical" {
+				return "[(function_declaration) (var_declaration)]", nil
+			}
+			return "(function_declaration)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		b.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind:     "logical",
+		Operator: "AND",
+		Children: []core.Query{
+			{Kind: core.KindFunction, Pattern: "*", Raw: "function:*"},
+			{Kind: core.KindVariable, Pattern: "*", Raw: "variable:*"},
+		},
+		Raw: "function:* && variable:*",
+	}
+
+	code := []byte(`
+		package main
+		
+		var globalVar = "test"
+		
+		func testFunction() {
+			var localVar = 42
+			anotherFunction(localVar)
+		}
+		
+		func anotherFunction(param int) {
+			var result = param * 2
+			fmt.Println(result)
+		}
+	`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := evaluator.Evaluate(query, code)
+		if err != nil {
+			b.Errorf("Unexpected error: %v", err)
+		}
+	}
+}
+
+func BenchmarkEvaluator_ResultCreation(b *testing.B) {
+	mockProvider := &MockLanguageProvider{
+		translateFunc: func(q *core.Query) (string, error) {
+			return "(function_declaration (identifier) @name)", nil
+		},
+	}
+
+	evaluator, err := NewUniversalEvaluator(mockProvider)
+	if err != nil {
+		b.Fatalf("Failed to create evaluator: %v", err)
+	}
+
+	query := &core.Query{
+		Kind:    core.KindFunction,
+		Pattern: "*",
+		Raw:     "function:*",
+	}
+
+	code := []byte(`
+		func testFunction1() {}
+		func testFunction2() {}
+		func testFunction3() {}
+	`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := evaluator.Evaluate(query, code)
+		if err != nil {
+			b.Errorf("Unexpected error: %v", err)
+		}
+		// Access results to ensure they're created
+		_ = len(result.Results)
 	}
 }

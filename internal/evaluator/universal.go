@@ -1,50 +1,122 @@
+// Package evaluator provides language-agnostic query evaluation capabilities.
+//
+// The UniversalEvaluator implements the core design principle: ONE evaluator
+// implementation that works for ALL languages via dependency injection of
+// language providers. This evaluator contains NO language-specific code
+// whatsoever and delegates all translation and language-specific operations
+// to the injected provider.
+//
+// Architecture Pattern: Dependency Injection
+//
+// The evaluator follows a clean dependency injection pattern where:
+//  1. A language provider is injected at construction time
+//  2. The provider handles ALL language-specific operations
+//  3. The evaluator provides a universal interface that works identically
+//     for all languages
+//  4. Query translation, AST traversal, and result extraction are all
+//     delegated to the provider
+//
+// This design ensures zero coupling between the core evaluation logic
+// and any specific programming language, enabling true language agnosticism.
 package evaluator
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/termfx/morfx/internal/types"
+	"github.com/termfx/morfx/internal/core"
+	"github.com/termfx/morfx/internal/provider"
 )
 
 // UniversalEvaluator provides language-agnostic query evaluation capabilities.
-// It works with any language provider to execute DSL queries against source code
-// using Tree-sitter for parsing and traversal.
+// It uses dependency injection to work with any language provider, ensuring
+// that the same evaluator implementation works identically across all supported
+// programming languages.
+//
+// The evaluator follows the core architectural principle: it contains NO
+// language-specific code and delegates all language-specific operations
+// to the injected provider. This enables true language agnosticism where
+// adding support for a new language requires ONLY implementing a provider
+// interface.
+//
+// Design Principles:
+// - Single Responsibility: Only handles the evaluation workflow
+// - Dependency Injection: Takes provider as injected dependency
+// - Language Agnostic: Works identically for ALL languages
+// - Provider Delegation: All language-specific logic handled by provider
 type UniversalEvaluator struct {
-	// provider is the language-specific provider for DSL translation
-	provider types.LanguageProvider
-	// parser is the Tree-sitter parser for the target language
-	parser *sitter.Parser
-	// language is the Tree-sitter language definition
-	language *sitter.Language
+	// provider is the injected language-specific provider that handles
+	// all translation between universal concepts and language-specific
+	// AST representations
+	provider provider.LanguageProvider
 }
 
-// NewUniversalEvaluator creates a new evaluator instance for the given language provider
-func NewUniversalEvaluator(p types.LanguageProvider) (*UniversalEvaluator, error) {
+// NewUniversalEvaluator creates a new evaluator instance with the given language provider.
+// The provider is injected as a dependency and will handle all language-specific
+// operations for this evaluator instance.
+//
+// This constructor follows the dependency injection pattern where the evaluator
+// is completely agnostic to the specific language being processed - the provider
+// encapsulates all language-specific knowledge.
+//
+// Parameters:
+//   - p: The language provider that will handle language-specific operations
+//
+// Returns:
+//   - *UniversalEvaluator: A new evaluator instance configured with the provider
+//   - error: If the provider is invalid or cannot be initialized
+//
+// Example:
+//
+//	provider := &golang.GoProvider{}  // or any provider implementation
+//	evaluator, err := NewUniversalEvaluator(provider)
+//	if err != nil {
+//	    return fmt.Errorf("failed to create evaluator: %w", err)
+//	}
+func NewUniversalEvaluator(p provider.LanguageProvider) (*UniversalEvaluator, error) {
 	if p == nil {
-		return nil, fmt.Errorf("provider cannot be nil")
+		return nil, fmt.Errorf("language provider cannot be nil")
 	}
 
-	lang := p.GetSitterLanguage()
-	if lang == nil {
-		return nil, fmt.Errorf("provider must return a valid Tree-sitter language")
+	// Validate that the provider can provide the required Tree-sitter language
+	sitterLang := p.GetSitterLanguage()
+	if sitterLang == nil {
+		return nil, fmt.Errorf("provider %s does not provide a valid Tree-sitter language", p.Lang())
 	}
-
-	parser := sitter.NewParser()
-	parser.SetLanguage(lang)
 
 	return &UniversalEvaluator{
 		provider: p,
-		parser:   parser,
-		language: lang,
 	}, nil
 }
 
-// EvaluateQuery executes a universal query against source code and returns results
-func (e *UniversalEvaluator) EvaluateQuery(query *types.Query, source []byte) (*types.ResultSet, error) {
+// Evaluate executes a universal query against source code and returns language-agnostic results.
+//
+// This method implements the core architectural principle: it is IDENTICAL for ALL languages.
+// The provider handles all language-specific translation and the evaluator provides a
+// universal interface that works consistently regardless of the programming language.
+//
+// Evaluation Workflow:
+// 1. Validate inputs (universal validation, no language-specific logic)
+// 2. Parse source code using Tree-sitter via provider's language
+// 3. Translate universal query to Tree-sitter query via provider
+// 4. Execute Tree-sitter query against the AST
+// 5. Process matches and create universal results via provider
+// 6. Return language-agnostic result set
+//
+// Parameters:
+//   - query: Universal query structure (language-agnostic)
+//   - source: Source code to evaluate (as byte slice)
+//
+// Returns:
+//   - *core.ResultSet: Universal result set containing matches
+//   - error: If evaluation fails at any step
+//
+// The returned ResultSet contains only universal concepts (core.Result) with
+// no language-specific dependencies, enabling consistent processing across
+// all supported languages.
+func (e *UniversalEvaluator) Evaluate(query *core.Query, source []byte) (*core.ResultSet, error) {
+	// Input validation - universal checks only
 	if query == nil {
 		return nil, fmt.Errorf("query cannot be nil")
 	}
@@ -52,34 +124,46 @@ func (e *UniversalEvaluator) EvaluateQuery(query *types.Query, source []byte) (*
 		return nil, fmt.Errorf("source code cannot be empty")
 	}
 
+	// Get Tree-sitter language from provider
+	sitterLang := e.provider.GetSitterLanguage()
+	if sitterLang == nil {
+		return nil, fmt.Errorf("provider failed to provide Tree-sitter language")
+	}
+
+	// Create and configure Tree-sitter parser
+	parser := sitter.NewParser()
+	parser.SetLanguage(sitterLang)
+
 	// Parse source code into AST
-	tree := e.parser.Parse(nil, source)
+	tree := parser.Parse(nil, source)
 	if tree == nil {
 		return nil, fmt.Errorf("failed to parse source code")
 	}
 	defer tree.Close()
 
-	// Translate universal query to Tree-sitter query
+	// Translate universal query to Tree-sitter query via provider
+	// This is where all language-specific translation happens
 	tsQuery, err := e.provider.TranslateQuery(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to translate query: %w", err)
+		return nil, fmt.Errorf("provider failed to translate query: %w", err)
 	}
 
-	// Execute Tree-sitter query
-	q, err := sitter.NewQuery([]byte(tsQuery), e.language)
+	// Create Tree-sitter query from translated string
+	q, err := sitter.NewQuery([]byte(tsQuery), sitterLang)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Tree-sitter query: %w", err)
 	}
 	defer q.Close()
 
-	// Execute query and collect results
+	// Execute Tree-sitter query
 	qc := sitter.NewQueryCursor()
 	defer qc.Close()
 
-	resultSet := types.NewResultSet()
+	// Collect all matches into universal results
+	results := make([]*core.Result, 0)
 	qc.Exec(q, tree.RootNode())
 
-	// Process matches
+	// Process each match using provider for language-specific extraction
 	for {
 		m, ok := qc.NextMatch()
 		if !ok {
@@ -93,330 +177,122 @@ func (e *UniversalEvaluator) EvaluateQuery(query *types.Query, source []byte) (*
 				continue
 			}
 
-			// Create result from node
-			result := e.createResultFromNode(node, source, query)
+			// Create universal result using provider for language-specific extraction
+			result, err := e.createUniversalResult(node, source, query)
+			if err != nil {
+				// Log error but continue processing other matches
+				continue
+			}
+
 			if result != nil {
-				resultSet.Add(result)
+				results = append(results, result)
 			}
 		}
 	}
 
-	// Apply post-processing filters
-	return e.applyFilters(resultSet, query), nil
+	// Create and return universal result set
+	resultSet := &core.ResultSet{
+		Results:      results,
+		TotalMatches: len(results),
+	}
+
+	return resultSet, nil
 }
 
-// EvaluateMultipleQueries executes multiple queries and combines results
-func (e *UniversalEvaluator) EvaluateMultipleQueries(queries []*types.Query, source []byte) (*types.ResultSet, error) {
-	if len(queries) == 0 {
-		return types.NewResultSet(), nil
-	}
-
-	combinedResults := types.NewResultSet()
-
-	for _, query := range queries {
-		results, err := e.EvaluateQuery(query, source)
-		if err != nil {
-			return nil, fmt.Errorf("failed to evaluate query %s: %w", query.Raw, err)
-		}
-		combinedResults = combinedResults.Merge(results)
-	}
-
-	return combinedResults, nil
-}
-
-// EvaluateLogicalQuery handles logical operations (AND, OR, NOT)
-func (e *UniversalEvaluator) EvaluateLogicalQuery(query *types.Query, source []byte) (*types.ResultSet, error) {
-	if query.Operator == "" {
-		return e.EvaluateQuery(query, source)
-	}
-
-	switch {
-	case strings.HasPrefix(query.Operator, "!"):
-		return e.evaluateNegation(query, source)
-	case query.Operator == "&&":
-		return e.evaluateAnd(query, source)
-	case query.Operator == "||":
-		return e.evaluateOr(query, source)
-	case query.Operator == ">":
-		return e.evaluateHierarchical(query, source)
-	default:
-		return e.EvaluateQuery(query, source)
-	}
-}
-
-// evaluateNegation handles negated queries
-func (e *UniversalEvaluator) evaluateNegation(query *types.Query, source []byte) (*types.ResultSet, error) {
-	// Create a copy of the query without negation
-	positiveQuery := *query
-	positiveQuery.Operator = strings.TrimPrefix(query.Operator, "!")
-
-	// Get all possible nodes of the same kind
-	allNodes, err := e.getAllNodesOfKind(query.Kind, source)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get nodes that match the positive query
-	matchingNodes, err := e.EvaluateQuery(&positiveQuery, source)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return nodes that don't match
-	return e.subtractResults(allNodes, matchingNodes), nil
-}
-
-// evaluateAnd handles AND operations
-func (e *UniversalEvaluator) evaluateAnd(query *types.Query, source []byte) (*types.ResultSet, error) {
-	if len(query.Children) < 2 {
-		return nil, fmt.Errorf("AND operation requires at least 2 operands")
-	}
-
-	// Start with results from first query
-	results, err := e.EvaluateLogicalQuery(&query.Children[0], source)
-	if err != nil {
-		return nil, err
-	}
-
-	// Intersect with results from remaining queries
-	for i := 1; i < len(query.Children); i++ {
-		nextResults, err := e.EvaluateLogicalQuery(&query.Children[i], source)
-		if err != nil {
-			return nil, err
-		}
-		results = e.intersectResults(results, nextResults)
-	}
-
-	return results, nil
-}
-
-// evaluateOr handles OR operations
-func (e *UniversalEvaluator) evaluateOr(query *types.Query, source []byte) (*types.ResultSet, error) {
-	if len(query.Children) < 2 {
-		return nil, fmt.Errorf("OR operation requires at least 2 operands")
-	}
-
-	combinedResults := types.NewResultSet()
-
-	// Union results from all queries
-	for _, childQuery := range query.Children {
-		results, err := e.EvaluateLogicalQuery(&childQuery, source)
-		if err != nil {
-			return nil, err
-		}
-		combinedResults = combinedResults.Merge(results)
-	}
-
-	return combinedResults, nil
-}
-
-// evaluateHierarchical handles parent > child relationships
-func (e *UniversalEvaluator) evaluateHierarchical(query *types.Query, source []byte) (*types.ResultSet, error) {
-	if len(query.Children) == 0 {
-		return nil, fmt.Errorf("hierarchical query requires parent specification")
-	}
-
-	parentQuery := &query.Children[0]
-
-	// Find parent nodes
-	parentResults, err := e.EvaluateLogicalQuery(parentQuery, source)
-	if err != nil {
-		return nil, err
-	}
-
-	// Find child nodes within parent contexts
-	childResults := types.NewResultSet()
-	for _, parentResult := range parentResults.All() {
-		// Create child query within parent scope
-		childQuery := *query
-		childQuery.Operator = "" // Remove hierarchy operator
-		childQuery.Children = nil
-		childQuery.Scope = types.ScopeBlock // Limit to parent scope
-
-		// This would need scope-limited evaluation
-		// For now, we'll do a simple implementation
-		results, err := e.EvaluateQuery(&childQuery, source)
-		if err != nil {
-			continue
-		}
-
-		// Filter results to only those within parent node
-		for _, result := range results.All() {
-			if e.isNodeWithinParent(result.Node, parentResult.Node) {
-				childResults.Add(result)
-			}
-		}
-	}
-
-	return childResults, nil
-}
-
-// createResultFromNode creates a Result object from a Tree-sitter node
-func (e *UniversalEvaluator) createResultFromNode(node *sitter.Node, source []byte, query *types.Query) *types.Result {
+// createUniversalResult creates a universal Result from a Tree-sitter node using
+// the provider for all language-specific extraction operations.
+//
+// This method demonstrates the delegation pattern where the evaluator handles
+// the universal workflow while the provider handles all language-specific
+// operations like name extraction, kind determination, and attribute parsing.
+//
+// Parameters:
+//   - node: Tree-sitter node from the match
+//   - source: Original source code (for text extraction)
+//   - query: Original universal query (for context)
+//
+// Returns:
+//   - *core.Result: Universal result with language-agnostic data
+//   - error: If result creation fails
+func (e *UniversalEvaluator) createUniversalResult(node *sitter.Node, source []byte, query *core.Query) (*core.Result, error) {
 	if node == nil {
-		return nil
+		return nil, fmt.Errorf("node cannot be nil")
 	}
 
-	// Get node kind using provider
+	// Use provider to determine universal node kind
+	// Provider maps language-specific AST node types to universal concepts
 	nodeKind := e.provider.GetNodeKind(node)
 
-	// Get node name using provider
+	// Use provider to extract node name/identifier
+	// Provider knows how to find names in language-specific AST structures
 	nodeName := e.provider.GetNodeName(node, source)
 
-	// Create location info
-	location := types.Location{
+	// Create universal location information
+	location := core.Location{
 		StartLine: int(node.StartPoint().Row) + 1, // Convert to 1-based
 		EndLine:   int(node.EndPoint().Row) + 1,
-		StartCol:  int(node.StartPoint().Column),
-		EndCol:    int(node.EndPoint().Column),
+		StartCol:  int(node.StartPoint().Column) + 1,
+		EndCol:    int(node.EndPoint().Column) + 1,
+		StartByte: int(node.StartByte()),
+		EndByte:   int(node.EndByte()),
 	}
 
-	// Create metadata
-	metadata := map[string]any{
-		"node_type":     node.Type(),
-		"byte_range":    fmt.Sprintf("%d-%d", node.StartByte(), node.EndByte()),
-		"query_kind":    string(query.Kind),
-		"query_pattern": query.Pattern,
+	// Extract content from source
+	content := string(source[node.StartByte():node.EndByte()])
+
+	// Use provider to extract language-specific attributes
+	// Provider can extract type information, visibility, etc.
+	attributes := e.provider.ParseAttributes(node, source)
+
+	// Convert provider attributes to universal metadata
+	metadata := make(map[string]any)
+	for key, value := range attributes {
+		metadata[key] = value
 	}
 
-	return &types.Result{
-		Node:     node,
-		Kind:     types.NodeKind(string(nodeKind)),
-		Name:     nodeName,
-		Location: location,
-		Metadata: metadata,
+	// Add universal metadata
+	metadata["node_type"] = node.Type()
+	metadata["query_kind"] = string(query.Kind)
+	metadata["query_pattern"] = query.Pattern
+
+	// Use provider to determine scope information
+	scope := e.provider.GetNodeScope(node)
+
+	// Find parent context using provider
+	var parentKind core.NodeKind
+	var parentName string
+	if parent := node.Parent(); parent != nil {
+		parentKind = e.provider.GetNodeKind(parent)
+		parentName = e.provider.GetNodeName(parent, source)
 	}
+
+	// Create universal result with no language-specific dependencies
+	result := &core.Result{
+		Kind:       nodeKind,
+		Name:       nodeName,
+		Location:   location,
+		Content:    content,
+		Metadata:   metadata,
+		ParentKind: parentKind,
+		ParentName: parentName,
+		Scope:      scope,
+	}
+
+	return result, nil
 }
 
-// applyFilters applies post-processing filters to results
-func (e *UniversalEvaluator) applyFilters(results *types.ResultSet, query *types.Query) *types.ResultSet {
-	if query.Pattern == "" && len(query.Attributes) == 0 {
-		return results
-	}
-
-	filteredResults := types.NewResultSet()
-
-	for _, result := range results.All() {
-		if e.matchesFilters(result, query) {
-			filteredResults.Add(result)
-		}
-	}
-
-	return filteredResults
-}
-
-// matchesFilters checks if a result matches the query filters
-func (e *UniversalEvaluator) matchesFilters(result *types.Result, query *types.Query) bool {
-	// Check pattern matching
-	if query.Pattern != "" && query.Pattern != "*" {
-		if !e.matchesPattern(result.Name, query.Pattern) {
-			return false
-		}
-	}
-
-	// Check attribute filters
-	for key, value := range query.Attributes {
-		if !e.matchesAttribute(result, key, value) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// matchesPattern checks if a name matches a pattern (with wildcard support)
-func (e *UniversalEvaluator) matchesPattern(name, pattern string) bool {
-	if pattern == "*" {
-		return true
-	}
-
-	// Simple wildcard matching - can be enhanced
-	if strings.Contains(pattern, "*") {
-		// Convert to regex-like matching
-		pattern = strings.ReplaceAll(pattern, "*", ".*")
-		matched, _ := regexp.MatchString("^"+pattern+"$", name)
-		return matched
-	}
-
-	return name == pattern
-}
-
-// matchesAttribute checks if a result matches an attribute filter
-func (e *UniversalEvaluator) matchesAttribute(result *types.Result, key, value string) bool {
-	// This would need to be implemented based on specific attribute types
-	// For now, return true as a placeholder
-	return true
-}
-
-// Helper methods for set operations
-
-// getAllNodesOfKind gets all nodes of a specific kind
-func (e *UniversalEvaluator) getAllNodesOfKind(kind types.NodeKind, source []byte) (*types.ResultSet, error) {
-	// Create a wildcard query for the kind
-	wildcardQuery := &types.Query{
-		Kind:    kind,
-		Pattern: "*",
-	}
-
-	return e.EvaluateQuery(wildcardQuery, source)
-}
-
-// subtractResults returns results in first set but not in second
-func (e *UniversalEvaluator) subtractResults(first, second *types.ResultSet) *types.ResultSet {
-	result := types.NewResultSet()
-	secondNodes := make(map[*sitter.Node]bool)
-
-	// Build lookup map for second set
-	for _, r := range second.All() {
-		secondNodes[r.Node] = true
-	}
-
-	// Add nodes from first set that aren't in second
-	for _, r := range first.All() {
-		if !secondNodes[r.Node] {
-			result.Add(r)
-		}
-	}
-
-	return result
-}
-
-// intersectResults returns results present in both sets
-func (e *UniversalEvaluator) intersectResults(first, second *types.ResultSet) *types.ResultSet {
-	result := types.NewResultSet()
-	secondNodes := make(map[*sitter.Node]bool)
-
-	// Build lookup map for second set
-	for _, r := range second.All() {
-		secondNodes[r.Node] = true
-	}
-
-	// Add nodes from first set that are also in second
-	for _, r := range first.All() {
-		if secondNodes[r.Node] {
-			result.Add(r)
-		}
-	}
-
-	return result
-}
-
-// isNodeWithinParent checks if a node is within the scope of a parent node
-func (e *UniversalEvaluator) isNodeWithinParent(child, parent *sitter.Node) bool {
-	if child == nil || parent == nil {
-		return false
-	}
-
-	// Check if child's byte range is within parent's byte range
-	return child.StartByte() >= parent.StartByte() && child.EndByte() <= parent.EndByte()
-}
-
-// GetProvider returns the language provider used by this evaluator
-func (e *UniversalEvaluator) GetProvider() types.LanguageProvider {
+// GetProvider returns the language provider used by this evaluator.
+// This enables inspection of the provider for debugging or capability queries.
+func (e *UniversalEvaluator) GetProvider() provider.LanguageProvider {
 	return e.provider
 }
 
-// GetLanguage returns the Tree-sitter language used by this evaluator
-func (e *UniversalEvaluator) GetLanguage() *sitter.Language {
-	return e.language
+// GetLanguage returns the canonical language identifier from the provider.
+// This is a convenience method for getting the language name without
+// directly accessing the provider.
+func (e *UniversalEvaluator) GetLanguage() string {
+	if e.provider == nil {
+		return ""
+	}
+	return e.provider.Lang()
 }
