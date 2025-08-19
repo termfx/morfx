@@ -344,8 +344,8 @@ func TestEncryptDecryptBlob(t *testing.T) {
 			}
 
 			key := make([]byte, encryptor.AlgoKeyLen())
-			if _, err := rand.Read(key); err != nil {
-				t.Fatalf("Failed to generate key: %v", err)
+			if _, kerr := rand.Read(key); kerr != nil {
+				t.Fatalf("Failed to generate key: %v", kerr)
 			}
 
 			// Test encryptBlob
@@ -678,7 +678,7 @@ func TestKeyCleanup(t *testing.T) {
 	}
 
 	// Create 4 more versions (total 5)
-	for i := range 4 {
+	for i := 0; i < 4; i++ {
 		_, err = RotateKey(db, masterKey, encryptor, config)
 		if err != nil {
 			t.Fatalf("Failed to rotate key iteration %d: %v", i, err)

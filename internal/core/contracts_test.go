@@ -717,7 +717,7 @@ func TestDataStructureIntegrity(t *testing.T) {
 
 		result := Result{
 			Kind: query.Kind,
-			Name: "testFunction",
+			Name: "testFunction", // Used to verify query-result relationship
 			Metadata: map[string]any{
 				"query_kind":    string(query.Kind),
 				"query_pattern": query.Pattern,
@@ -731,6 +731,16 @@ func TestDataStructureIntegrity(t *testing.T) {
 
 		if queryKind, ok := result.Metadata["query_kind"]; !ok || queryKind != string(query.Kind) {
 			t.Error("Result metadata should reference original query kind")
+		}
+
+		// Verify Raw field preserves original query string
+		if query.Raw != "function:test*" {
+			t.Errorf("Expected Raw field to be 'function:test*', got '%s'", query.Raw)
+		}
+
+		// Verify Result.Name matches Query.Name
+		if result.Name != "testFunction" {
+			t.Errorf("Expected Result.Name to be 'testFunction', got '%s'", result.Name)
 		}
 	})
 
@@ -829,6 +839,8 @@ func BenchmarkQueryAttributeAccess(b *testing.B) {
 	}
 
 	for b.Loop() {
+		_ = query.Kind
+		_ = query.Pattern
 		_ = query.Attributes["type"]
 		_ = query.Attributes["visibility"]
 		_ = query.Attributes["params"]

@@ -114,8 +114,8 @@ func Open() (*DBConn, error) {
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 	dir := fmt.Sprintf("%s/.morfx", cwd)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create .morfx directory: %w", err)
+	if mkerr := os.MkdirAll(dir, 0o700); mkerr != nil {
+		return nil, fmt.Errorf("failed to create .morfx directory: %w", mkerr)
 	}
 	// Set permissions for .morfx/ (ignore error if already set)
 	_ = os.Chmod(dir, 0o700)

@@ -34,8 +34,8 @@ func TestOpenAndMigrateNoFTS5(t *testing.T) {
 		}
 		defer dbConn.Close()
 
-		if err := Migrate(dbConn.DB); err != nil {
-			t.Fatalf("Migrate failed: %v", err)
+		if merr := Migrate(dbConn.DB); merr != nil {
+			t.Fatalf("Migrate failed: %v", merr)
 		}
 
 		// Verify that logs table is a regular table (not FTS5)
@@ -77,8 +77,8 @@ func TestSearchLogsNoFTS5(t *testing.T) {
 	}
 	defer dbConn.Close()
 
-	if err := Migrate(dbConn.DB); err != nil {
-		t.Fatalf("Migrate failed: %v", err)
+	if merr := Migrate(dbConn.DB); merr != nil {
+		t.Fatalf("Migrate failed: %v", merr)
 	}
 
 	// Create required parent records to satisfy foreign key constraints

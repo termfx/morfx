@@ -32,7 +32,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 
 	// Define flags
 	fs.BoolP("help", "h", true, "Show this help message and exit.")
-
+	
 	// Core Input flags
 	fs.StringP(
 		"query",
@@ -53,7 +53,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		"",
 		"Target language (go, python, etc.). Inferred from file extensions if omitted.",
 	)
-
+	
 	// InputOptions flags
 	fs.BoolP("dry-run", "d", false, "Perform a trial run without writing any files.")
 	fs.BoolP(
@@ -89,7 +89,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		false,
 		"Skip import organization after operations.",
 	)
-
+	
 	// Legacy compatibility flags
 	fs.BoolP(
 		"include-tests",
@@ -114,7 +114,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		false,
 		"Write changes to disk (overrides default dry-run behavior).",
 	)
-
+	
 	// Output control flags
 	showDiff := fs.BoolP("diff", "D", false, "Show a unified diff of the changes.")
 	diffContext := fs.IntP("diff-context", "C", 3, "Lines of context for the diff.")
@@ -163,7 +163,7 @@ func BuildConfigFromFlags(args []string) (*model.Config, []string, error) {
 		JSONOutput:  *jsonOutput,
 		StdoutMode:  *stdout,
 		Workers:     *workers,
-
+		
 		// Map new flags to config
 		DryRun:          dryRun,
 		Interactive:     interactive,
@@ -185,7 +185,7 @@ func validateFlags(fs *pflag.FlagSet, cfg *model.Config) (*model.Config, []strin
 	}
 
 	// Check commit flag first
-	if cfg, ok := checkCommit(fs); ok {
+	if _, ok := checkCommit(fs); ok {
 		return cfg, nil, nil
 	}
 

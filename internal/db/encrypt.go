@@ -192,7 +192,7 @@ func initKeyring(db *sql.DB, masterKey []byte, activeKeyVersion int, encryptor E
 	if count == 0 {
 		// Insert the new key version into the database
 		keyHash := sha256.Sum256(derivedKey)
-		_, err := db.Exec(
+		_, iErr := db.Exec(
 			"INSERT INTO keys(key_version, created_at, algo, key_hash, key_material, derivation_salt, derivation_info, is_active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
 			activeKeyVersion,
 			time.Now().Unix(), // Use Unix timestamp for created_at
@@ -203,7 +203,7 @@ func initKeyring(db *sql.DB, masterKey []byte, activeKeyVersion int, encryptor E
 			info,         // Store derivation info
 			1,            // Mark as active
 		)
-		if err != nil {
+		if iErr != nil {
 			return fmt.Errorf("failed to insert new key version into database: %w", err)
 		}
 	}
@@ -233,7 +233,7 @@ func initKeyring(db *sql.DB, masterKey []byte, activeKeyVersion int, encryptor E
 
 		reDerivedKeyHash := sha256.Sum256(existingDerivedKey)
 		if !bytes.Equal(keyHashPrefix, reDerivedKeyHash[:16]) {
-			return fmt.Errorf("key hash mismatch for version %d. Possible tampering or master key change.", kv)
+			return fmt.Errorf("key hash mismatch for version %d: possible tampering or master key change", kv)
 		}
 		globalKeyring[kv] = existingDerivedKey
 	}
@@ -316,8 +316,8 @@ func cleanupOldKeys(db *sql.DB, retainCount int) error {
 	var versionsToDelete []int
 	for rows.Next() {
 		var version int
-		if err := rows.Scan(&version); err != nil {
-			return fmt.Errorf("failed to scan key version: %w", err)
+		if rerr := rows.Scan(&version); rerr != nil {
+			return fmt.Errorf("failed to scan key version: %w", rerr)
 		}
 		versionsToDelete = append(versionsToDelete, version)
 	}

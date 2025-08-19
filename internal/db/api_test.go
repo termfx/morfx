@@ -83,7 +83,7 @@ func TestBeginRun(t *testing.T) {
 
 			if !tt.wantErr {
 				// Verify runID is a valid UUID
-				if _, err := uuid.Parse(runID); err != nil {
+				if _, parseErr := uuid.Parse(runID); parseErr != nil {
 					t.Errorf("BeginRun() returned invalid UUID: %v", err)
 				}
 
@@ -170,8 +170,8 @@ func TestAppendOp(t *testing.T) {
 
 			if !tt.wantErr {
 				// Verify opID is a valid UUID
-				if _, err := uuid.Parse(opID); err != nil {
-					t.Errorf("AppendOp() returned invalid UUID: %v", err)
+				if _, werr := uuid.Parse(opID); werr != nil {
+					t.Errorf("AppendOp() returned invalid UUID: %v", werr)
 				}
 
 				// Verify operation was inserted into database

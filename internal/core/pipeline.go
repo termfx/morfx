@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sort"
@@ -73,7 +74,7 @@ func (p *Pipeline) Apply(input Input) (*PipelineResult, error) {
 		parser := sitter.NewParser()
 		parser.SetLanguage(language)
 		var err error
-		tree, err = parser.ParseCtx(nil, nil, []byte(input.CodeIn))
+		tree, err = parser.ParseCtx(context.TODO(), nil, []byte(input.CodeIn))
 		if err != nil {
 			return p.errorResult(result, fmt.Errorf("parse error: %w", err))
 		}
@@ -131,7 +132,7 @@ func (p *Pipeline) Apply(input Input) (*PipelineResult, error) {
 
 	// Step 6: Post-process
 	if input.Options == nil || !input.Options.SkipValidation {
-		if err := p.validateResult(modifiedCode, input.Repl); err != nil {
+		if validateErr := p.validateResult(modifiedCode, input.Repl); validateErr != nil {
 			result.Status = StatusPartial
 			result.Diagnostics = append(result.Diagnostics, Diagnostic{
 				Severity: "warning",
@@ -173,6 +174,7 @@ func (p *Pipeline) Apply(input Input) (*PipelineResult, error) {
 func (p *Pipeline) resolveOperation(op Operation, query string) (Operation, error) {
 	// For now, return the operation as-is
 	// Future: Add logic for operation inference based on query
+	_ = query // TODO: Use query for operation inference
 	switch op {
 	case InsertBefore, InsertAfter, Replace, Delete, AppendToBody:
 		return op, nil

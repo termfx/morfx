@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -340,8 +339,8 @@ func TestRetryLogic(t *testing.T) {
 
 	go func() {
 		for i := range 10 {
-			_, err := execWithRetry(db, "INSERT INTO retry_test (id) VALUES (?)", i)
-			if err != nil {
+			_, errx := execWithRetry(db, "INSERT INTO retry_test (id) VALUES (?)", i)
+			if errx != nil {
 				errorChan <- fmt.Errorf("concurrent insert %d failed: %v", i, err)
 				return
 			}
@@ -351,8 +350,8 @@ func TestRetryLogic(t *testing.T) {
 
 	go func() {
 		for i := 10; i < 20; i++ {
-			_, err := execWithRetry(db, "INSERT INTO retry_test (id) VALUES (?)", i)
-			if err != nil {
+			_, errx := execWithRetry(db, "INSERT INTO retry_test (id) VALUES (?)", i)
+			if errx != nil {
 				errorChan <- fmt.Errorf("concurrent insert %d failed: %v", i, err)
 				return
 			}
@@ -366,8 +365,8 @@ func TestRetryLogic(t *testing.T) {
 		select {
 		case <-done:
 			completedCount++
-		case err := <-errorChan:
-			t.Errorf("Goroutine failed: %v", err)
+		case errChan := <-errorChan:
+			t.Errorf("Goroutine failed: %v", errChan)
 			return
 		case <-time.After(5 * time.Second):
 			t.Fatal("Test timed out waiting for goroutines")
@@ -428,22 +427,6 @@ func TestDatabaseLockHandling(t *testing.T) {
 		t.Errorf("Expected 'test', got '%s'", data)
 	}
 }
-
-// Helper function to simulate database lock errors
-func simulateDatabaseLock(db *sql.DB) error {
-	// This is a conceptual helper - in practice, database locks occur
-	// due to concurrent access patterns
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Hold a transaction open to potentially cause locks
-	_, err = tx.Exec("SELECT 1")
-	return err
-}
-
 func TestErrorHandling(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

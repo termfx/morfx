@@ -23,8 +23,8 @@ func TestOpenAndMigrate(t *testing.T) {
 			t.Fatalf("Open failed: %v", err)
 		}
 		defer dbConn.Close()
-		if err := Migrate(dbConn.DB); err != nil {
-			t.Fatalf("Migrate failed: %v", err)
+		if merr := Migrate(dbConn.DB); merr != nil {
+			t.Fatalf("Migrate failed: %v", merr)
 		}
 		// Verify that logs table is a virtual table (FTS5)
 		var tblName, tblType string
@@ -174,8 +174,8 @@ func TestSearchLogs(t *testing.T) {
 	}
 	defer dbConn.Close()
 
-	if err := Migrate(dbConn.DB); err != nil {
-		t.Fatalf("Migrate failed: %v", err)
+	if merr := Migrate(dbConn.DB); merr != nil {
+		t.Fatalf("Migrate failed: %v", merr)
 	}
 
 	// Create required parent records to satisfy foreign key constraints
