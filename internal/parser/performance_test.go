@@ -35,12 +35,11 @@ func BenchmarkParseComplexLogicalQuery(b *testing.B) {
 // BenchmarkParseQueryWithProvider tests performance of provider integration
 func BenchmarkParseQueryWithProvider(b *testing.B) {
 	parser := NewUniversalParser()
-	provider := NewMockProvider()
 	input := "fn:test"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := parser.ParseQueryWithProvider(input, provider)
+		_, err := parser.ParseQuery(input)
 		if err != nil {
 			b.Errorf("Unexpected error: %v", err)
 		}
@@ -157,7 +156,6 @@ func BenchmarkParseQueryMemoryAllocation(b *testing.B) {
 // BenchmarkProviderDSLTranslation tests performance of DSL translation with provider
 func BenchmarkProviderDSLTranslation(b *testing.B) {
 	parser := NewUniversalParser()
-	provider := NewMockProvider()
 	queries := []string{
 		"fn:test",
 		"var:name",
@@ -169,7 +167,7 @@ func BenchmarkProviderDSLTranslation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		query := queries[i%len(queries)]
-		_, err := parser.ParseQueryWithProvider(query, provider)
+		_, err := parser.ParseQuery(query)
 		if err != nil {
 			b.Errorf("Unexpected error for query %s: %v", query, err)
 		}

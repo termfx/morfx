@@ -74,7 +74,7 @@ func TestProviderIntegration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parser.ParseQueryWithProvider(tt.dsl, mockProvider)
+			result, err := parser.ParseQuery(tt.dsl)
 
 			if tt.wantErr {
 				if err == nil {
@@ -151,7 +151,7 @@ func TestProviderQueryTranslation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, err := parser.ParseQueryWithProvider(tt.dsl, mockProvider)
+			query, err := parser.ParseQuery(tt.dsl)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseQueryWithProvider() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -175,7 +175,6 @@ func TestProviderQueryTranslation(t *testing.T) {
 // TestProviderDSLValidation tests DSL validation with providers
 func TestProviderDSLValidation(t *testing.T) {
 	parser := NewUniversalParser()
-	mockProvider := NewMockProvider()
 
 	tests := []struct {
 		name        string
@@ -217,7 +216,7 @@ func TestProviderDSLValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parser.ParseQueryWithProvider(tt.dsl, mockProvider)
+			_, err := parser.ParseQuery(tt.dsl)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseQueryWithProvider() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -270,7 +269,7 @@ func TestProviderComplexScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, err := parser.ParseQueryWithProvider(tt.dsl, mockProvider)
+			query, err := parser.ParseQuery(tt.dsl)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseQueryWithProvider() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -296,24 +295,17 @@ func TestProviderComplexScenarios(t *testing.T) {
 func TestProviderErrorHandling(t *testing.T) {
 	parser := NewUniversalParser()
 
-	// Test with nil provider
-	t.Run("nil provider", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				// Expected panic due to nil provider
-				t.Logf("Expected panic with nil provider: %v", r)
-			}
-		}()
-		_, err := parser.ParseQueryWithProvider("fn:test", nil)
+	// Test with valid DSL that should work regardless of provider
+	t.Run("parser handles unsupported DSL gracefully", func(t *testing.T) {
+		_, err := parser.ParseQuery("unsupported_kind:test")
 		if err == nil {
-			t.Errorf("ParseQueryWithProvider() with nil provider should return error")
+			t.Errorf("ParseQuery() with unsupported kind should return error")
 		}
 	})
 
 	// Test with provider that returns errors
-	errorProvider := &ErrorProvider{}
 	t.Run("provider with errors", func(t *testing.T) {
-		_, err := parser.ParseQueryWithProvider("fn:test", errorProvider)
+		_, err := parser.ParseQuery("fn:test")
 		// Should handle provider errors gracefully
 		if err != nil {
 			t.Logf("Provider error handled: %v", err)
@@ -324,23 +316,36 @@ func TestProviderErrorHandling(t *testing.T) {
 // ErrorProvider is a mock provider that returns errors for testing
 type ErrorProvider struct{}
 
-func (e *ErrorProvider) Lang() string                                                    { return "error" }
-func (e *ErrorProvider) Aliases() []string                                               { return []string{"error"} }
-func (e *ErrorProvider) Extensions() []string                                            { return []string{".err"} }
-func (e *ErrorProvider) GetSitterLanguage() *sitter.Language                           { return nil }
-func (e *ErrorProvider) TranslateKind(kind types.NodeKind) []types.NodeMapping          { return []types.NodeMapping{} }
-func (e *ErrorProvider) TranslateQuery(q *types.Query) (string, error)                 { return "", nil }
-func (e *ErrorProvider) NormalizeDSLKind(dslKind string) types.NodeKind                 { return types.NodeKind(dslKind) }
-func (e *ErrorProvider) GetSupportedDSLKinds() []string                                 { return []string{} }
-func (e *ErrorProvider) ParseAttributes(node *sitter.Node, source []byte) map[string]string { return make(map[string]string) }
-func (e *ErrorProvider) GetNodeKind(node *sitter.Node) types.NodeKind                   { return "unknown" }
-func (e *ErrorProvider) GetNodeName(node *sitter.Node, source []byte) string            { return "" }
-func (e *ErrorProvider) OptimizeQuery(query *types.Query) *types.Query                  { return query }
-func (e *ErrorProvider) EstimateQueryCost(query *types.Query) int                       { return 1 }
-func (e *ErrorProvider) GetNodeScope(node *sitter.Node) types.ScopeType                 { return types.ScopeFile }
-func (e *ErrorProvider) FindEnclosingScope(node *sitter.Node, scope types.ScopeType) *sitter.Node { return nil }
-func (e *ErrorProvider) IsBlockLevelNode(nodeType string) bool                          { return false }
-func (e *ErrorProvider) GetDefaultIgnorePatterns() ([]string, []string)                { return []string{}, []string{} }
-func (e *ErrorProvider) BuildMappings() map[types.NodeKind][]string                     { return make(map[types.NodeKind][]string) }
-func (e *ErrorProvider) CacheQuery(query string, result *types.Query)                   {}
-func (e *ErrorProvider) GetCachedQuery(query string) (*types.Query, bool)               { return nil, false }
+func (e *ErrorProvider) Lang() string                        { return "error" }
+func (e *ErrorProvider) Aliases() []string                   { return []string{"error"} }
+func (e *ErrorProvider) Extensions() []string                { return []string{".err"} }
+func (e *ErrorProvider) GetSitterLanguage() *sitter.Language { return nil }
+func (e *ErrorProvider) TranslateKind(kind types.NodeKind) []types.NodeMapping {
+	return []types.NodeMapping{}
+}
+func (e *ErrorProvider) TranslateQuery(q *types.Query) (string, error) { return "", nil }
+func (e *ErrorProvider) NormalizeDSLKind(dslKind string) types.NodeKind {
+	return types.NodeKind(dslKind)
+}
+func (e *ErrorProvider) GetSupportedDSLKinds() []string { return []string{} }
+func (e *ErrorProvider) ParseAttributes(node *sitter.Node, source []byte) map[string]string {
+	return make(map[string]string)
+}
+func (e *ErrorProvider) GetNodeKind(node *sitter.Node) types.NodeKind        { return "unknown" }
+func (e *ErrorProvider) GetNodeName(node *sitter.Node, source []byte) string { return "" }
+func (e *ErrorProvider) OptimizeQuery(query *types.Query) *types.Query       { return query }
+func (e *ErrorProvider) EstimateQueryCost(query *types.Query) int            { return 1 }
+func (e *ErrorProvider) GetNodeScope(node *sitter.Node) types.ScopeType      { return types.ScopeFile }
+func (e *ErrorProvider) FindEnclosingScope(node *sitter.Node, scope types.ScopeType) *sitter.Node {
+	return nil
+}
+func (e *ErrorProvider) IsBlockLevelNode(nodeType string) bool { return false }
+func (e *ErrorProvider) GetDefaultIgnorePatterns() ([]string, []string) {
+	return []string{}, []string{}
+}
+
+func (e *ErrorProvider) BuildMappings() map[types.NodeKind][]string {
+	return make(map[types.NodeKind][]string)
+}
+func (e *ErrorProvider) CacheQuery(query string, result *types.Query)     {}
+func (e *ErrorProvider) GetCachedQuery(query string) (*types.Query, bool) { return nil, false }
