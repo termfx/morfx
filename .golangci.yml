@@ -1,0 +1,488 @@
+version: "2"
+run:
+  go: "1.24"
+  build-tags:
+    - sqlite_fts5
+    - integration
+  modules-download-mode: readonly
+  issues-exit-code: 1
+  tests: true
+  allow-parallel-runners: true
+output:
+  formats:
+    text:
+      path: stdout
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - cyclop
+    - decorder
+    - durationcheck
+    - errcheck
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gomoddirectives
+    - gosec
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - ireturn
+    - lll
+    - maintidx
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nolintlint
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - promlinter
+    - reassign
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - tagliatelle
+    - testableexamples
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl_v5
+  settings:
+    cyclop:
+      max-complexity: 12
+      package-average: 5
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    funlen:
+      lines: 75
+      statements: 50
+    gocognit:
+      min-complexity: 21
+    gocritic:
+      disabled-checks:
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      settings:
+        captLocal:
+          paramsOnly: true
+        rangeValCopy:
+          sizeThreshold: 64
+        underef:
+          skipRecvDeref: true
+    gocyclo:
+      min-complexity: 18
+    gosec:
+      excludes:
+        - G104
+      severity: medium
+      confidence: medium
+    lll:
+      line-length: 120
+    maintidx:
+      under: 20
+    nestif:
+      min-complexity: 6
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+    tagliatelle:
+      case:
+        rules:
+          - json: snake
+    revive:
+      confidence: 0.8
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: early-return
+        - name: unconditional-recursion
+        - name: modifies-parameter
+        - name: constant-logical-expr
+        - name: bool-literal-in-expr
+        - name: range-val-in-closure
+        - name: comment-spacings
+        - name: string-of-int
+        - name: string-format
+        - name: struct-tag
+        - name: atomic
+        - name: empty-lines
+        - name: line-length-limit
+          arguments:
+            - 120
+        - name: cognitive-complexity
+          arguments:
+            - 15
+        - name: cyclomatic
+          arguments:
+            - 12
+        - name: max-public-structs
+          arguments:
+            - 5
+        - name: function-result-limit
+          arguments:
+            - 3
+        - name: argument-limit
+          arguments:
+            - 5
+        - name: function-length
+          arguments:
+            - 50
+            - 95
+    testpackage:
+      skip-regexp: (export|internal)_test\.go
+    thelper:
+      test:
+        first: true
+        name: true
+        begin: true
+      benchmark:
+        first: true
+        name: true
+        begin: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - funlen
+          - gocognit
+          - goconst
+          - gocyclo
+          - gosec
+          - lll
+          - maintidx
+        path: _test\.go
+      - linters:
+          - errcheck
+          - goconst
+        path: example_.*\.go
+      - linters:
+          - lll
+        path: \.gen\.go$
+      - linters:
+          - lll
+        source: "^//go:generate "
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+      - linters:
+          - revive
+        path: _test\.go
+        text: should not use dot imports
+      - linters:
+          - revive
+        path: internal/core/contracts\.go
+        text: max-public-structs
+      - linters:
+          - revive
+        path: _test\.go
+        text: function-length
+      - linters:
+          - revive
+        path: _test\.go
+        text: cognitive-complexity
+      - linters:
+          - ireturn
+        path: (cmd/morfx/main\.go|internal/registry/registry\.go)
+        text: returns interface
+      - linters:
+          - nestif
+        path: _test\.go
+      - linters:
+          - revive
+        path: cmd/morfx-provider-gen/main\.go
+        text: line-length-limit
+      - linters:
+          - revive
+        path: internal/provider/contract\.go
+        text: line-length-limit
+      - linters:
+          - revive
+        text: unused-parameter
+      - linters:
+          - revive
+        path: internal/util/file\.go
+        text: (argument-limit|function-result-limit)
+      - linters:
+          - revive
+        text: var-naming
+        source: "package util"
+      - linters:
+          - revive
+        path: internal/util/util\.go
+        text: (argument-limit|early-return)
+      - linters:
+          - lll
+        path: cmd/morfx-provider-gen/main\.go
+      - linters:
+          - gocritic
+        path: internal/util/file\.go
+        text: unnamedResult
+      - linters:
+          - revive
+        path: (internal/core/contracts_test\.go|internal/provider/contract\.go|internal/model/model\.go|internal/util/remap\.go)
+        text: (cyclomatic|line-length-limit)
+      - linters:
+          - unparam
+        path: (cmd/validate-architecture/main\.go|internal/core/pipeline\.go|internal/util/util\.go)
+      - linters:
+          - lll
+        path: internal/model/model\.go
+      - linters:
+          - revive
+        path: cmd/validate-(architecture|functionality)/main\.go
+        text: (argument-limit|function-length)
+      - linters:
+          - funlen
+        path: cmd/validate-functionality/main\.go
+      - linters:
+          - revive
+        path: (internal/config/checks_test\.go|internal/lang/golang/provider\.go|internal/lang/typescript/provider\.go|internal/writer/interactive\.go)
+        text: (bool-literal-in-expr|cyclomatic|line-length-limit|empty-block)
+      - linters:
+          - gocritic
+        path: internal/writer/interactive\.go
+        text: (preferStringWriter|preferFprint)
+      - linters:
+          - lll
+        path: internal/lang/(golang|typescript|python)/provider\.go
+      - linters:
+          - revive
+        path: (internal/config/cli\.go|internal/lang/python/provider\.go|internal/util/file\.go)
+        text: (function-length|line-length-limit)
+      - linters:
+          - funlen
+        path: (internal/config/cli\.go|internal/lang/python/provider\.go)
+      - linters:
+          - lll
+        path: (internal/util/file\.go|internal/writer/interactive\.go)
+      - linters:
+          - revive
+        path: (internal/config/cli_test\.go|internal/core/types\.go|internal/registry/registry_test\.go)
+        text: (line-length-limit|max-public-structs|cyclomatic)
+      - linters:
+          - revive
+        path: (internal/db/api_test\.go|internal/parser/universal_test\.go)
+        text: (cyclomatic|line-length-limit)
+      - linters:
+          - revive
+        path: internal/registry/registry\.go
+        text: if-return
+      - linters:
+          - revive
+        path: internal/db/api\.go
+        text: (line-length-limit|function-result-limit|argument-limit|empty-block|if-return)
+      - linters:
+          - revive
+        path: internal/db/.*\.go
+        text: (blank-imports|exported|empty-block|line-length-limit|cyclomatic)
+      - linters:
+          - gocritic
+        path: internal/db/api\.go
+        text: (preferFprint|unnamedResult)
+      - linters:
+          - gocritic
+        path: internal/db/(api|db)\.go
+        text: (preferFprint|preferStringWriter)
+      - linters:
+          - nestif
+        path: internal/db/api\.go
+      - linters:
+          - revive
+        path: internal/db/(encrypt|migrate)\.go
+        text: (var-naming|function-result-limit|function-length)
+      - linters:
+          - revive
+        path: internal/provider/contract\.go
+        text: function-length
+      - linters:
+          - staticcheck
+        path: internal/db/(api|db)\.go
+        text: SA9003
+      - linters:
+          - funlen
+        path: internal/db/migrate\.go
+      - linters:
+          - ireturn
+        path: internal/db/encrypt\.go
+      - linters:
+          - revive
+        path: internal/evaluator/universal_test\.go
+        text: (cyclomatic|line-length-limit)
+      - linters:
+          - revive
+        path: internal/provider/contract\.go
+        text: (function-length|line-length-limit)
+      - linters:
+          - revive
+        path: internal/integration.*_test\.go
+        text: (line-length-limit|cyclomatic)
+      - linters:
+          - revive
+        path: internal/lang/.*\.(go|_test\.go)
+        text: (line-length-limit|cyclomatic|argument-limit|function-length|exported)
+      - linters:
+          - thelper
+        path: internal/lang/golang/e2e_test\.go
+      - linters:
+          - funlen
+        path: internal/lang/(golang|javascript|typescript)/provider\.go
+      - linters:
+          - revive
+        path: (internal/manipulator/manipulator\.go|internal/matcher/matcher_test\.go)
+        text: cyclomatic
+      - linters:
+          - cyclop
+        path: internal/manipulator/manipulator\.go
+      - linters:
+          - revive
+        path: internal/model/model\.go
+        text: max-public-structs
+      - linters:
+          - revive
+        path: internal/parser/universal\.go
+        text: function-length
+      - linters:
+          - funlen
+        path: internal/parser/universal\.go
+      - linters:
+          - lll
+        path: internal/db/.*\.go
+      - linters:
+          - staticcheck
+        path: internal/writer/interactive\.go
+        text: SA9003
+      - path: (.+)\.go$
+        text: Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.(Un)?Setenv). is not checked
+      - linters:
+          - cyclop
+        path: (.+)_test\.go
+      - linters:
+          - gci
+          - gofumpt
+          - goimports
+        path: ".*"
+    paths:
+      - .*\.gen\.go$
+      - mock_.*\.go$
+      - vendor
+      - testdata
+      - third_party
+      - .git
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+  uniq-by-line: true
+  new: false
+  exclude-rules:
+    # Acceptable complexity for CLI flag parsing
+    - linters:
+        - revive
+      path: internal/config/cli\.go
+      text: cyclomatic
+    # Acceptable complexity for result creation with identifier resolution
+    - linters:
+        - gocognit
+        - revive
+        - gocyclo
+        - nestif
+        - funlen
+      path: internal/evaluator/universal\.go
+      text: "(createUniversalResult|function-length)"
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/termfx/morfx)
+      custom-order: true
+    gofumpt:
+      module-path: github.com/termfx/morfx
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/termfx/morfx
+  exclusions:
+    generated: lax
+    paths:
+      - .*\.gen\.go$
+      - mock_.*\.go$
+      - vendor
+      - testdata
+      - third_party
+      - .git
+      - third_party$
+      - builtin$
+      - examples$
+      - \.gen\.go$
