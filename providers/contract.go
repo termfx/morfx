@@ -9,7 +9,7 @@ type Provider interface {
 	// Metadata
 	Language() string
 	Extensions() []string
-	
+
 	// Core operations
 	Query(source string, query core.AgentQuery) core.QueryResult
 	Transform(source string, op core.TransformOp) core.TransformResult

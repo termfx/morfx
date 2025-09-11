@@ -7,6 +7,7 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
+
 	"github.com/termfx/morfx/core"
 	"github.com/termfx/morfx/providers"
 )
@@ -289,8 +290,8 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 	}
 
 	// Handle wildcards
-	if strings.HasPrefix(pattern, "*") {
-		return strings.HasSuffix(name, strings.TrimPrefix(pattern, "*"))
+	if after, ok := strings.CutPrefix(pattern, "*"); ok {
+		return strings.HasSuffix(name, after)
 	}
 	if strings.HasSuffix(pattern, "*") {
 		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))

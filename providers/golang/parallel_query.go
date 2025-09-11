@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	sitter "github.com/smacker/go-tree-sitter"
+
 	"github.com/termfx/morfx/core"
 )
 
@@ -44,7 +45,7 @@ func (p *Provider) ParallelQuery(source string, query core.AgentQuery) core.Quer
 
 	// Start workers
 	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

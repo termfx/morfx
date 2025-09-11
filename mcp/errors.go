@@ -10,25 +10,25 @@ const (
 	MethodNotFound = -32601 // The method does not exist
 	InvalidParams  = -32602 // Invalid method parameters
 	InternalError  = -32603 // Internal JSON-RPC error
-	
+
 	// Custom domain error codes (10xxx range)
-	LanguageNotFound   = 10001 // No provider for the specified language
-	SyntaxError        = 10002 // Source code parsing failed
-	NoMatches          = 10003 // Query returned no results
-	TransformFailed    = 10004 // Transformation operation failed
-	StageNotFound      = 10005 // Staging ID doesn't exist
-	StageExpired       = 10006 // Staging has expired
-	AlreadyApplied     = 10007 // Stage was already applied
-	DatabaseError      = 10008 // Database operation failed
-	ConfidenceTooLow   = 10009 // Confidence below threshold
-	ValidationFailed   = 10010 // Code validation failed
+	LanguageNotFound = 10001 // No provider for the specified language
+	SyntaxError      = 10002 // Source code parsing failed
+	NoMatches        = 10003 // Query returned no results
+	TransformFailed  = 10004 // Transformation operation failed
+	StageNotFound    = 10005 // Staging ID doesn't exist
+	StageExpired     = 10006 // Staging has expired
+	AlreadyApplied   = 10007 // Stage was already applied
+	DatabaseError    = 10008 // Database operation failed
+	ConfidenceTooLow = 10009 // Confidence below threshold
+	ValidationFailed = 10010 // Code validation failed
 )
 
 // MCPError represents a structured error for the MCP protocol
 type MCPError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // Error implements the error interface
@@ -40,7 +40,7 @@ func (e *MCPError) Error() string {
 }
 
 // NewMCPError creates a new MCP error with optional data
-func NewMCPError(code int, message string, data ...interface{}) *MCPError {
+func NewMCPError(code int, message string, data ...any) *MCPError {
 	err := &MCPError{
 		Code:    code,
 		Message: message,
@@ -60,7 +60,7 @@ func WrapError(code int, message string, err error) *MCPError {
 }
 
 // ErrorResponse creates a JSON-RPC error response
-func ErrorResponse(id interface{}, code int, message string) Response {
+func ErrorResponse(id any, code int, message string) Response {
 	return Response{
 		JSONRPC: "2.0",
 		Error: &Error{
@@ -72,7 +72,7 @@ func ErrorResponse(id interface{}, code int, message string) Response {
 }
 
 // ErrorResponseWithData creates a JSON-RPC error response with additional data
-func ErrorResponseWithData(id interface{}, code int, message string, data interface{}) Response {
+func ErrorResponseWithData(id any, code int, message string, data any) Response {
 	return Response{
 		JSONRPC: "2.0",
 		Error: &Error{

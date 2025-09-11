@@ -6,11 +6,12 @@ import (
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
+
 	"github.com/termfx/morfx/core"
 )
 
 // SmartAppend adds content at the optimal location based on content type
-func (p *Provider) SmartAppend(source string, content string) core.TransformResult {
+func (p *Provider) SmartAppend(source, content string) core.TransformResult {
 	// Parse source
 	tree, err := p.parser.ParseCtx(context.TODO(), nil, []byte(source))
 	if err != nil || tree == nil {
@@ -64,7 +65,7 @@ func (p *Provider) SmartAppend(source string, content string) core.TransformResu
 		Diff:       diff,
 		Confidence: confidence,
 		MatchCount: 1,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"strategy": insertPoint.Strategy,
 			"position": insertPoint.Position,
 		},
@@ -92,7 +93,7 @@ func (p *Provider) detectContentType(content string) string {
 }
 
 // findLastMethod finds the last method with matching receiver
-func (p *Provider) findLastMethod(tree *sitter.Tree, source string, receiver string) *InsertionPoint {
+func (p *Provider) findLastMethod(tree *sitter.Tree, source, receiver string) *InsertionPoint {
 	root := tree.RootNode()
 
 	var lastMethod *sitter.Node

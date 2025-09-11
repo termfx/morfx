@@ -3,9 +3,10 @@ package mcp
 import (
 	"fmt"
 	"time"
-	
-	"github.com/termfx/morfx/models"
+
 	"gorm.io/gorm"
+
+	"github.com/termfx/morfx/models"
 )
 
 // StagingManager handles staging and applying transformations
@@ -28,11 +29,11 @@ func (sm *StagingManager) CreateStage(stage *models.Stage) error {
 	if stage.ID == "" {
 		stage.ID = generateID("stg")
 	}
-	
+
 	// Set defaults
 	stage.Status = "pending"
 	stage.ExpiresAt = time.Now().Add(sm.config.StagingTTL)
-	
+
 	// Save to database
 	return sm.db.Create(stage).Error
 }
@@ -55,19 +56,19 @@ func (sm *StagingManager) ApplyStage(stageID string, autoApplied bool) (*models.
 
 func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (*models.Apply, error) {
 	var apply *models.Apply
-	
+
 	err := sm.db.Transaction(func(tx *gorm.DB) error {
 		// Get the stage
 		var stage models.Stage
 		if err := tx.First(&stage, "id = ?", stageID).Error; err != nil {
 			return fmt.Errorf("stage not found: %w", err)
 		}
-		
+
 		// Check status
 		if stage.Status != "pending" {
 			return fmt.Errorf("stage already %s", stage.Status)
 		}
-		
+
 		// Check expiration
 		if time.Now().After(stage.ExpiresAt) {
 			// Update status to expired
@@ -75,7 +76,7 @@ func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (
 			tx.Save(&stage)
 			return fmt.Errorf("stage expired")
 		}
-		
+
 		// Create apply record
 		apply = &models.Apply{
 			ID:          generateID("apl"),
@@ -83,38 +84,37 @@ func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (
 			AutoApplied: autoApplied,
 			AppliedBy:   "mcp",
 		}
-		
+
 		if autoApplied {
 			apply.AppliedBy = "auto"
 		}
-		
+
 		if err := tx.Create(apply).Error; err != nil {
 			return fmt.Errorf("failed to create apply record: %w", err)
 		}
-		
+
 		// Update stage status
 		now := time.Now()
 		stage.Status = "applied"
 		stage.AppliedAt = &now
-		
+
 		if err := tx.Save(&stage).Error; err != nil {
 			return fmt.Errorf("failed to update stage: %w", err)
 		}
-		
+
 		// Update session statistics if available
 		if stage.SessionID != "" {
 			tx.Model(&models.Session{}).
 				Where("id = ?", stage.SessionID).
 				Update("applies_count", gorm.Expr("applies_count + ?", 1))
 		}
-		
+
 		return nil
 	})
-	
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return apply, nil
 }
 

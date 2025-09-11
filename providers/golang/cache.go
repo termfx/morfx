@@ -86,7 +86,7 @@ func (c *ASTCache) hash(source []byte) string {
 
 // cleanupOldEntries removes expired entries
 func (c *ASTCache) cleanupOldEntries() {
-	c.cache.Range(func(key, value interface{}) bool {
+	c.cache.Range(func(key, value any) bool {
 		ast := value.(*CachedAST)
 		if time.Since(ast.timestamp) > c.maxAge {
 			c.cache.Delete(key)

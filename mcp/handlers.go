@@ -8,8 +8,8 @@ import (
 // handleListTools returns available tools to the client
 func (s *StdioServer) handleListTools(req Request) Response {
 	tools := GetToolDefinitions()
-	
-	return SuccessResponse(req.ID, map[string]interface{}{
+
+	return SuccessResponse(req.ID, map[string]any{
 		"tools": tools,
 	})
 }
@@ -20,23 +20,23 @@ func (s *StdioServer) handleCallTool(req Request) Response {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
-	
+
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return ErrorResponse(req.ID, InvalidParams, "Invalid params structure")
 	}
-	
+
 	s.debugLog("Calling tool: %s", params.Name)
-	
+
 	// Look up tool handler
 	s.mu.RLock()
 	handler, exists := s.tools[params.Name]
 	s.mu.RUnlock()
-	
+
 	if !exists {
-		return ErrorResponse(req.ID, MethodNotFound, 
+		return ErrorResponse(req.ID, MethodNotFound,
 			fmt.Sprintf("Tool not found: %s", params.Name))
 	}
-	
+
 	// Execute tool
 	result, err := handler(params.Arguments)
 	if err != nil {
@@ -47,38 +47,39 @@ func (s *StdioServer) handleCallTool(req Request) Response {
 		// Generic error
 		return ErrorResponse(req.ID, InternalError, err.Error())
 	}
-	
+
 	return SuccessResponse(req.ID, result)
 }
+
 // handleInitialize handles the MCP initialization handshake
 func (s *StdioServer) handleInitialize(req Request) Response {
 	// Parse initialize params
 	var params struct {
-		ProtocolVersion string `json:"protocolVersion"`
+		ProtocolVersion string   `json:"protocolVersion"`
 		Capabilities    struct{} `json:"capabilities"`
 		ClientInfo      struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"clientInfo"`
 	}
-	
+
 	if req.Params != nil {
 		json.Unmarshal(req.Params, &params)
-		s.debugLog("Client: %s v%s, Protocol: %s", 
-			params.ClientInfo.Name, 
-			params.ClientInfo.Version, 
+		s.debugLog("Client: %s v%s, Protocol: %s",
+			params.ClientInfo.Name,
+			params.ClientInfo.Version,
 			params.ProtocolVersion)
 	}
-	
+
 	// Return server capabilities
-	return SuccessResponse(req.ID, map[string]interface{}{
+	return SuccessResponse(req.ID, map[string]any{
 		"protocolVersion": "2025-06-18",
-		"capabilities": map[string]interface{}{
-			"tools": map[string]interface{}{},
+		"capabilities": map[string]any{
+			"tools": map[string]any{},
 		},
-		"serverInfo": map[string]interface{}{
+		"serverInfo": map[string]any{
 			"name":    "morfx",
-			"version": "0.2.0",
+			"version": "1.1.0",
 		},
 	})
 }
@@ -92,10 +93,10 @@ func (s *StdioServer) handleInitialized(req Request) Response {
 		return Response{}
 	}
 	// This shouldn't happen, but handle it
-	return SuccessResponse(req.ID, map[string]interface{}{})
+	return SuccessResponse(req.ID, map[string]any{})
 }
 
 // handlePing responds to keepalive pings
 func (s *StdioServer) handlePing(req Request) Response {
-	return SuccessResponse(req.ID, map[string]interface{}{})
+	return SuccessResponse(req.ID, map[string]any{})
 }

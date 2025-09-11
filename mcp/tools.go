@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	
+
 	"github.com/termfx/morfx/core"
 )
 
 // ToolDefinition describes a tool for the client
 type ToolDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
 }
 
 // GetToolDefinitions returns all available tool definitions
@@ -21,26 +21,26 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "query",
 			Description: "Find code elements using natural language queries",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language (go, python, javascript, etc)",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code to analyze",
 					},
-					"query": map[string]interface{}{
+					"query": map[string]any{
 						"type":        "object",
 						"description": "Query to find code elements",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type":        "string",
 								"description": "Element type (function, struct, class, etc)",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type":        "string",
 								"description": "Name pattern (supports wildcards)",
 							},
@@ -53,30 +53,30 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "replace",
 			Description: "Replace code elements matching a query",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code",
 					},
-					"target": map[string]interface{}{
+					"target": map[string]any{
 						"type":        "object",
 						"description": "Target to replace",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type": "string",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type": "string",
 							},
 						},
 					},
-					"replacement": map[string]interface{}{
+					"replacement": map[string]any{
 						"type":        "string",
 						"description": "Replacement code",
 					},
@@ -87,25 +87,25 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "delete",
 			Description: "Delete code elements matching a query",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code",
 					},
-					"target": map[string]interface{}{
+					"target": map[string]any{
 						"type":        "object",
 						"description": "Target to delete",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type": "string",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type": "string",
 							},
 						},
@@ -117,30 +117,30 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "insert_before",
 			Description: "Insert code before elements matching a query",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code",
 					},
-					"target": map[string]interface{}{
+					"target": map[string]any{
 						"type":        "object",
 						"description": "Target location",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type": "string",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type": "string",
 							},
 						},
 					},
-					"content": map[string]interface{}{
+					"content": map[string]any{
 						"type":        "string",
 						"description": "Code to insert",
 					},
@@ -151,30 +151,30 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "insert_after",
 			Description: "Insert code after elements matching a query",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code",
 					},
-					"target": map[string]interface{}{
+					"target": map[string]any{
 						"type":        "object",
 						"description": "Target location",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type": "string",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type": "string",
 							},
 						},
 					},
-					"content": map[string]interface{}{
+					"content": map[string]any{
 						"type":        "string",
 						"description": "Code to insert",
 					},
@@ -185,18 +185,18 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "apply",
 			Description: "Apply staged code transformations",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"id": map[string]interface{}{
+				"properties": map[string]any{
+					"id": map[string]any{
 						"type":        "string",
 						"description": "Specific stage ID to apply",
 					},
-					"all": map[string]interface{}{
+					"all": map[string]any{
 						"type":        "boolean",
 						"description": "Apply all pending stages",
 					},
-					"latest": map[string]interface{}{
+					"latest": map[string]any{
 						"type":        "boolean",
 						"description": "Apply the most recent pending stage",
 					},
@@ -207,30 +207,30 @@ func GetToolDefinitions() []ToolDefinition {
 		{
 			Name:        "append",
 			Description: "Append code to source - uses target if specified, otherwise intelligently places content",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"language": map[string]interface{}{
+				"properties": map[string]any{
+					"language": map[string]any{
 						"type":        "string",
 						"description": "Programming language",
 					},
-					"source": map[string]interface{}{
+					"source": map[string]any{
 						"type":        "string",
 						"description": "Source code",
 					},
-					"target": map[string]interface{}{
+					"target": map[string]any{
 						"type":        "object",
 						"description": "Optional target scope (struct, function, etc)",
-						"properties": map[string]interface{}{
-							"type": map[string]interface{}{
+						"properties": map[string]any{
+							"type": map[string]any{
 								"type": "string",
 							},
-							"name": map[string]interface{}{
+							"name": map[string]any{
 								"type": "string",
 							},
 						},
 					},
-					"content": map[string]interface{}{
+					"content": map[string]any{
 						"type":        "string",
 						"description": "Code to append",
 					},
@@ -239,7 +239,7 @@ func GetToolDefinitions() []ToolDefinition {
 			},
 		},
 	}
-	
+
 	return tools
 }
 
@@ -247,58 +247,62 @@ func GetToolDefinitions() []ToolDefinition {
 func (s *StdioServer) registerBuiltinTools() {
 	// Query tool
 	s.RegisterTool("query", s.handleQueryTool)
-	
+
 	// Transformation tools
 	s.RegisterTool("replace", s.handleReplaceTool)
 	s.RegisterTool("delete", s.handleDeleteTool)
 	s.RegisterTool("insert_before", s.handleInsertBeforeTool)
 	s.RegisterTool("insert_after", s.handleInsertAfterTool)
 	s.RegisterTool("append", s.handleAppendTool)
-	
+
 	// Staging tools
 	s.RegisterTool("apply", s.handleApplyTool)
-	
+
 	// TODO Phase 6:
 	// s.RegisterTool("validate", s.handleValidateTool)
 }
 
 // handleQueryTool executes code queries using language providers
-func (s *StdioServer) handleQueryTool(params json.RawMessage) (interface{}, error) {
+func (s *StdioServer) handleQueryTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
 		Query    json.RawMessage `json:"query"`
 	}
-	
+
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, WrapError(InvalidParams, "Invalid query parameters", err)
 	}
-	
+
 	// Get provider for language
 	provider, exists := s.providers.Get(args.Language)
 	if !exists {
-		return nil, NewMCPError(LanguageNotFound, 
+		return nil, NewMCPError(LanguageNotFound,
 			fmt.Sprintf("No provider for language: %s", args.Language),
-			"Supported languages: go, python, javascript, laravel")
+			map[string]any{
+				"requested": args.Language,
+				"supported": []string{"go"},
+			})
 	}
-	
+
 	// Parse the query
 	var query core.AgentQuery
 	if err := json.Unmarshal(args.Query, &query); err != nil {
 		return nil, WrapError(InvalidParams, "Invalid query structure", err)
 	}
-	
+
 	// Execute query
 	result := provider.Query(args.Source, query)
 	if result.Error != nil {
 		// Check if it's a syntax error or other
 		errMsg := result.Error.Error()
 		if strings.Contains(errMsg, "parse") || strings.Contains(errMsg, "syntax") {
-			return nil, NewMCPError(SyntaxError, "Failed to parse source code", errMsg)
+			return nil, NewMCPError(SyntaxError, "Failed to parse source code",
+				map[string]any{"details": errMsg})
 		}
 		return nil, WrapError(TransformFailed, "Query execution failed", result.Error)
 	}
-	
+
 	// Format matches as human-readable text
 	var responseText string
 	if len(result.Matches) == 0 {
@@ -309,10 +313,10 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (interface{}, erro
 			responseText += "es"
 		}
 		responseText += ":\n\n"
-		
+
 		for _, match := range result.Matches {
 			responseText += fmt.Sprintf("• %s '%s' at line %d, column %d",
-				match.Type, match.Name, 
+				match.Type, match.Name,
 				match.Location.Line, match.Location.Column)
 			if match.Content != "" {
 				responseText += fmt.Sprintf("\n  Content: %s", match.Content)
@@ -320,10 +324,10 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (interface{}, erro
 			responseText += "\n"
 		}
 	}
-	
+
 	// Return as MCP content blocks
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
+	return map[string]any{
+		"content": []map[string]any{
 			{
 				"type": "text",
 				"text": responseText,

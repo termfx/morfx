@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"strings"
 
+	"gorm.io/datatypes"
+
 	"github.com/termfx/morfx/core"
 	"github.com/termfx/morfx/models"
-	"gorm.io/datatypes"
 )
 
 // handleReplaceTool executes replacement transformation with staging
-func (s *StdioServer) handleReplaceTool(params json.RawMessage) (interface{}, error) {
+func (s *StdioServer) handleReplaceTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language    string          `json:"language"`
 		Source      string          `json:"source"`
@@ -32,7 +33,7 @@ func (s *StdioServer) handleReplaceTool(params json.RawMessage) (interface{}, er
 }
 
 // handleDeleteTool executes deletion transformation with staging
-func (s *StdioServer) handleDeleteTool(params json.RawMessage) (interface{}, error) {
+func (s *StdioServer) handleDeleteTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
@@ -49,7 +50,7 @@ func (s *StdioServer) handleDeleteTool(params json.RawMessage) (interface{}, err
 }
 
 // handleInsertBeforeTool executes insert before transformation with staging
-func (s *StdioServer) handleInsertBeforeTool(params json.RawMessage) (interface{}, error) {
+func (s *StdioServer) handleInsertBeforeTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
@@ -68,7 +69,7 @@ func (s *StdioServer) handleInsertBeforeTool(params json.RawMessage) (interface{
 }
 
 // handleInsertAfterTool executes insert after transformation with staging
-func (s *StdioServer) handleInsertAfterTool(params json.RawMessage) (interface{}, error) {
+func (s *StdioServer) handleInsertAfterTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
@@ -87,11 +88,20 @@ func (s *StdioServer) handleInsertAfterTool(params json.RawMessage) (interface{}
 }
 
 // executeTransform is the common transformation logic with staging
-func (s *StdioServer) executeTransform(language string, source string, targetJSON json.RawMessage, op core.TransformOp) (interface{}, error) {
+func (s *StdioServer) executeTransform(
+	language, source string,
+	targetJSON json.RawMessage,
+	op core.TransformOp,
+) (any, error) {
 	// Get provider
 	provider, exists := s.providers.Get(language)
 	if !exists {
-		return nil, NewMCPError(LanguageNotFound, fmt.Sprintf("No provider for language: %s", language))
+		return nil, NewMCPError(LanguageNotFound,
+			fmt.Sprintf("No provider for language: %s", language),
+			map[string]any{
+				"requested": language,
+				"supported": []string{"go"},
+			})
 	}
 
 	// Parse target
@@ -106,10 +116,12 @@ func (s *StdioServer) executeTransform(language string, source string, targetJSO
 	if result.Error != nil {
 		errMsg := result.Error.Error()
 		if strings.Contains(errMsg, "parse") || strings.Contains(errMsg, "syntax") {
-			return nil, NewMCPError(SyntaxError, "Failed to parse source", errMsg)
+			return nil, NewMCPError(SyntaxError, "Failed to parse source",
+				map[string]any{"details": errMsg})
 		}
 		if strings.Contains(errMsg, "no matches") || strings.Contains(errMsg, "no targets") {
-			return nil, NewMCPError(NoMatches, fmt.Sprintf("No targets found for %s", op.Method), errMsg)
+			return nil, NewMCPError(NoMatches, fmt.Sprintf("No targets found for %s", op.Method),
+				map[string]any{"details": errMsg})
 		}
 		return nil, WrapError(TransformFailed, fmt.Sprintf("%s operation failed", op.Method), result.Error)
 	}
@@ -131,8 +143,8 @@ func (s *StdioServer) executeTransform(language string, source string, targetJSO
 			responseText += "\n⚠️ Low confidence - review recommended"
 		}
 
-		return map[string]interface{}{
-			"content": []map[string]interface{}{
+		return map[string]any{
+			"content": []map[string]any{
 				{"type": "text", "text": responseText},
 			},
 			"result":   status,
@@ -197,15 +209,16 @@ func (s *StdioServer) executeTransform(language string, source string, targetJSO
 	}
 
 	// Build response
-	response := map[string]interface{}{
-		"content": []map[string]interface{}{
+	response := map[string]any{
+		"content": []map[string]any{
 			{"type": "text", "text": responseText},
 		},
 		"result": status,
 		"id":     referenceID,
 	}
 
-	if status == "applied" {
+	// Always include modified source when available (either applied or when it would auto-apply)
+	if status == "applied" || (shouldAutoApply && result.Modified != "") {
 		response["modified"] = result.Modified
 	}
 
@@ -260,7 +273,7 @@ func calculateSHA256(content string) string {
 }
 
 // mustMarshalJSON safely marshals to JSON
-func mustMarshalJSON(v interface{}) datatypes.JSON {
+func mustMarshalJSON(v any) datatypes.JSON {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return datatypes.JSON([]byte("{}"))

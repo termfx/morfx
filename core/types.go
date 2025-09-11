@@ -15,8 +15,8 @@ type Match struct {
 	Name     string   `json:"name"`
 	Location Location `json:"location"`
 	Content  string   `json:"content,omitempty"`
-	Scope    string   `json:"scope,omitempty"`    // file, function, class
-	Parent   string   `json:"parent,omitempty"`   // parent element name
+	Scope    string   `json:"scope,omitempty"`  // file, function, class
+	Parent   string   `json:"parent,omitempty"` // parent element name
 }
 
 // Location in source code
@@ -37,26 +37,26 @@ type QueryResult struct {
 
 // TransformOp represents a transformation operation
 type TransformOp struct {
-	Method      string      `json:"method"`      // replace, delete, insert_before, etc
-	Target      AgentQuery  `json:"target"`      // what to find
-	Content     string      `json:"content,omitempty"`     // for insert/append
-	Replacement string      `json:"replacement,omitempty"` // for replace
+	Method      string     `json:"method"`                // replace, delete, insert_before, etc
+	Target      AgentQuery `json:"target"`                // what to find
+	Content     string     `json:"content,omitempty"`     // for insert/append
+	Replacement string     `json:"replacement,omitempty"` // for replace
 }
 
 // TransformResult from provider
 type TransformResult struct {
-	Modified   string           `json:"modified"`
-	Diff       string           `json:"diff"`
-	Confidence ConfidenceScore  `json:"confidence"`
-	MatchCount int              `json:"match_count"` // Number of elements matched/transformed
-	Metadata   map[string]interface{} `json:"metadata,omitempty"` // Additional info (strategy, etc)
-	Error      error            `json:"-"`
+	Modified   string          `json:"modified"`
+	Diff       string          `json:"diff"`
+	Confidence ConfidenceScore `json:"confidence"`
+	MatchCount int             `json:"match_count"`        // Number of elements matched/transformed
+	Metadata   map[string]any  `json:"metadata,omitempty"` // Additional info (strategy, etc)
+	Error      error           `json:"-"`
 }
 
 // ConfidenceScore for transformations
 type ConfidenceScore struct {
-	Score   float64            `json:"score"`   // 0.0 to 1.0
-	Level   string             `json:"level"`   // high, medium, low
+	Score   float64            `json:"score"` // 0.0 to 1.0
+	Level   string             `json:"level"` // high, medium, low
 	Factors []ConfidenceFactor `json:"factors"`
 }
 

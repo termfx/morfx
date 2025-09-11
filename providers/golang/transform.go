@@ -3,9 +3,12 @@ package golang
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/pmezard/go-difflib/difflib"
 	sitter "github.com/smacker/go-tree-sitter"
+
 	"github.com/termfx/morfx/core"
 )
 
@@ -99,13 +102,7 @@ func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.Agen
 	nodeTypes := p.getNodeTypesForQuery(query.Type)
 
 	// Check if node type matches
-	typeMatches := false
-	for _, nt := range nodeTypes {
-		if node.Type() == nt {
-			typeMatches = true
-			break
-		}
-	}
+	typeMatches := slices.Contains(nodeTypes, node.Type())
 
 	if !typeMatches {
 		return false
@@ -272,7 +269,11 @@ func (p *Provider) getIndentation(source string, node *sitter.Node) string {
 }
 
 // calculateConfidence calculates transformation confidence
-func (p *Provider) calculateConfidence(op core.TransformOp, targets []*sitter.Node, source string) core.ConfidenceScore {
+func (p *Provider) calculateConfidence(
+	op core.TransformOp,
+	targets []*sitter.Node,
+	source string,
+) core.ConfidenceScore {
 	score := 1.0
 	factors := []core.ConfidenceFactor{}
 
@@ -360,58 +361,22 @@ func (p *Provider) generateDiff(original, modified string) string {
 		return ""
 	}
 
-	// Simple line-based diff for MVP
-	originalLines := strings.Split(original, "\n")
-	modifiedLines := strings.Split(modified, "\n")
-
-	diff := "--- original\n+++ modified\n"
-
-	// Find first difference
-	firstDiff := -1
-	for i := 0; i < len(originalLines) && i < len(modifiedLines); i++ {
-		if originalLines[i] != modifiedLines[i] {
-			firstDiff = i
-			break
-		}
+	diff := difflib.UnifiedDiff{
+		A:        strings.Split(original, "\n"),
+		B:        strings.Split(modified, "\n"),
+		FromFile: "original",
+		ToFile:   "modified",
+		Context:  3,
 	}
 
-	if firstDiff == -1 {
-		// Length difference
-		if len(originalLines) > len(modifiedLines) {
-			firstDiff = len(modifiedLines)
-		} else {
-			firstDiff = len(originalLines)
-		}
+	text, err := difflib.GetUnifiedDiffString(diff)
+	if err != nil {
+		// Fallback to simple diff if error
+		return fmt.Sprintf("--- original\n+++ modified\n@@ changes @@\n%d bytes -> %d bytes",
+			len(original), len(modified))
 	}
 
-	// Show context around changes (simplified)
-	start := firstDiff - 2
-	if start < 0 {
-		start = 0
-	}
-
-	diff += fmt.Sprintf("@@ -%d,%d +%d,%d @@\n",
-		start+1, len(originalLines)-start,
-		start+1, len(modifiedLines)-start)
-
-	// Add some context lines
-	for i := start; i < firstDiff && i < len(originalLines); i++ {
-		diff += " " + originalLines[i] + "\n"
-	}
-
-	// Show changes
-	if firstDiff < len(originalLines) {
-		for i := firstDiff; i < len(originalLines) && i < firstDiff+5; i++ {
-			diff += "-" + originalLines[i] + "\n"
-		}
-	}
-	if firstDiff < len(modifiedLines) {
-		for i := firstDiff; i < len(modifiedLines) && i < firstDiff+5; i++ {
-			diff += "+" + modifiedLines[i] + "\n"
-		}
-	}
-
-	return diff
+	return text
 }
 
 // getNodeTypesForQuery maps query types to AST node types
@@ -517,9 +482,9 @@ func (p *Provider) detectInnerIndentation(source string, node *sitter.Node) stri
 
 	// Find first line after opening brace
 	content := source[startByte:endByte]
-	lines := strings.Split(content, "\n")
+	lines := strings.SplitSeq(content, "\n")
 
-	for _, line := range lines {
+	for line := range lines {
 		if len(strings.TrimSpace(line)) > 0 {
 			// Count leading whitespace
 			leadingSpace := len(line) - len(strings.TrimLeft(line, " \t"))
