@@ -66,3 +66,59 @@ type ConfidenceFactor struct {
 	Impact float64 `json:"impact"` // -1.0 to 1.0
 	Reason string  `json:"reason"`
 }
+
+// FileScope defines which files to process in filesystem operations
+type FileScope struct {
+	Path           string   `json:"path"`                // Root path to scan
+	Include        []string `json:"include,omitempty"`   // File patterns to include (*.go, **/*.ts)
+	Exclude        []string `json:"exclude,omitempty"`   // File patterns to exclude
+	MaxDepth       int      `json:"max_depth,omitempty"` // Max directory depth (0 = unlimited)
+	MaxFiles       int      `json:"max_files,omitempty"` // Max files to process (0 = unlimited)
+	FollowSymlinks bool     `json:"follow_symlinks"`     // Follow symbolic links
+	Language       string   `json:"language,omitempty"`  // Auto-detect by extension if empty
+}
+
+// FileTransformOp represents a file-based transformation operation
+type FileTransformOp struct {
+	TransformOp           // Embedded base operation
+	Scope       FileScope `json:"scope"`    // Files to operate on
+	DryRun      bool      `json:"dry_run"`  // Preview only, don't modify files
+	Backup      bool      `json:"backup"`   // Create .bak files before modifying
+	Parallel    bool      `json:"parallel"` // Use parallel processing
+}
+
+// FileMatch represents a code match with file information
+type FileMatch struct {
+	Match           // Embedded base match
+	FilePath string `json:"file_path"` // Absolute file path
+	FileSize int64  `json:"file_size"` // File size in bytes
+	ModTime  int64  `json:"mod_time"`  // Last modification time (Unix timestamp)
+	Language string `json:"language"`  // Detected language
+}
+
+// FileTransformResult represents the result of file-based transformations
+type FileTransformResult struct {
+	FilesScanned      int                   `json:"files_scanned"`            // Total files processed
+	FilesModified     int                   `json:"files_modified"`           // Files actually changed
+	TotalMatches      int                   `json:"total_matches"`            // Total matches across all files
+	ScanDuration      int64                 `json:"scan_duration_ms"`         // Time spent scanning (ms)
+	TransformDuration int64                 `json:"transform_duration_ms"`    // Time spent transforming (ms)
+	Files             []FileTransformDetail `json:"files"`                    // Per-file results
+	Confidence        ConfidenceScore       `json:"confidence"`               // Overall confidence
+	TransactionID     string                `json:"transaction_id,omitempty"` // Transaction ID for rollback
+	Error             error                 `json:"-"`
+}
+
+// FileTransformDetail represents the transformation result for a single file
+type FileTransformDetail struct {
+	FilePath     string          `json:"file_path"`
+	Language     string          `json:"language"`
+	MatchCount   int             `json:"match_count"`
+	Modified     bool            `json:"modified"`
+	Diff         string          `json:"diff,omitempty"`
+	Confidence   ConfidenceScore `json:"confidence"`
+	Error        string          `json:"error,omitempty"`
+	BackupPath   string          `json:"backup_path,omitempty"`
+	OriginalSize int64           `json:"original_size"`
+	ModifiedSize int64           `json:"modified_size"`
+}

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/termfx/morfx/core"
@@ -30,7 +31,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code to analyze",
+						"description": "Source code to analyze (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to analyze (for file writer mode)",
 					},
 					"query": map[string]any{
 						"type":        "object",
@@ -47,7 +52,64 @@ func GetToolDefinitions() []ToolDefinition {
 						},
 					},
 				},
-				"required": []string{"language", "source", "query"},
+				"required": []string{"language", "query"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
+			},
+		},
+		{
+			Name:        "file_query",
+			Description: "Find code elements across multiple files using natural language queries",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"scope": map[string]any{
+						"type":        "object",
+						"description": "File scope to search",
+						"properties": map[string]any{
+							"path": map[string]any{
+								"type":        "string",
+								"description": "Root directory path to scan",
+							},
+							"include": map[string]any{
+								"type":        "array",
+								"description": "File patterns to include (*.go, **/*.ts)",
+								"items":       map[string]any{"type": "string"},
+							},
+							"exclude": map[string]any{
+								"type":        "array",
+								"description": "File patterns to exclude",
+								"items":       map[string]any{"type": "string"},
+							},
+							"max_files": map[string]any{
+								"type":        "integer",
+								"description": "Maximum files to process (0 = unlimited)",
+							},
+							"language": map[string]any{
+								"type":        "string",
+								"description": "Programming language filter",
+							},
+						},
+						"required": []string{"path"},
+					},
+					"query": map[string]any{
+						"type":        "object",
+						"description": "Query to find code elements",
+						"properties": map[string]any{
+							"type": map[string]any{
+								"type":        "string",
+								"description": "Element type (function, struct, class, etc)",
+							},
+							"name": map[string]any{
+								"type":        "string",
+								"description": "Name pattern (supports wildcards)",
+							},
+						},
+					},
+				},
+				"required": []string{"scope", "query"},
 			},
 		},
 		{
@@ -62,7 +124,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code",
+						"description": "Source code (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to modify (for file writer mode)",
 					},
 					"target": map[string]any{
 						"type":        "object",
@@ -81,7 +147,62 @@ func GetToolDefinitions() []ToolDefinition {
 						"description": "Replacement code",
 					},
 				},
-				"required": []string{"language", "source", "target", "replacement"},
+				"required": []string{"language", "target", "replacement"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
+			},
+		},
+		{
+			Name:        "file_replace",
+			Description: "Replace code elements across multiple files",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"scope": map[string]any{
+						"type":        "object",
+						"description": "File scope to process",
+						"properties": map[string]any{
+							"path": map[string]any{
+								"type":        "string",
+								"description": "Root directory path",
+							},
+							"include": map[string]any{
+								"type":        "array",
+								"description": "File patterns to include",
+								"items":       map[string]any{"type": "string"},
+							},
+							"exclude": map[string]any{
+								"type":        "array",
+								"description": "File patterns to exclude",
+								"items":       map[string]any{"type": "string"},
+							},
+						},
+						"required": []string{"path"},
+					},
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Target to replace",
+						"properties": map[string]any{
+							"type": map[string]any{"type": "string"},
+							"name": map[string]any{"type": "string"},
+						},
+					},
+					"replacement": map[string]any{
+						"type":        "string",
+						"description": "Replacement code",
+					},
+					"dry_run": map[string]any{
+						"type":        "boolean",
+						"description": "Preview changes without applying",
+					},
+					"backup": map[string]any{
+						"type":        "boolean",
+						"description": "Create backup files",
+					},
+				},
+				"required": []string{"scope", "target", "replacement"},
 			},
 		},
 		{
@@ -96,7 +217,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code",
+						"description": "Source code (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to modify (for file writer mode)",
 					},
 					"target": map[string]any{
 						"type":        "object",
@@ -111,7 +236,53 @@ func GetToolDefinitions() []ToolDefinition {
 						},
 					},
 				},
-				"required": []string{"language", "source", "target"},
+				"required": []string{"language", "target"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
+			},
+		},
+		{
+			Name:        "file_delete",
+			Description: "Delete code elements across multiple files",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"scope": map[string]any{
+						"type":        "object",
+						"description": "File scope to process",
+						"properties": map[string]any{
+							"path": map[string]any{
+								"type":        "string",
+								"description": "Root directory path",
+							},
+							"include": map[string]any{
+								"type":        "array",
+								"description": "File patterns to include",
+								"items":       map[string]any{"type": "string"},
+							},
+						},
+						"required": []string{"path"},
+					},
+					"target": map[string]any{
+						"type":        "object",
+						"description": "Target to delete",
+						"properties": map[string]any{
+							"type": map[string]any{"type": "string"},
+							"name": map[string]any{"type": "string"},
+						},
+					},
+					"dry_run": map[string]any{
+						"type":        "boolean",
+						"description": "Preview changes without applying",
+					},
+					"backup": map[string]any{
+						"type":        "boolean",
+						"description": "Create backup files",
+					},
+				},
+				"required": []string{"scope", "target"},
 			},
 		},
 		{
@@ -126,7 +297,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code",
+						"description": "Source code (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to modify (for file writer mode)",
 					},
 					"target": map[string]any{
 						"type":        "object",
@@ -145,7 +320,11 @@ func GetToolDefinitions() []ToolDefinition {
 						"description": "Code to insert",
 					},
 				},
-				"required": []string{"language", "source", "target", "content"},
+				"required": []string{"language", "target", "content"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
 			},
 		},
 		{
@@ -160,7 +339,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code",
+						"description": "Source code (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to modify (for file writer mode)",
 					},
 					"target": map[string]any{
 						"type":        "object",
@@ -179,7 +362,11 @@ func GetToolDefinitions() []ToolDefinition {
 						"description": "Code to insert",
 					},
 				},
-				"required": []string{"language", "source", "target", "content"},
+				"required": []string{"language", "target", "content"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
 			},
 		},
 		{
@@ -216,7 +403,11 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"source": map[string]any{
 						"type":        "string",
-						"description": "Source code",
+						"description": "Source code (for in-memory mode)",
+					},
+					"path": map[string]any{
+						"type":        "string",
+						"description": "File path to modify (for file writer mode)",
 					},
 					"target": map[string]any{
 						"type":        "object",
@@ -235,7 +426,11 @@ func GetToolDefinitions() []ToolDefinition {
 						"description": "Code to append",
 					},
 				},
-				"required": []string{"language", "source", "content"},
+				"required": []string{"language", "content"},
+				"oneOf": []map[string]any{
+					{"required": []string{"source"}},
+					{"required": []string{"path"}},
+				},
 			},
 		},
 	}
@@ -245,12 +440,15 @@ func GetToolDefinitions() []ToolDefinition {
 
 // registerBuiltinTools registers all built-in tool handlers
 func (s *StdioServer) registerBuiltinTools() {
-	// Query tool
+	// Query tools
 	s.RegisterTool("query", s.handleQueryTool)
+	s.RegisterTool("file_query", s.handleFileQueryTool)
 
 	// Transformation tools
 	s.RegisterTool("replace", s.handleReplaceTool)
+	s.RegisterTool("file_replace", s.handleFileReplaceTool)
 	s.RegisterTool("delete", s.handleDeleteTool)
+	s.RegisterTool("file_delete", s.handleFileDeleteTool)
 	s.RegisterTool("insert_before", s.handleInsertBeforeTool)
 	s.RegisterTool("insert_after", s.handleInsertAfterTool)
 	s.RegisterTool("append", s.handleAppendTool)
@@ -267,11 +465,31 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
+		Path     string          `json:"path"`
 		Query    json.RawMessage `json:"query"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, WrapError(InvalidParams, "Invalid query parameters", err)
+	}
+
+	// Validate that exactly one of source or path is provided
+	if (args.Source == "" && args.Path == "") || (args.Source != "" && args.Path != "") {
+		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
+	}
+
+	// Get source code
+	var source string
+	if args.Path != "" {
+		// FILE WRITER MODE: Read from filesystem
+		content, err := os.ReadFile(args.Path)
+		if err != nil {
+			return nil, WrapError(FileSystemError, "Failed to read file", err)
+		}
+		source = string(content)
+	} else {
+		// IN-MEMORY MODE: Use provided source
+		source = args.Source
 	}
 
 	// Get provider for language
@@ -292,7 +510,7 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (any, error) {
 	}
 
 	// Execute query
-	result := provider.Query(args.Source, query)
+	result := provider.Query(source, query)
 	if result.Error != nil {
 		// Check if it's a syntax error or other
 		errMsg := result.Error.Error()
@@ -323,6 +541,11 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (any, error) {
 			}
 			responseText += "\n"
 		}
+	}
+
+	// Add file info if in FILE WRITER MODE
+	if args.Path != "" {
+		responseText = fmt.Sprintf("File: %s\n\n%s", args.Path, responseText)
 	}
 
 	// Return as MCP content blocks

@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/termfx/morfx/core"
 	"github.com/termfx/morfx/db"
 	"github.com/termfx/morfx/models"
 	"github.com/termfx/morfx/providers"
@@ -31,11 +32,17 @@ type StdioServer struct {
 	// Provider registry
 	providers *providers.Registry
 
+	// File processor for filesystem operations
+	fileProcessor *core.FileProcessor
+
 	// Session tracking
 	session *models.Session
 
 	// Staging manager
 	staging *StagingManager
+
+	// Safety manager
+	safety *SafetyManager
 
 	// Debug logging
 	debugLog func(format string, args ...any)
@@ -67,12 +74,9 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 	if config.DatabaseURL != "" && config.DatabaseURL != "skip" {
 		database, err := db.Connect(config.DatabaseURL, config.Debug)
 		if err != nil {
-			// Only fail if database was explicitly requested
-			if config.DatabaseURL != "postgres://localhost/morfx_dev" {
-				return nil, fmt.Errorf("failed to connect to database: %w", err)
-			}
-			// Default URL failed, continue without database
+			// Log the error but continue without database for better compatibility
 			server.debugLog("Database connection failed, continuing without persistence: %v", err)
+			// Don't fail the server initialization - just continue without database features
 		} else {
 			server.db = database
 
@@ -99,7 +103,45 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 	server.providers.Register(golang.New())
 	server.debugLog("Registered Go provider")
 
+	// Initialize file processor with providers
+	server.fileProcessor = core.NewFileProcessor(&providerRegistryAdapter{server.providers})
+	server.debugLog("Initialized file processor")
+
+	// Initialize safety manager
+	server.safety = NewSafetyManager(config.Safety)
+	server.debugLog("Initialized safety manager")
+
 	return server, nil
+}
+
+// providerRegistryAdapter adapts providers.Registry to core.ProviderRegistry
+type providerRegistryAdapter struct {
+	*providers.Registry
+}
+
+func (pra *providerRegistryAdapter) Get(language string) (core.Provider, bool) {
+	provider, exists := pra.Registry.Get(language)
+	if !exists {
+		return nil, false
+	}
+	return &providerAdapter{provider}, true
+}
+
+// providerAdapter adapts providers.Provider to core.Provider
+type providerAdapter struct {
+	providers.Provider
+}
+
+func (pa *providerAdapter) Language() string {
+	return pa.Provider.Language()
+}
+
+func (pa *providerAdapter) Query(source string, query core.AgentQuery) core.QueryResult {
+	return pa.Provider.Query(source, query)
+}
+
+func (pa *providerAdapter) Transform(source string, op core.TransformOp) core.TransformResult {
+	return pa.Provider.Transform(source, op)
 }
 
 // Start begins processing JSON-RPC requests from stdin
@@ -182,15 +224,19 @@ func (s *StdioServer) handleRequest(req Request) Response {
 	case "tools/call":
 		return s.handleCallTool(req)
 	case "prompts/list":
-		// Return empty prompts list
-		return SuccessResponse(req.ID, map[string]any{
-			"prompts": []any{},
-		})
+		return s.handleListPrompts(req)
+	case "prompts/get":
+		return s.handleGetPrompt(req)
 	case "resources/list":
-		// Return empty resources list
-		return SuccessResponse(req.ID, map[string]any{
-			"resources": []any{},
-		})
+		return s.handleListResources(req)
+	case "resources/read":
+		return s.handleReadResource(req)
+	case "resources/subscribe":
+		return s.handleSubscribeResource(req)
+	case "resources/unsubscribe":
+		return s.handleUnsubscribeResource(req)
+	case "logging/setLevel":
+		return s.handleSetLoggingLevel(req)
 	default:
 		return ErrorResponse(req.ID, MethodNotFound,
 			fmt.Sprintf("Method not found: %s", req.Method))

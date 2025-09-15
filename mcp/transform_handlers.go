@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"gorm.io/datatypes"
@@ -18,6 +19,7 @@ func (s *StdioServer) handleReplaceTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language    string          `json:"language"`
 		Source      string          `json:"source"`
+		Path        string          `json:"path"`
 		Target      json.RawMessage `json:"target"`
 		Replacement string          `json:"replacement"`
 	}
@@ -26,7 +28,12 @@ func (s *StdioServer) handleReplaceTool(params json.RawMessage) (any, error) {
 		return nil, WrapError(InvalidParams, "Invalid replace parameters", err)
 	}
 
-	return s.executeTransform(args.Language, args.Source, args.Target, core.TransformOp{
+	// Validate that exactly one of source or path is provided
+	if (args.Source == "" && args.Path == "") || (args.Source != "" && args.Path != "") {
+		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
+	}
+
+	return s.executeTransform(args.Language, args.Source, args.Path, args.Target, core.TransformOp{
 		Method:      "replace",
 		Replacement: args.Replacement,
 	})
@@ -37,6 +44,7 @@ func (s *StdioServer) handleDeleteTool(params json.RawMessage) (any, error) {
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
+		Path     string          `json:"path"`
 		Target   json.RawMessage `json:"target"`
 	}
 
@@ -44,7 +52,12 @@ func (s *StdioServer) handleDeleteTool(params json.RawMessage) (any, error) {
 		return nil, WrapError(InvalidParams, "Invalid delete parameters", err)
 	}
 
-	return s.executeTransform(args.Language, args.Source, args.Target, core.TransformOp{
+	// Validate that exactly one of source or path is provided
+	if (args.Source == "" && args.Path == "") || (args.Source != "" && args.Path != "") {
+		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
+	}
+
+	return s.executeTransform(args.Language, args.Source, args.Path, args.Target, core.TransformOp{
 		Method: "delete",
 	})
 }
@@ -54,6 +67,7 @@ func (s *StdioServer) handleInsertBeforeTool(params json.RawMessage) (any, error
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
+		Path     string          `json:"path"`
 		Target   json.RawMessage `json:"target"`
 		Content  string          `json:"content"`
 	}
@@ -62,7 +76,12 @@ func (s *StdioServer) handleInsertBeforeTool(params json.RawMessage) (any, error
 		return nil, WrapError(InvalidParams, "Invalid insert_before parameters", err)
 	}
 
-	return s.executeTransform(args.Language, args.Source, args.Target, core.TransformOp{
+	// Validate that exactly one of source or path is provided
+	if (args.Source == "" && args.Path == "") || (args.Source != "" && args.Path != "") {
+		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
+	}
+
+	return s.executeTransform(args.Language, args.Source, args.Path, args.Target, core.TransformOp{
 		Method:  "insert_before",
 		Content: args.Content,
 	})
@@ -73,6 +92,7 @@ func (s *StdioServer) handleInsertAfterTool(params json.RawMessage) (any, error)
 	var args struct {
 		Language string          `json:"language"`
 		Source   string          `json:"source"`
+		Path     string          `json:"path"`
 		Target   json.RawMessage `json:"target"`
 		Content  string          `json:"content"`
 	}
@@ -81,18 +101,66 @@ func (s *StdioServer) handleInsertAfterTool(params json.RawMessage) (any, error)
 		return nil, WrapError(InvalidParams, "Invalid insert_after parameters", err)
 	}
 
-	return s.executeTransform(args.Language, args.Source, args.Target, core.TransformOp{
+	// Validate that exactly one of source or path is provided
+	if (args.Source == "" && args.Path == "") || (args.Source != "" && args.Path != "") {
+		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
+	}
+
+	return s.executeTransform(args.Language, args.Source, args.Path, args.Target, core.TransformOp{
 		Method:  "insert_after",
 		Content: args.Content,
 	})
 }
 
-// executeTransform is the common transformation logic with staging
+// executeTransform is the common transformation logic with staging and file writing
 func (s *StdioServer) executeTransform(
-	language, source string,
+	language, source, path string,
 	targetJSON json.RawMessage,
 	op core.TransformOp,
 ) (any, error) {
+	// Get source code
+	var actualSource string
+	var originalHash string
+	var isFileMode bool
+	var fileLock *FileLock
+	_ = fileLock // Used for lock management
+
+	if path != "" {
+		// FILE WRITER MODE: Read from filesystem with safety checks
+
+		// Acquire file lock if in file mode
+		lock, err := s.safety.LockFile(path)
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Release()
+		fileLock = lock
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, WrapError(FileSystemError, "Failed to read file", err)
+		}
+		actualSource = string(content)
+
+		// Calculate original hash for integrity checking
+		if s.config.Safety.ValidateFileHashes {
+			originalHash = calculateSHA256(actualSource)
+		}
+
+		// Validate file size
+		if s.config.Safety.MaxFileSize > 0 && int64(len(actualSource)) > s.config.Safety.MaxFileSize {
+			return nil, NewMCPError(FileTooLarge,
+				fmt.Sprintf("File exceeds size limit: %s (%d bytes > %d bytes)",
+					path, len(actualSource), s.config.Safety.MaxFileSize))
+		}
+
+		isFileMode = true
+	} else {
+		// IN-MEMORY MODE: Use provided source
+		actualSource = source
+		isFileMode = false
+	}
+
 	// Get provider
 	provider, exists := s.providers.Get(language)
 	if !exists {
@@ -112,7 +180,7 @@ func (s *StdioServer) executeTransform(
 	op.Target = target
 
 	// Execute transformation
-	result := provider.Transform(source, op)
+	result := provider.Transform(actualSource, op)
 	if result.Error != nil {
 		errMsg := result.Error.Error()
 		if strings.Contains(errMsg, "parse") || strings.Contains(errMsg, "syntax") {
@@ -126,6 +194,38 @@ func (s *StdioServer) executeTransform(
 		return nil, WrapError(TransformFailed, fmt.Sprintf("%s operation failed", op.Method), result.Error)
 	}
 
+	// Safety validation for single file operations
+	if isFileMode {
+		// Validate operation safety
+		safetyOp := &SafetyOperation{
+			Files: []SafetyFile{
+				{
+					Path:       path,
+					Size:       int64(len(result.Modified)),
+					Confidence: result.Confidence.Score,
+				},
+			},
+			GlobalConfidence: result.Confidence.Score,
+		}
+
+		if err := s.safety.ValidateOperation(safetyOp); err != nil {
+			return nil, err
+		}
+
+		// Validate file integrity (check if file was modified externally)
+		if originalHash != "" {
+			integrityChecks := []FileIntegrityCheck{
+				{
+					Path:         path,
+					ExpectedHash: originalHash,
+				},
+			}
+			if err := s.safety.ValidateFileIntegrity(integrityChecks); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Determine if should auto-apply
 	shouldAutoApply := s.config.AutoApplyEnabled &&
 		result.Confidence.Score >= s.config.AutoApplyThreshold
@@ -133,14 +233,41 @@ func (s *StdioServer) executeTransform(
 	// Create response text
 	responseText := s.formatTransformResponse(op.Method, result)
 
+	// FILE WRITER MODE: Write to filesystem if auto-applying with safety
+	if isFileMode && shouldAutoApply {
+		if err := s.safety.AtomicWrite(path, result.Modified); err != nil {
+			return nil, WrapError(FileSystemError, "Failed to write file safely", err)
+		}
+		responseText += fmt.Sprintf("\n✅ File updated safely: %s", path)
+
+		// Add safety info
+		if s.config.Safety.AtomicWrites {
+			responseText += " (atomic)"
+		}
+		if s.config.Safety.CreateBackups {
+			responseText += " (backup created)"
+		}
+	}
+
+	// Add file info if in FILE WRITER MODE
+	if isFileMode {
+		responseText = fmt.Sprintf("File: %s\n\n%s", path, responseText)
+	}
+
 	// If no staging available, return direct result
 	if s.staging == nil {
 		status := "completed"
 		if shouldAutoApply {
 			status = "applied"
-			responseText += "\n✅ Changes applied (no staging available)"
+			if !isFileMode {
+				responseText += "\n✅ Changes applied (no staging available)"
+			}
 		} else {
-			responseText += "\n⚠️ Low confidence - review recommended"
+			if isFileMode {
+				responseText += "\n⚠️ Low confidence - file not modified. Use 'apply' to force write."
+			} else {
+				responseText += "\n⚠️ Low confidence - review recommended"
+			}
 		}
 
 		return map[string]any{
@@ -149,10 +276,11 @@ func (s *StdioServer) executeTransform(
 			},
 			"result":   status,
 			"modified": result.Modified,
+			"path":     path, // Include path if in file mode
 		}, nil
 	}
 
-	// Create stage
+	// Create stage with additional safety metadata
 	stage := &models.Stage{
 		ID:        generateID("stg"),
 		Language:  language,
@@ -164,17 +292,25 @@ func (s *StdioServer) executeTransform(
 		TargetQuery: datatypes.JSON(targetJSON),
 
 		// Content
-		Original:    source,
+		Original:    actualSource,
 		Modified:    result.Modified,
 		Content:     op.Content,
 		Diff:        result.Diff,
-		BaseDigest:  calculateSHA256(source),
+		BaseDigest:  calculateSHA256(actualSource),
 		AfterDigest: calculateSHA256(result.Modified),
 
 		// Confidence
 		ConfidenceScore:   result.Confidence.Score,
 		ConfidenceLevel:   result.Confidence.Level,
 		ConfidenceFactors: mustMarshalJSON(result.Confidence.Factors),
+
+		// Safety metadata
+		ScopeAST: mustMarshalJSON(map[string]any{
+			"file_path":        path,
+			"original_hash":    originalHash,
+			"file_size":        len(result.Modified),
+			"safety_validated": true,
+		}),
 	}
 
 	// Add session if available
@@ -201,11 +337,19 @@ func (s *StdioServer) executeTransform(
 		} else {
 			status = "applied"
 			referenceID = apply.ID
-			responseText += fmt.Sprintf("\n✅ Auto-applied (ID: %s)", apply.ID)
+			if isFileMode {
+				responseText += fmt.Sprintf("\n✅ Auto-applied and file updated safely (ID: %s)", apply.ID)
+			} else {
+				responseText += fmt.Sprintf("\n✅ Auto-applied (ID: %s)", apply.ID)
+			}
 		}
 	} else {
 		responseText += fmt.Sprintf("\n📋 Staged for review (ID: %s)", stage.ID)
-		responseText += "\nUse 'apply' command to commit changes"
+		if isFileMode {
+			responseText += "\nUse 'apply' command to write changes to file"
+		} else {
+			responseText += "\nUse 'apply' command to commit changes"
+		}
 	}
 
 	// Build response
@@ -217,9 +361,14 @@ func (s *StdioServer) executeTransform(
 		"id":     referenceID,
 	}
 
-	// Always include modified source when available (either applied or when it would auto-apply)
-	if status == "applied" || (shouldAutoApply && result.Modified != "") {
+	// Always include modified source when available
+	if status == "applied" || result.Modified != "" {
 		response["modified"] = result.Modified
+	}
+
+	// Include path if in file mode
+	if isFileMode {
+		response["path"] = path
 	}
 
 	return response, nil

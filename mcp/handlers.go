@@ -73,13 +73,23 @@ func (s *StdioServer) handleInitialize(req Request) Response {
 
 	// Return server capabilities
 	return SuccessResponse(req.ID, map[string]any{
-		"protocolVersion": "2025-06-18",
+		"protocolVersion": "2024-11-05",
 		"capabilities": map[string]any{
-			"tools": map[string]any{},
+			"tools": map[string]any{
+				"listChanged": true, // Server can notify when tools list changes
+			},
+			"resources": map[string]any{
+				"subscribe":   true, // Server supports resource subscriptions
+				"listChanged": true, // Server can notify when resources list changes
+			},
+			"prompts": map[string]any{
+				"listChanged": true, // Server can notify when prompts list changes
+			},
+			"logging": map[string]any{}, // Server supports logging messages
 		},
 		"serverInfo": map[string]any{
 			"name":    "morfx",
-			"version": "1.1.0",
+			"version": "1.2.0",
 		},
 	})
 }

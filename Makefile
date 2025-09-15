@@ -26,7 +26,6 @@ GOLANGCI_VERSION = v1.62.2
 GOFUMPT_VERSION = latest
 GOLINES_VERSION = latest
 GOTESTSUM_VERSION = latest
-MIGRATE_VERSION = latest
 
 # Colors for output
 RED = \033[0;31m
@@ -134,7 +133,35 @@ test-coverage:
 	@mkdir -p $(COVERAGE_DIR)
 	@go test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
 	@go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	@go tool cover -func=$(COVERAGE_DIR)/coverage.out
 	@echo "$(GREEN)Coverage report: $(COVERAGE_DIR)/coverage.html$(NC)"
+
+## coverage-check: Enforce coverage thresholds
+.PHONY: coverage-check
+coverage-check: test-coverage
+	@echo "$(GREEN)Checking coverage thresholds...$(NC)"
+	@go run tools/coverage-check/main.go $(COVERAGE_DIR)/coverage.out
+
+## coverage-badge: Generate coverage badge
+.PHONY: coverage-badge
+coverage-badge: test-coverage
+	@echo "$(GREEN)Generating coverage badge...$(NC)"
+	@go run tools/coverage-badge.go $(COVERAGE_DIR)/coverage.out $(COVERAGE_DIR)/badge.svg
+
+## coverage-report: Generate detailed coverage report with component breakdown
+.PHONY: coverage-report
+coverage-report: test-coverage
+	@echo "$(GREEN)Generating detailed coverage report...$(NC)"
+	@go run tools/coverage-report/main.go $(COVERAGE_DIR)/coverage.out $(COVERAGE_DIR)/report.md
+
+## coverage-ci: Coverage for CI/CD (with stricter thresholds)
+.PHONY: coverage-ci
+coverage-ci:
+	@echo "$(GREEN)Running CI coverage checks...$(NC)"
+	@mkdir -p $(COVERAGE_DIR)
+	@go test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
+	@go tool cover -func=$(COVERAGE_DIR)/coverage.out | grep "total:" | awk '{print "Total coverage: " $$3}'
+	@go run tools/coverage-check/main.go $(COVERAGE_DIR)/coverage.out --strict
 
 ## bench: Run benchmarks
 .PHONY: bench
@@ -174,31 +201,12 @@ install:
 # DATABASE
 # ==================================================================================== #
 
-## db-up: Start PostgreSQL with Docker
-.PHONY: db-up
-db-up:
-	@echo "$(GREEN)Starting PostgreSQL...$(NC)"
-	@docker run -d \
-		--name morfx-postgres \
-		-e POSTGRES_USER=root \
-		-e POSTGRES_PASSWORD= \
-		-e POSTGRES_DB=morfx_dev \
-		-p 5432:5432 \
-		postgres:14-alpine || docker start morfx-postgres
-	@echo "$(GREEN)✓ PostgreSQL running on localhost:5432$(NC)"
-
-## db-down: Stop PostgreSQL
-.PHONY: db-down
-db-down:
-	@echo "$(YELLOW)Stopping PostgreSQL...$(NC)"
-	@docker stop morfx-postgres || true
-
-## db-reset: Reset database
+## db-reset: Reset SQLite database
 .PHONY: db-reset
-db-reset: db-down
-	@echo "$(RED)Removing PostgreSQL container...$(NC)"
-	@docker rm morfx-postgres || true
-	@make db-up
+db-reset:
+	@echo "$(YELLOW)Resetting SQLite database...$(NC)"
+	@rm -f ./.morfx/db/morfx.db
+	@echo "$(GREEN)✓ Database reset. Will be recreated on next run.$(NC)"
 
 # ==================================================================================== #
 # DEVELOPMENT
@@ -209,12 +217,6 @@ db-reset: db-down
 run: build
 	@echo "$(GREEN)Running MCP server...$(NC)"
 	@$(BUILD_DIR)/$(BINARY_NAME) mcp --debug
-
-## run-http: Run the HTTP server
-.PHONY: run-http
-run-http: build
-	@echo "$(GREEN)Running HTTP server...$(NC)"
-	@$(BUILD_DIR)/$(BINARY_NAME) serve --api-key dev-key --debug
 
 ## watch: Run with file watcher (requires entr)
 .PHONY: watch
@@ -233,7 +235,7 @@ dev: modernize lint test build
 
 ## tools: Install all development tools
 .PHONY: tools
-tools: tools/golangci-lint tools/gofumpt tools/golines tools/gosec tools/gotestsum tools/goimports tools/gopls tools/migrate
+tools: tools/golangci-lint tools/gofumpt tools/golines tools/gosec tools/gotestsum tools/goimports tools/gopls
 	@echo "$(GREEN)✓ All tools installed!$(NC)"
 
 .PHONY: tools/golangci-lint
@@ -285,12 +287,6 @@ tools/gopls:
 		go install golang.org/x/tools/gopls@latest; \
 	fi
 
-.PHONY: tools/migrate
-tools/migrate:
-	@if ! [ -f $(GOBIN)/migrate ]; then \
-		echo "$(YELLOW)Installing migrate...$(NC)"; \
-		go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@$(MIGRATE_VERSION); \
-	fi
 
 # ==================================================================================== #
 # MAINTENANCE

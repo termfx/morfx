@@ -85,65 +85,7 @@ type Session struct {
 	ClientInfo datatypes.JSON `gorm:"type:jsonb"`
 }
 
-// MCPSession tracks HTTP MCP protocol sessions
-type MCPSession struct {
-	ID           string    `gorm:"primaryKey;type:varchar(20)"`
-	CreatedAt    time.Time `gorm:"autoCreateTime"`
-	LastActivity time.Time `gorm:"autoUpdateTime"`
-	ExpiresAt    time.Time `gorm:"index"`
-	Active       bool      `gorm:"default:true;index"`
-
-	// Request tracking
-	RequestCount int    `gorm:"default:0"`
-	UserAgent    string `gorm:"type:varchar(255)"`
-	RemoteAddr   string `gorm:"type:varchar(45)"` // IPv6 max length
-
-	// Protocol info
-	ProtocolVersion string         `gorm:"type:varchar(20)"`
-	ClientInfo      datatypes.JSON `gorm:"type:jsonb"`
-
-	// OAuth integration
-	OAuthSubject   string `gorm:"type:varchar(255);index"`
-	OAuthTokenHash string `gorm:"type:varchar(64)"` // SHA256 of token for revocation
-}
-
-// OAuthClient represents RFC7591 registered OAuth clients
-type OAuthClient struct {
-	ID        string    `gorm:"primaryKey;type:varchar(20)"`
-	CreatedAt time.Time `gorm:"autoCreateTime"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime"`
-
-	// OAuth RFC7591 fields
-	ClientID      string         `gorm:"type:varchar(64);uniqueIndex;not null"`
-	ClientSecret  string         `gorm:"type:varchar(128);not null"`
-	RedirectURIs  datatypes.JSON `gorm:"type:jsonb;not null"`
-	GrantTypes    datatypes.JSON `gorm:"type:jsonb;not null"`
-	ResponseTypes datatypes.JSON `gorm:"type:jsonb;not null"`
-	Scope         string         `gorm:"type:varchar(512)"`
-
-	// Client metadata
-	ClientName string         `gorm:"type:varchar(255)"`
-	ClientURI  string         `gorm:"type:varchar(512)"`
-	LogoURI    string         `gorm:"type:varchar(512)"`
-	Contacts   datatypes.JSON `gorm:"type:jsonb"`
-	TosURI     string         `gorm:"type:varchar(512)"`
-	PolicyURI  string         `gorm:"type:varchar(512)"`
-
-	// Technical config
-	TokenEndpointAuthMethod string `gorm:"type:varchar(50);default:'client_secret_basic'"`
-	ApplicationType         string `gorm:"type:varchar(20);default:'web'"`
-
-	// Secret management
-	SecretExpiresAt *time.Time
-	Active          bool `gorm:"default:true;index"`
-
-	// Additional metadata
-	Metadata datatypes.JSON `gorm:"type:jsonb"`
-}
-
 // TableName customizations for cleaner names
-func (Stage) TableName() string       { return "stages" }
-func (Apply) TableName() string       { return "applies" }
-func (Session) TableName() string     { return "sessions" }
-func (MCPSession) TableName() string  { return "mcp_sessions" }
-func (OAuthClient) TableName() string { return "oauth_clients" }
+func (Stage) TableName() string   { return "stages" }
+func (Apply) TableName() string   { return "applies" }
+func (Session) TableName() string { return "sessions" }

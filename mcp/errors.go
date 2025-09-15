@@ -22,6 +22,20 @@ const (
 	DatabaseError    = 10008 // Database operation failed
 	ConfidenceTooLow = 10009 // Confidence below threshold
 	ValidationFailed = 10010 // Code validation failed
+	FileSystemError  = 10011 // File system operation failed
+
+	// Safety error codes (11xxx range)
+	SafetyViolation      = 11001 // General safety violation
+	FileTooLarge         = 11002 // File exceeds size limit
+	TooManyFiles         = 11003 // Too many files in operation
+	TotalSizeTooLarge    = 11004 // Total operation size too large
+	FileModified         = 11005 // File was modified externally
+	FileLocked           = 11006 // File is locked by another process
+	LockTimeout          = 11007 // Could not acquire file lock
+	AtomicWriteFailed    = 11008 // Atomic write operation failed
+	BackupFailed         = 11009 // Backup creation failed
+	RollbackFailed       = 11010 // Rollback operation failed
+	PerFileConfidenceLow = 11011 // Individual file confidence too low
 )
 
 // MCPError represents a structured error for the MCP protocol
