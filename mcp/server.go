@@ -15,6 +15,10 @@ import (
 	"github.com/termfx/morfx/models"
 	"github.com/termfx/morfx/providers"
 	"github.com/termfx/morfx/providers/golang"
+	"github.com/termfx/morfx/providers/javascript"
+	"github.com/termfx/morfx/providers/typescript"
+	"github.com/termfx/morfx/providers/php"
+	"github.com/termfx/morfx/providers/python"
 )
 
 // StdioServer handles MCP communication over stdio
@@ -102,6 +106,18 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 	// Register providers
 	server.providers.Register(golang.New())
 	server.debugLog("Registered Go provider")
+	
+	server.providers.Register(javascript.New())
+	server.debugLog("Registered JavaScript provider")
+	
+	server.providers.Register(typescript.New())
+	server.debugLog("Registered TypeScript provider")
+	
+	server.providers.Register(php.New())
+	server.debugLog("Registered PHP provider")
+	
+	server.providers.Register(python.New())
+	server.debugLog("Registered Python provider")
 
 	// Initialize file processor with providers
 	server.fileProcessor = core.NewFileProcessor(&providerRegistryAdapter{server.providers})

@@ -1,4 +1,4 @@
-package golang
+package base
 
 import (
 	"context"
@@ -10,11 +10,120 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 
 	"github.com/termfx/morfx/core"
+	"github.com/termfx/morfx/providers"
 )
 
-// Transform executes a transformation operation on Go source code
+// LanguageConfig defines language-specific behavior that must be implemented
+type LanguageConfig interface {
+	// Metadata
+	Language() string
+	Extensions() []string
+	GetLanguage() *sitter.Language
+
+	// Language-specific AST mapping
+	MapQueryTypeToNodeTypes(queryType string) []string
+	ExtractNodeName(node *sitter.Node, source string) string
+	IsExported(name string) bool // For confidence calculation
+}
+
+// Provider provides common functionality for all language providers
+type Provider struct {
+	config LanguageConfig
+	parser *sitter.Parser
+	cache  *ASTCache
+}
+
+// New creates a base provider with language-specific config
+func New(config LanguageConfig) *Provider {
+	parser := sitter.NewParser()
+	lang := config.GetLanguage()
+	if lang == nil {
+		panic(fmt.Sprintf("Failed to load %s language for tree-sitter", config.Language()))
+	}
+	parser.SetLanguage(lang)
+
+	return &Provider{
+		config: config,
+		parser: parser,
+		cache:  GlobalCache,
+	}
+}
+
+// Language returns language identifier
+func (p *Provider) Language() string {
+	return p.config.Language()
+}
+
+// Extensions returns supported file extensions
+func (p *Provider) Extensions() []string {
+	return p.config.Extensions()
+}
+
+// Query finds code elements matching the query
+func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult {
+	tree, err := p.parser.ParseCtx(context.TODO(), nil, []byte(source))
+	if err != nil || tree == nil {
+		return core.QueryResult{Error: fmt.Errorf("failed to parse source: %v", err)}
+	}
+	defer tree.Close()
+
+	var matches []core.Match
+	p.walkTree(tree.RootNode(), source, query, &matches)
+
+	return core.QueryResult{
+		Matches: matches,
+		Total:   len(matches),
+	}
+}
+
+// walkTree recursively walks AST looking for matches
+func (p *Provider) walkTree(node *sitter.Node, source string, query core.AgentQuery, matches *[]core.Match) {
+	if match := p.checkNode(node, source, query); match != nil {
+		*matches = append(*matches, *match)
+	}
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		p.walkTree(child, source, query, matches)
+	}
+}
+
+// checkNode checks if a node matches the query using language-specific mapping
+func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQuery) *core.Match {
+	nodeType := node.Type()
+	
+	// Get valid node types for this query from language config
+	validTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
+	if !slices.Contains(validTypes, nodeType) {
+		return nil
+	}
+
+	// Extract name using language-specific logic
+	name := p.config.ExtractNodeName(node, source)
+	if name == "" {
+		name = "anonymous"
+	}
+
+	// Check name pattern
+	if !p.matchesPattern(name, query.Name) {
+		return nil
+	}
+
+	return &core.Match{
+		Type: query.Type,
+		Name: name,
+		Location: core.Location{
+			Line:      int(node.StartPoint().Row) + 1,
+			Column:    int(node.StartPoint().Column) + 1,
+			EndLine:   int(node.EndPoint().Row) + 1,
+			EndColumn: int(node.EndPoint().Column) + 1,
+		},
+		Content: source[node.StartByte():node.EndByte()],
+	}
+}
+
+// Transform applies a transformation operation
 func (p *Provider) Transform(source string, op core.TransformOp) core.TransformResult {
-	// Parse source using ParseCtx
 	tree, err := p.parser.ParseCtx(context.TODO(), nil, []byte(source))
 	if err != nil || tree == nil {
 		return core.TransformResult{
@@ -31,13 +140,7 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 		}
 	}
 
-	// Use Pipeline for multiple targets (automatic optimization)
-	if len(targets) > 1 {
-		pipeline := p.NewTransformPipeline()
-		return pipeline.BatchTransform(source, op, targets)
-	}
-
-	// Single target: use simple sequential transform
+	// Calculate confidence
 	confidence := p.calculateConfidence(op, targets, source)
 	var modified string
 
@@ -59,9 +162,7 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 	}
 
 	if err != nil {
-		return core.TransformResult{
-			Error: err,
-		}
+		return core.TransformResult{Error: err}
 	}
 
 	// Generate diff
@@ -71,8 +172,50 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 		Modified:   modified,
 		Diff:       diff,
 		Confidence: confidence,
-		MatchCount: len(targets), // Track how many elements were actually transformed
+		MatchCount: len(targets),
 	}
+}
+
+// Validate checks syntax
+func (p *Provider) Validate(source string) providers.ValidationResult {
+	tree := p.parser.Parse(nil, []byte(source))
+	if tree == nil {
+		return providers.ValidationResult{
+			Valid:  false,
+			Errors: []string{"Failed to parse source"},
+		}
+	}
+	defer tree.Close()
+
+	var errors []string
+	p.findErrors(tree.RootNode(), source, &errors)
+
+	return providers.ValidationResult{
+		Valid:  len(errors) == 0,
+		Errors: errors,
+	}
+}
+
+// matchesPattern checks if name matches pattern (with wildcards)
+func (p *Provider) matchesPattern(name, pattern string) bool {
+	if pattern == "" || pattern == "*" {
+		return true
+	}
+
+	if after, ok := strings.CutPrefix(pattern, "*"); ok {
+		return strings.HasSuffix(name, after)
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))
+	}
+	if strings.Contains(pattern, "*") {
+		parts := strings.Split(pattern, "*")
+		if len(parts) == 2 {
+			return strings.HasPrefix(name, parts[0]) && strings.HasSuffix(name, parts[1])
+		}
+	}
+
+	return name == pattern
 }
 
 // findTargets finds all nodes matching the query
@@ -81,12 +224,9 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 
 	var walk func(*sitter.Node)
 	walk = func(node *sitter.Node) {
-		// Check if this node matches
 		if p.nodeMatches(node, source, query) {
 			targets = append(targets, node)
 		}
-
-		// Recurse children
 		for i := 0; i < int(node.ChildCount()); i++ {
 			walk(node.Child(i))
 		}
@@ -98,43 +238,21 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 
 // nodeMatches checks if a node matches the query
 func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.AgentQuery) bool {
-	// Map query type to AST node types
-	nodeTypes := p.getNodeTypesForQuery(query.Type)
-
-	// Check if node type matches
+	nodeTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
 	typeMatches := slices.Contains(nodeTypes, node.Type())
 
 	if !typeMatches {
 		return false
 	}
 
-	// Check name if specified
 	if query.Name != "" {
-		name := p.extractNodeName(node, source)
+		name := p.config.ExtractNodeName(node, source)
 		if !p.matchesPattern(name, query.Name) {
 			return false
 		}
 	}
 
 	return true
-}
-
-// extractNodeName gets the name from various node types
-func (p *Provider) extractNodeName(node *sitter.Node, source string) string {
-	// Try standard name field
-	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
-		return source[nameNode.StartByte():nameNode.EndByte()]
-	}
-
-	// For other nodes, try first identifier child
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "identifier" {
-			return source[child.StartByte():child.EndByte()]
-		}
-	}
-
-	return ""
 }
 
 // doReplace performs replacement transformation
@@ -146,6 +264,7 @@ func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement 
 	// Sort targets by position (reverse order to maintain positions)
 	sortedTargets := make([]*sitter.Node, len(targets))
 	copy(sortedTargets, targets)
+	
 	// Sort reverse order to replace from end to beginning
 	for i := 0; i < len(sortedTargets)-1; i++ {
 		for j := i + 1; j < len(sortedTargets); j++ {
@@ -168,7 +287,6 @@ func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement 
 
 // doDelete performs deletion transformation
 func (p *Provider) doDelete(source string, targets []*sitter.Node) (string, error) {
-	// Delete is replace with empty string
 	return p.doReplace(source, targets, "")
 }
 
@@ -238,6 +356,27 @@ func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content 
 	return result, nil
 }
 
+// doAppendToTarget appends content to the end of target scope
+func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, content string) (string, error) {
+	if len(targets) == 0 {
+		return source, fmt.Errorf("no targets for append")
+	}
+
+	// For append, we only use first target
+	target := targets[0]
+	
+	// This is language-agnostic - append after target
+	insertPos := target.EndByte()
+	
+	before := source[:insertPos]
+	after := source[insertPos:]
+	
+	// Add proper formatting
+	insertion := "\n\n" + content
+	
+	return before + insertion + after, nil
+}
+
 // getIndentation extracts indentation for a node
 func (p *Provider) getIndentation(source string, node *sitter.Node) string {
 	line := node.StartPoint().Row
@@ -293,6 +432,7 @@ func (p *Provider) calculateConfidence(
 			Reason: fmt.Sprintf("Operation affects %d locations", len(targets)),
 		})
 	}
+
 	// Factor 2: Operation type
 	switch op.Method {
 	case "delete":
@@ -303,14 +443,17 @@ func (p *Provider) calculateConfidence(
 			Reason: "Delete operations are destructive",
 		})
 	case "replace":
-		// Check if replacing exported function
-		if len(targets) > 0 && p.isExported(p.extractNodeName(targets[0], source)) {
-			score -= 0.2
-			factors = append(factors, core.ConfidenceFactor{
-				Name:   "exported_api",
-				Impact: -0.2,
-				Reason: "Modifying exported API",
-			})
+		// Check if replacing exported function using language-specific logic
+		if len(targets) > 0 {
+			name := p.config.ExtractNodeName(targets[0], source)
+			if p.config.IsExported(name) {
+				score -= 0.2
+				factors = append(factors, core.ConfidenceFactor{
+					Name:   "exported_api",
+					Impact: -0.2,
+					Reason: "Modifying exported API",
+				})
+			}
 		}
 	}
 
@@ -347,14 +490,6 @@ func (p *Provider) calculateConfidence(
 	}
 }
 
-// isExported checks if identifier is exported (starts with capital)
-func (p *Provider) isExported(name string) bool {
-	if len(name) == 0 {
-		return false
-	}
-	return name[0] >= 'A' && name[0] <= 'Z'
-}
-
 // generateDiff creates a unified diff
 func (p *Provider) generateDiff(original, modified string) string {
 	if original == modified {
@@ -371,7 +506,6 @@ func (p *Provider) generateDiff(original, modified string) string {
 
 	text, err := difflib.GetUnifiedDiffString(diff)
 	if err != nil {
-		// Fallback to simple diff if error
 		return fmt.Sprintf("--- original\n+++ modified\n@@ changes @@\n%d bytes -> %d bytes",
 			len(original), len(modified))
 	}
@@ -379,122 +513,17 @@ func (p *Provider) generateDiff(original, modified string) string {
 	return text
 }
 
-// getNodeTypesForQuery maps query types to AST node types
-func (p *Provider) getNodeTypesForQuery(queryType string) []string {
-	switch queryType {
-	case "function", "func":
-		return []string{"function_declaration", "method_declaration"}
-	case "struct":
-		return []string{"type_spec"} // Need additional check for struct type
-	case "interface":
-		return []string{"type_spec"} // Need additional check for interface type
-	case "variable", "var":
-		return []string{"var_declaration", "short_var_declaration"}
-	case "constant", "const":
-		return []string{"const_declaration"}
-	case "import":
-		return []string{"import_declaration"}
-	case "type":
-		return []string{"type_declaration", "type_spec"}
-	case "method":
-		return []string{"method_declaration"}
-	case "field":
-		return []string{"field_declaration"}
-	default:
-		// Try to use the query type directly as node type
-		return []string{queryType}
-	}
-}
-
-// doAppendToTarget appends content to the end of target scope
-func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, content string) (string, error) {
-	if len(targets) == 0 {
-		return source, fmt.Errorf("no targets for append")
+// findErrors looks for syntax errors in AST
+func (p *Provider) findErrors(node *sitter.Node, source string, errors *[]string) {
+	if node.Type() == "ERROR" {
+		*errors = append(*errors, fmt.Sprintf(
+			"Syntax error at line %d, column %d",
+			node.StartPoint().Row+1,
+			node.StartPoint().Column+1,
+		))
 	}
 
-	// For append, we only use first target
-	target := targets[0]
-
-	// Find the appropriate insertion point based on target type
-	var insertPos uint32
-	var needsNewline bool
-
-	switch target.Type() {
-	case "type_spec":
-		// For struct/interface, append inside the body
-		if typeNode := target.ChildByFieldName("type"); typeNode != nil {
-			if typeNode.Type() == "struct_type" || typeNode.Type() == "interface_type" {
-				// Find closing brace
-				insertPos = typeNode.EndByte() - 1 // Before }
-				needsNewline = true
-			} else {
-				// Not a struct/interface, append after
-				insertPos = target.EndByte()
-			}
-		} else {
-			insertPos = target.EndByte()
-		}
-
-	case "function_declaration", "method_declaration":
-		// For functions, append inside body
-		if body := target.ChildByFieldName("body"); body != nil {
-			insertPos = body.EndByte() - 1 // Before closing }
-			needsNewline = true
-		} else {
-			// No body, append after
-			insertPos = target.EndByte()
-		}
-
-	default:
-		// Default: append after target
-		insertPos = target.EndByte()
+	for i := 0; i < int(node.ChildCount()); i++ {
+		p.findErrors(node.Child(i), source, errors)
 	}
-
-	// Build insertion
-	before := source[:insertPos]
-	after := source[insertPos:]
-
-	// Add proper formatting
-	indent := p.getIndentation(source, target)
-	var insertion string
-
-	if needsNewline {
-		// Inside a scope - detect if tabs or spaces from existing content
-		innerIndent := p.detectInnerIndentation(source, target)
-		insertion = "\n" + innerIndent + content + "\n" + indent
-	} else {
-		// After target
-		insertion = "\n\n" + content
-	}
-
-	return before + insertion + after, nil
-}
-
-// detectInnerIndentation finds the indentation used inside a scope
-func (p *Provider) detectInnerIndentation(source string, node *sitter.Node) string {
-	// Look at the first child inside the scope to detect indentation
-	startByte := node.StartByte()
-	endByte := node.EndByte()
-
-	if startByte >= endByte {
-		return "\t" // Default to tab
-	}
-
-	// Find first line after opening brace
-	content := source[startByte:endByte]
-	lines := strings.SplitSeq(content, "\n")
-
-	for line := range lines {
-		if len(strings.TrimSpace(line)) > 0 {
-			// Count leading whitespace
-			leadingSpace := len(line) - len(strings.TrimLeft(line, " \t"))
-			if leadingSpace > 0 {
-				return line[:leadingSpace]
-			}
-		}
-	}
-
-	// Default: parent indent + tab
-	parentIndent := p.getIndentation(source, node)
-	return parentIndent + "\t"
 }

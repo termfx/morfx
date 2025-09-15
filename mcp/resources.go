@@ -172,7 +172,7 @@ func (s *StdioServer) generateResourceContent(uri string) (*ResourceContent, err
 func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 	info := map[string]any{
 		"name":    "Morfx MCP Server",
-		"version": "1.2.0",
+		"version": "1.3.0",
 		"runtime": map[string]any{
 			"go_version": runtime.Version(),
 			"platform":   fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),

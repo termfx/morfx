@@ -1,6 +1,6 @@
 # Morfx MCP Server
 
-[![Version](https://img.shields.io/badge/version-v1.2.0-blue.svg)](https://github.com/termfx/morfx/releases)
+[![Version](https://img.shields.io/badge/version-v1.3.0-blue.svg)](https://github.com/termfx/morfx/releases)
 
 > **Enterprise-grade code transformations for AI agents**
 

@@ -1,4 +1,4 @@
-package golang
+package base
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// ASTCache is a lock-free cache for parsed ASTs
+// ASTCache is a lock-free cache for parsed ASTs (shared across all providers)
 type ASTCache struct {
 	cache     sync.Map // Lock-free concurrent map
 	hits      atomic.Int64
@@ -29,7 +29,7 @@ type CachedAST struct {
 	hitCount  atomic.Int32
 }
 
-// GlobalCache is the singleton cache instance
+// GlobalCache is the singleton cache instance shared across all providers
 var GlobalCache = &ASTCache{
 	maxAge: 5 * time.Minute,
 }
@@ -56,7 +56,7 @@ func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tre
 
 	c.misses.Add(1)
 
-	// Parse new tree using ParseCtx (Parse is deprecated)
+	// Parse new tree using ParseCtx
 	tree, err := parser.ParseCtx(context.TODO(), nil, source)
 	if err != nil || tree == nil {
 		return nil, false
