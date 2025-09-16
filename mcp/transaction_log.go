@@ -84,9 +84,16 @@ func (tl *TransactionLog) FailTransaction(txID string, reason error) error {
 	tx.Status = "failed"
 	tx.Error = reason.Error()
 	tx.EndTime = time.Now()
-	tl.logTransaction(tx)
 
-	return tl.rollbackTransaction(tx)
+	// Perform rollback but keep the failed status
+	err := tl.rollbackTransactionInternal(tx, false) // false = don't change status
+	if err != nil {
+		// If rollback fails, note it but keep failed status
+		tx.Error = fmt.Sprintf("%s; rollback failed: %v", tx.Error, err)
+	}
+
+	tl.logTransaction(tx)
+	return err
 }
 
 // RollbackTransaction performs rollback for a specific transaction
@@ -104,6 +111,10 @@ func (tl *TransactionLog) RollbackTransaction(txID string) error {
 
 // rollbackTransaction performs the actual rollback logic
 func (tl *TransactionLog) rollbackTransaction(tx *Transaction) error {
+	return tl.rollbackTransactionInternal(tx, true) // true = change status to rolled_back
+}
+
+func (tl *TransactionLog) rollbackTransactionInternal(tx *Transaction, changeStatus bool) error {
 	// If we have a backup, restore it
 	if tx.BackupPath != "" && fileExists(tx.BackupPath) {
 		if err := os.Rename(tx.BackupPath, tx.TargetPath); err != nil {
@@ -123,9 +134,11 @@ func (tl *TransactionLog) rollbackTransaction(tx *Transaction) error {
 		os.Remove(tx.TmpPath)
 	}
 
-	tx.Status = "rolled_back"
-	tx.EndTime = time.Now()
-	tl.logTransaction(tx)
+	if changeStatus {
+		tx.Status = "rolled_back"
+		tx.EndTime = time.Now()
+		tl.logTransaction(tx)
+	}
 
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -183,7 +182,7 @@ func (aw *AtomicWriter) releaseLock(path string) error {
 	return nil
 }
 
-// isLockStale checks if a lock file is from a dead process
+// isLockStale checks if a lock file is from a dead process (cross-platform)
 func (aw *AtomicWriter) isLockStale(lockPath string) bool {
 	content, err := os.ReadFile(lockPath)
 	if err != nil {
@@ -195,15 +194,8 @@ func (aw *AtomicWriter) isLockStale(lockPath string) bool {
 		return true // Invalid format, assume stale
 	}
 
-	// Check if process exists (Unix-specific)
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return true // Process doesn't exist
-	}
-
-	// Send signal 0 to check if process is alive
-	err = process.Signal(syscall.Signal(0))
-	return err != nil // If error, process is dead
+	// Cross-platform process check
+	return !isProcessAlive(pid)
 }
 
 // createBackup creates a backup copy with timestamp

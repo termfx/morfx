@@ -13,11 +13,12 @@ import (
 
 // ASTCache is a lock-free cache for parsed ASTs (shared across all providers)
 type ASTCache struct {
-	cache     sync.Map // Lock-free concurrent map
-	hits      atomic.Int64
-	misses    atomic.Int64
-	evictions atomic.Int64
-	maxAge    time.Duration
+	cache       sync.Map // Lock-free concurrent map
+	hits        atomic.Int64
+	misses      atomic.Int64
+	evictions   atomic.Int64
+	maxAge      time.Duration
+	cleanupOnce sync.Once // Ensures only one cleanup goroutine runs
 }
 
 // CachedAST holds parsed tree with metadata
@@ -72,8 +73,10 @@ func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tre
 
 	c.cache.Store(hash, cachedAST)
 
-	// Async cleanup old entries
-	go c.cleanupOldEntries()
+	// Start single cleanup goroutine on first miss
+	c.cleanupOnce.Do(func() {
+		go c.cleanupOldEntries()
+	})
 
 	return tree, false
 }

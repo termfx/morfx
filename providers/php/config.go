@@ -5,6 +5,8 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/php"
+
+	"github.com/termfx/morfx/core"
 )
 
 // Config implements LanguageConfig for PHP
@@ -30,6 +32,8 @@ func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
 	switch queryType {
 	case "function", "func":
 		return []string{"function_definition", "method_declaration"}
+	case "method":
+		return []string{"method_declaration"}
 	case "class":
 		return []string{"class_declaration"}
 	case "interface":
@@ -110,4 +114,71 @@ func (c *Config) IsExported(name string) bool {
 	// In PHP, consider non-underscore prefixed names as public/exported
 	// Private/protected typically start with underscore
 	return !strings.HasPrefix(name, "_")
+}
+
+// ValidateVisibility checks PHP visibility modifiers for better export detection
+func (c *Config) ValidateVisibility(node *sitter.Node, source string) bool {
+	parent := node.Parent()
+	for parent != nil {
+		if parent.Type() == "property_declaration" || parent.Type() == "method_declaration" {
+			// Check for explicit visibility modifiers
+			for i := 0; i < int(parent.ChildCount()); i++ {
+				child := parent.Child(i)
+				childText := source[child.StartByte():child.EndByte()]
+				if childText == "private" || childText == "protected" {
+					return false // Explicitly not exported
+				}
+				if childText == "public" {
+					return true // Explicitly exported
+				}
+			}
+		}
+		parent = parent.Parent()
+	}
+	// Fallback to underscore rule
+	name := c.ExtractNodeName(node, source)
+	return !strings.HasPrefix(name, "_")
+}
+
+// ExpandMatches handles multiple property declarations in PHP
+func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	switch node.Type() {
+	case "property_declaration":
+		return c.expandPropertyDeclaration(node, source, query)
+	default:
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{
+			Node:      node,
+			Name:      name,
+			Type:      query.Type,
+			NodeType:  node.Type(),
+			StartByte: node.StartByte(),
+			EndByte:   node.EndByte(),
+			Line:      node.StartPoint().Row,
+			Column:    node.StartPoint().Column,
+		}}
+	}
+}
+
+func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "variable_name" && strings.HasPrefix(source[child.StartByte():child.EndByte()], "$") {
+			name := source[child.StartByte():child.EndByte()]
+			matches = append(matches, core.CodeMatch{
+				Node:      child,
+				Name:      name,
+				Type:      query.Type,
+				NodeType:  "variable_name",
+				StartByte: child.StartByte(),
+				EndByte:   child.EndByte(),
+				Line:      child.StartPoint().Row,
+				Column:    child.StartPoint().Column,
+			})
+		}
+	}
+
+	return matches
 }

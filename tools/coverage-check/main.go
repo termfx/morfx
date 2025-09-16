@@ -11,7 +11,7 @@ import (
 // ComponentThresholds defines coverage requirements per component
 type ComponentThresholds struct {
 	Core      float64 // core/ package
-	MCP       float64 // mcp/ package  
+	MCP       float64 // mcp/ package
 	Providers float64 // providers/ package
 	Safety    float64 // safety-related code
 	Database  float64 // db/ and models/ packages
@@ -74,7 +74,7 @@ func main() {
 	fmt.Printf("Overall: %.1f%%\n\n", overallCoverage)
 
 	failures := 0
-	
+
 	// Check each component
 	components := map[string]struct {
 		actual    float64
@@ -86,8 +86,8 @@ func main() {
 		"Safety Systems": {componentCoverage["safety"], thresholds.Safety},
 		"Database":       {componentCoverage["database"], thresholds.Database},
 		"File Ops":       {componentCoverage["fileops"], thresholds.FileOps},
-		"CLI":           {componentCoverage["cli"], thresholds.CLI},
-		"Utils":         {componentCoverage["utils"], thresholds.Utils},
+		"CLI":            {componentCoverage["cli"], thresholds.CLI},
+		"Utils":          {componentCoverage["utils"], thresholds.Utils},
 	}
 
 	for name, data := range components {
@@ -96,7 +96,7 @@ func main() {
 			status = "❌"
 			failures++
 		}
-		fmt.Printf("%s %-15s: %5.1f%% (target: %.1f%%)\n", 
+		fmt.Printf("%s %-15s: %5.1f%% (target: %.1f%%)\n",
 			status, name, data.actual, data.threshold)
 	}
 
@@ -105,7 +105,7 @@ func main() {
 	if strict {
 		minOverall = 82.0
 	}
-	
+
 	if overallCoverage < minOverall {
 		failures++
 		fmt.Printf("❌ Overall coverage %.1f%% below minimum %.1f%%\n", overallCoverage, minOverall)
@@ -128,10 +128,10 @@ func main() {
 }
 
 type PackageCoverage struct {
-	Package string
+	Package  string
 	Coverage float64
-	Lines   int
-	Covered int
+	Lines    int
+	Covered  int
 }
 
 func parseCoverageFile(filename string) ([]PackageCoverage, error) {
@@ -156,16 +156,33 @@ func parseCoverageFile(filename string) ([]PackageCoverage, error) {
 			continue
 		}
 
-		// Extract package from filename
+		// Extract package from filename - use full package path
 		fileParts := strings.Split(parts[0], ":")
 		if len(fileParts) < 1 {
 			continue
 		}
-		
-		packagePath := strings.Split(fileParts[0], "/")
+
+		filepath := fileParts[0]
+		// Extract package path from the filepath
+		// e.g., "github.com/termfx/morfx/providers/golang/provider.go" -> "providers/golang"
 		var packageName string
-		if len(packagePath) > 0 {
-			packageName = packagePath[len(packagePath)-1]
+		if strings.Contains(filepath, "github.com/termfx/morfx/") {
+			// Remove the base path and get the package directory
+			relativePath := strings.TrimPrefix(filepath, "github.com/termfx/morfx/")
+			pathParts := strings.Split(relativePath, "/")
+			if len(pathParts) > 1 {
+				// Join the directory parts (exclude filename)
+				packageName = strings.Join(pathParts[:len(pathParts)-1], "/")
+			} else if len(pathParts) == 1 {
+				// Single directory
+				packageName = strings.TrimSuffix(pathParts[0], ".go")
+			}
+		} else {
+			// Fallback to old logic for edge cases
+			packagePath := strings.Split(filepath, "/")
+			if len(packagePath) > 0 {
+				packageName = packagePath[len(packagePath)-1]
+			}
 		}
 
 		// Parse coverage data
@@ -235,22 +252,29 @@ func calculateComponentCoverage(packages []PackageCoverage) map[string]float64 {
 
 	for _, pkg := range packages {
 		var component string
-		
+
+		// Normalize package name for consistent classification
+		pkgLower := strings.ToLower(pkg.Package)
+
 		switch {
-		case strings.Contains(pkg.Package, "core"):
+		case strings.Contains(pkgLower, "core") || strings.Contains(pkgLower, "fileprocessor"):
 			component = "core"
-		case strings.Contains(pkg.Package, "mcp"):
+		case strings.Contains(pkgLower, "mcp") || strings.Contains(pkgLower, "server"):
 			component = "mcp"
-		case strings.Contains(pkg.Package, "providers"):
+		case strings.Contains(pkgLower, "providers") || strings.Contains(pkgLower, "golang") || strings.Contains(pkgLower, "javascript") || strings.Contains(pkgLower, "php") || strings.Contains(pkgLower, "python") || strings.Contains(pkgLower, "typescript"):
 			component = "providers"
-		case strings.Contains(pkg.Package, "safety") || strings.Contains(pkg.Package, "atomic") || strings.Contains(pkg.Package, "transaction"):
+		case strings.Contains(pkgLower, "safety") || strings.Contains(pkgLower, "atomic") || strings.Contains(pkgLower, "transaction"):
 			component = "safety"
-		case strings.Contains(pkg.Package, "db") || strings.Contains(pkg.Package, "models"):
+		case strings.Contains(pkgLower, "db") || strings.Contains(pkgLower, "models"):
 			component = "database"
-		case strings.Contains(pkg.Package, "file") && !strings.Contains(pkg.Package, "core"):
+		case strings.Contains(pkgLower, "filewalker") || strings.Contains(pkgLower, "util"):
+			component = "utils"
+		case strings.Contains(pkgLower, "file") && !strings.Contains(pkgLower, "core"):
 			component = "fileops"
-		case strings.Contains(pkg.Package, "cmd") || strings.Contains(pkg.Package, "main"):
+		case strings.Contains(pkgLower, "cmd") || strings.Contains(pkgLower, "main") || strings.Contains(pkgLower, "morfx"):
 			component = "cli"
+		case strings.Contains(pkgLower, "filewalker") || strings.Contains(pkgLower, "util"):
+			component = "utils"
 		default:
 			component = "utils"
 		}

@@ -31,6 +31,16 @@ func (s *StdioServer) handleAppendTool(params json.RawMessage) (any, error) {
 		return nil, NewMCPError(InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
 	}
 
+	// Validate that content is provided (can be empty string, but must be present)
+	// Check if the field was actually provided in the JSON
+	var rawArgs map[string]json.RawMessage
+	if err := json.Unmarshal(params, &rawArgs); err != nil {
+		return nil, WrapError(InvalidParams, "Invalid parameters", err)
+	}
+	if _, hasContent := rawArgs["content"]; !hasContent {
+		return nil, NewMCPError(InvalidParams, "Missing required parameter: content", nil)
+	}
+
 	// Get source code
 	var actualSource string
 	var originalHash string

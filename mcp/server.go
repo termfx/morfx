@@ -12,13 +12,17 @@ import (
 
 	"github.com/termfx/morfx/core"
 	"github.com/termfx/morfx/db"
+	"github.com/termfx/morfx/mcp/prompts"
+	"github.com/termfx/morfx/mcp/resources"
+	"github.com/termfx/morfx/mcp/tools"
+	"github.com/termfx/morfx/mcp/types"
 	"github.com/termfx/morfx/models"
 	"github.com/termfx/morfx/providers"
 	"github.com/termfx/morfx/providers/golang"
 	"github.com/termfx/morfx/providers/javascript"
-	"github.com/termfx/morfx/providers/typescript"
 	"github.com/termfx/morfx/providers/php"
 	"github.com/termfx/morfx/providers/python"
+	"github.com/termfx/morfx/providers/typescript"
 )
 
 // StdioServer handles MCP communication over stdio
@@ -29,8 +33,13 @@ type StdioServer struct {
 	reader *bufio.Reader
 	writer *bufio.Writer
 
-	// Tool registry
-	tools map[string]ToolHandler
+	// NEW: Modular registries
+	toolRegistry     *ToolRegistry
+	promptRegistry   *PromptRegistry
+	resourceRegistry *ResourceRegistry
+
+	// OLD: Will be removed after migration
+	tools map[string]types.ToolHandler
 	mu    sync.RWMutex
 
 	// Provider registry
@@ -53,7 +62,7 @@ type StdioServer struct {
 }
 
 // ToolHandler represents a function that handles a tool call
-type ToolHandler func(params json.RawMessage) (any, error)
+type ToolHandler = types.ToolHandler
 
 // NewStdioServer creates a new MCP server that communicates over stdio
 func NewStdioServer(config Config) (*StdioServer, error) {
@@ -61,9 +70,14 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		config:    config,
 		reader:    bufio.NewReader(os.Stdin),
 		writer:    bufio.NewWriter(os.Stdout),
-		tools:     make(map[string]ToolHandler),
+		tools:     make(map[string]types.ToolHandler), // Keep for now, remove after migration
 		providers: providers.NewRegistry(),
 	}
+
+	// Initialize modular registries
+	server.toolRegistry = NewToolRegistry(server)
+	server.promptRegistry = NewPromptRegistry()
+	server.resourceRegistry = NewResourceRegistry()
 
 	// Set debug logger
 	if config.Debug {
@@ -81,6 +95,10 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 			// Log the error but continue without database for better compatibility
 			server.debugLog("Database connection failed, continuing without persistence: %v", err)
 			// Don't fail the server initialization - just continue without database features
+			// Explicitly set these to nil to ensure clean state
+			server.db = nil
+			server.session = nil
+			server.staging = nil
 		} else {
 			server.db = database
 
@@ -90,32 +108,41 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 			}
 			if err := server.db.Create(session).Error; err != nil {
 				server.debugLog("Failed to create session: %v", err)
+				server.session = nil
 			} else {
 				server.session = session
 				server.debugLog("Session created: %s", session.ID)
 			}
 
-			// Initialize staging manager
-			server.staging = NewStagingManager(server.db, config)
+			// Initialize staging manager only if we have a working database
+			if server.db != nil {
+				server.staging = NewStagingManager(server.db, config)
+			}
 		}
 	}
 
-	// Register built-in tools
+	// Register built-in tools (OLD - will be removed)
 	server.registerBuiltinTools()
+
+	// NEW: Initialize modular registries
+	tools.Init(server)
+	prompts.Init()
+	resources.Init()
+	server.debugLog("Initialized modular components")
 
 	// Register providers
 	server.providers.Register(golang.New())
 	server.debugLog("Registered Go provider")
-	
+
 	server.providers.Register(javascript.New())
 	server.debugLog("Registered JavaScript provider")
-	
+
 	server.providers.Register(typescript.New())
 	server.debugLog("Registered TypeScript provider")
-	
+
 	server.providers.Register(php.New())
 	server.debugLog("Registered PHP provider")
-	
+
 	server.providers.Register(python.New())
 	server.debugLog("Registered Python provider")
 

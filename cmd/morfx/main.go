@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"testing"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
@@ -108,4 +109,23 @@ func runMCPServer(cmd *cobra.Command, args []string) {
 	if debug {
 		fmt.Fprintf(os.Stderr, "[INFO] Server shutdown complete\n")
 	}
+}
+
+// resetFlags resets all command-line flags to their default values
+// Used primarily in tests to ensure clean state between test runs
+func resetFlags() {
+	debug = false
+	dbURL = ""
+	autoApply = true
+	autoApplyThreshold = 0.85
+}
+
+// setupTestEnvironment sets up a test environment for integration tests
+func setupTestEnvironment(t *testing.T) string {
+	// Create temporary directory for test database
+	tmpDir := "/tmp/morfx-test-" + fmt.Sprintf("%d", os.Getpid())
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+	return tmpDir
 }

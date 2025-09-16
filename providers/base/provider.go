@@ -67,6 +67,13 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 	}
 	defer tree.Close()
 
+	// Check for syntax errors first
+	var errors []string
+	p.findErrors(tree.RootNode(), source, &errors)
+	if len(errors) > 0 {
+		return core.QueryResult{Error: fmt.Errorf("syntax errors in source: %v", errors)}
+	}
+
 	var matches []core.Match
 	p.walkTree(tree.RootNode(), source, query, &matches)
 
@@ -91,7 +98,7 @@ func (p *Provider) walkTree(node *sitter.Node, source string, query core.AgentQu
 // checkNode checks if a node matches the query using language-specific mapping
 func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQuery) *core.Match {
 	nodeType := node.Type()
-	
+
 	// Get valid node types for this query from language config
 	validTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
 	if !slices.Contains(validTypes, nodeType) {
@@ -133,28 +140,34 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 	defer tree.Close()
 
 	// Find targets
-	targets := p.findTargets(tree.RootNode(), source, op.Target)
-	if len(targets) == 0 {
+	matches := p.findTargets(tree.RootNode(), source, op.Target)
+	if len(matches) == 0 {
 		return core.TransformResult{
 			Error: fmt.Errorf("no matches found for target"),
 		}
 	}
 
+	// Extract nodes for transformation operations
+	nodes := make([]*sitter.Node, len(matches))
+	for i, match := range matches {
+		nodes[i] = match.Node
+	}
+
 	// Calculate confidence
-	confidence := p.calculateConfidence(op, targets, source)
+	confidence := p.calculateConfidence(op, nodes, source)
 	var modified string
 
 	switch op.Method {
 	case "replace":
-		modified, err = p.doReplace(source, targets, op.Replacement)
+		modified, err = p.doReplace(source, nodes, op.Replacement)
 	case "delete":
-		modified, err = p.doDelete(source, targets)
+		modified, err = p.doDelete(source, nodes)
 	case "insert_before":
-		modified, err = p.doInsertBefore(source, targets, op.Content)
+		modified, err = p.doInsertBefore(source, nodes, op.Content)
 	case "insert_after":
-		modified, err = p.doInsertAfter(source, targets, op.Content)
+		modified, err = p.doInsertAfter(source, nodes, op.Content)
 	case "append":
-		modified, err = p.doAppendToTarget(source, targets, op.Content)
+		modified, err = p.doAppendToTarget(source, nodes, op.Content)
 	default:
 		return core.TransformResult{
 			Error: fmt.Errorf("unknown transform method: %s", op.Method),
@@ -172,7 +185,7 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 		Modified:   modified,
 		Diff:       diff,
 		Confidence: confidence,
-		MatchCount: len(targets),
+		MatchCount: len(matches), // Now shows actual match count including expansions
 	}
 }
 
@@ -202,30 +215,40 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 		return true
 	}
 
-	if after, ok := strings.CutPrefix(pattern, "*"); ok {
-		return strings.HasSuffix(name, after)
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(name, strings.TrimSuffix(pattern, "*"))
-	}
+	// Check for *middle* pattern first (has * at both ends or in middle)
 	if strings.Contains(pattern, "*") {
 		parts := strings.Split(pattern, "*")
-		if len(parts) == 2 {
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			// Pattern like "prefix*suffix"
 			return strings.HasPrefix(name, parts[0]) && strings.HasSuffix(name, parts[1])
+		}
+		if len(parts) == 3 && parts[0] == "" && parts[2] == "" {
+			// Pattern like "*middle*"
+			return strings.Contains(name, parts[1])
+		}
+		// Check for *suffix pattern
+		if parts[0] == "" && len(parts) == 2 {
+			return strings.HasSuffix(name, parts[1])
+		}
+		// Check for prefix* pattern
+		if parts[len(parts)-1] == "" && len(parts) == 2 {
+			return strings.HasPrefix(name, parts[0])
 		}
 	}
 
 	return name == pattern
 }
 
-// findTargets finds all nodes matching the query
-func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []*sitter.Node {
-	var targets []*sitter.Node
+// findTargets finds all matches for the query with proper expansion
+func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
 
 	var walk func(*sitter.Node)
 	walk = func(node *sitter.Node) {
 		if p.nodeMatches(node, source, query) {
-			targets = append(targets, node)
+			// Expand node into multiple matches if needed
+			expanded := p.expandMatches(node, source, query)
+			matches = append(matches, expanded...)
 		}
 		for i := 0; i < int(node.ChildCount()); i++ {
 			walk(node.Child(i))
@@ -233,16 +256,48 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 	}
 
 	walk(root)
-	return targets
+	return matches
 }
 
-// nodeMatches checks if a node matches the query
+// expandMatches converts a node into one or more matches
+func (p *Provider) expandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	// Check if provider has custom expansion logic
+	if expander, ok := p.config.(interface {
+		ExpandMatches(*sitter.Node, string, core.AgentQuery) []core.CodeMatch
+	}); ok {
+		return expander.ExpandMatches(node, source, query)
+	}
+
+	// Default: single match
+	name := p.config.ExtractNodeName(node, source)
+	return []core.CodeMatch{{
+		Node:      node,
+		Name:      name,
+		Type:      query.Type,
+		NodeType:  node.Type(),
+		StartByte: node.StartByte(),
+		EndByte:   node.EndByte(),
+		Line:      node.StartPoint().Row,
+		Column:    node.StartPoint().Column,
+	}}
+}
+
+// nodeMatches checks if a node matches the query with provider-specific validation
 func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.AgentQuery) bool {
 	nodeTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
 	typeMatches := slices.Contains(nodeTypes, node.Type())
 
 	if !typeMatches {
 		return false
+	}
+
+	// Provider-specific validation (e.g., Go struct vs interface in type_spec)
+	if validator, ok := p.config.(interface {
+		ValidateTypeSpec(*sitter.Node, string, string) bool
+	}); ok {
+		if !validator.ValidateTypeSpec(node, source, query.Type) {
+			return false
+		}
 	}
 
 	if query.Name != "" {
@@ -255,6 +310,16 @@ func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.Agen
 	return true
 }
 
+// sortTargetsDescending sorts nodes by start byte in descending order (reverse)
+func sortTargetsDescending(targets []*sitter.Node) []*sitter.Node {
+	sorted := make([]*sitter.Node, len(targets))
+	copy(sorted, targets)
+	slices.SortFunc(sorted, func(a, b *sitter.Node) int {
+		return int(b.StartByte() - a.StartByte()) // Reverse order
+	})
+	return sorted
+}
+
 // doReplace performs replacement transformation
 func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement string) (string, error) {
 	if len(targets) == 0 {
@@ -262,23 +327,21 @@ func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement 
 	}
 
 	// Sort targets by position (reverse order to maintain positions)
-	sortedTargets := make([]*sitter.Node, len(targets))
-	copy(sortedTargets, targets)
-	
-	// Sort reverse order to replace from end to beginning
-	for i := 0; i < len(sortedTargets)-1; i++ {
-		for j := i + 1; j < len(sortedTargets); j++ {
-			if sortedTargets[i].StartByte() < sortedTargets[j].StartByte() {
-				sortedTargets[i], sortedTargets[j] = sortedTargets[j], sortedTargets[i]
-			}
-		}
-	}
+	sortedTargets := sortTargetsDescending(targets)
 
-	// Replace each target
+	// Replace each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		before := result[:target.StartByte()]
-		after := result[target.EndByte():]
+		startPos := int(target.StartByte())
+		endPos := int(target.EndByte())
+
+		// Safety bounds check
+		if startPos > len(result) || endPos > len(result) || startPos < 0 || endPos < 0 {
+			continue
+		}
+
+		before := result[:startPos]
+		after := result[endPos:]
 		result = before + replacement + after
 	}
 
@@ -297,21 +360,20 @@ func (p *Provider) doInsertBefore(source string, targets []*sitter.Node, content
 	}
 
 	// Sort targets reverse order
-	sortedTargets := make([]*sitter.Node, len(targets))
-	copy(sortedTargets, targets)
-	for i := 0; i < len(sortedTargets)-1; i++ {
-		for j := i + 1; j < len(sortedTargets); j++ {
-			if sortedTargets[i].StartByte() < sortedTargets[j].StartByte() {
-				sortedTargets[i], sortedTargets[j] = sortedTargets[j], sortedTargets[i]
-			}
-		}
-	}
+	sortedTargets := sortTargetsDescending(targets)
 
-	// Insert before each target
+	// Insert before each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		before := result[:target.StartByte()]
-		after := result[target.StartByte():]
+		startPos := int(target.StartByte())
+
+		// Safety bounds check
+		if startPos > len(result) || startPos < 0 {
+			continue
+		}
+
+		before := result[:startPos]
+		after := result[startPos:]
 
 		// Preserve indentation
 		indent := p.getIndentation(source, target)
@@ -330,21 +392,20 @@ func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content 
 	}
 
 	// Sort targets reverse order
-	sortedTargets := make([]*sitter.Node, len(targets))
-	copy(sortedTargets, targets)
-	for i := 0; i < len(sortedTargets)-1; i++ {
-		for j := i + 1; j < len(sortedTargets); j++ {
-			if sortedTargets[i].StartByte() < sortedTargets[j].StartByte() {
-				sortedTargets[i], sortedTargets[j] = sortedTargets[j], sortedTargets[i]
-			}
-		}
-	}
+	sortedTargets := sortTargetsDescending(targets)
 
-	// Insert after each target
+	// Insert after each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		before := result[:target.EndByte()]
-		after := result[target.EndByte():]
+		endPos := int(target.EndByte())
+
+		// Safety bounds check
+		if endPos > len(result) || endPos < 0 {
+			continue
+		}
+
+		before := result[:endPos]
+		after := result[endPos:]
 
 		// Preserve indentation
 		indent := p.getIndentation(source, target)
@@ -364,16 +425,16 @@ func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, conte
 
 	// For append, we only use first target
 	target := targets[0]
-	
+
 	// This is language-agnostic - append after target
 	insertPos := target.EndByte()
-	
+
 	before := source[:insertPos]
 	after := source[insertPos:]
-	
+
 	// Add proper formatting
 	insertion := "\n\n" + content
-	
+
 	return before + insertion + after, nil
 }
 
@@ -442,6 +503,18 @@ func (p *Provider) calculateConfidence(
 			Impact: -0.2,
 			Reason: "Delete operations are destructive",
 		})
+		// Check if deleting exported function
+		if len(targets) > 0 {
+			name := p.config.ExtractNodeName(targets[0], source)
+			if p.config.IsExported(name) {
+				score -= 0.3
+				factors = append(factors, core.ConfidenceFactor{
+					Name:   "delete_exported_api",
+					Impact: -0.3,
+					Reason: "Deleting exported API is dangerous",
+				})
+			}
+		}
 	case "replace":
 		// Check if replacing exported function using language-specific logic
 		if len(targets) > 0 {

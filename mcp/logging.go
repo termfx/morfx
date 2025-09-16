@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -40,7 +41,10 @@ func (s *StdioServer) handleSetLoggingLevel(req Request) Response {
 		return ErrorResponse(req.ID, InvalidParams, "Invalid logging level parameters")
 	}
 
-	s.debugLog("Setting logging level to: %s", params.Level)
+	// Use the existing debug logging mechanism
+	if s.config.Debug {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Setting logging level to: %s\n", params.Level)
+	}
 
 	// Store the logging level (in a real implementation, you'd store this in server state)
 	// For now, just acknowledge the setting
@@ -53,6 +57,13 @@ func (s *StdioServer) sendLogNotification(level LogLevel, message string, data L
 		return // Don't send debug logs unless debug mode is enabled
 	}
 
+	// Create or use existing data map
+	if data == nil {
+		data = make(LogData)
+	}
+	data["message"] = message
+	data["timestamp"] = time.Now().Format(time.RFC3339)
+
 	notification := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "notifications/message",
@@ -62,13 +73,6 @@ func (s *StdioServer) sendLogNotification(level LogLevel, message string, data L
 			"logger": "morfx",
 		},
 	}
-
-	// Add the message to data
-	if data == nil {
-		data = make(LogData)
-	}
-	data["message"] = message
-	data["timestamp"] = time.Now().Format(time.RFC3339)
 
 	notificationJSON, err := json.Marshal(notification)
 	if err != nil {

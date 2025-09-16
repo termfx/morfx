@@ -90,15 +90,18 @@ func (fp *FileProcessor) QueryFiles(ctx context.Context, scope FileScope, query 
 
 	// Collect results
 	var allMatches []FileMatch
+	collectorDone := make(chan struct{})
 	go func() {
 		for fileMatches := range matches {
 			allMatches = append(allMatches, fileMatches...)
 		}
+		close(collectorDone)
 	}()
 
 	// Wait for completion
 	wg.Wait()
 	close(matches)
+	<-collectorDone // Wait for collector to finish
 
 	// Add timing metadata
 	duration := time.Since(start)

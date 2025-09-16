@@ -80,6 +80,12 @@ func (s *StdioServer) applySpecificStage(stageID string) (any, error) {
 		return nil, WrapError(TransformFailed, "Failed to apply stage", err)
 	}
 
+	// Clean up the applied stage
+	if err := s.staging.DeleteStage(stageID); err != nil {
+		// Log error but don't fail the response since stage was applied
+		// We'll just leave it as "applied" in the database
+	}
+
 	// Format response
 	responseText := fmt.Sprintf("✅ Applied stage %s\n", stageID)
 	responseText += fmt.Sprintf("Apply ID: %s\n", apply.ID)
@@ -148,6 +154,14 @@ func (s *StdioServer) applyAllStages() (any, error) {
 	responseText := fmt.Sprintf("Applied %d stages, %d failed\n\n", applied, failed)
 	for _, detail := range details {
 		responseText += detail + "\n"
+	}
+
+	// Clean up applied stages for this session if any were successfully applied
+	if applied > 0 {
+		if err := s.staging.DeleteAppliedStages(sessionID); err != nil {
+			// Log error but don't fail the response since stages were applied
+			responseText += fmt.Sprintf("\nWarning: Failed to cleanup applied stages: %v\n", err)
+		}
 	}
 
 	return map[string]any{

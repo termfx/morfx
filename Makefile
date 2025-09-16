@@ -126,15 +126,15 @@ test-integration:
 	@echo "$(GREEN)Running integration tests...$(NC)"
 	@go test -race -tags=integration ./...
 
-## test-coverage: Run tests with coverage report
-.PHONY: test-coverage
-test-coverage:
-	@echo "$(GREEN)Running tests with coverage...$(NC)"
+## test-cov-silent: Run tests with coverage (minimal output)
+.PHONY: test-cov-silent
+test-cov-silent:
+	@echo "$(GREEN)Running coverage check...$(NC)"
 	@mkdir -p $(COVERAGE_DIR)
-	@go test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
-	@go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
-	@go tool cover -func=$(COVERAGE_DIR)/coverage.out
-	@echo "$(GREEN)Coverage report: $(COVERAGE_DIR)/coverage.html$(NC)"
+	@go test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic $(shell go list ./... | grep -v /tools/) | grep -E '(FAIL|PASS.*\[no tests to run\]|coverage:)' || true
+	@go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html 2>/dev/null
+	@COVERAGE=$$(go tool cover -func=$(COVERAGE_DIR)/coverage.out | grep "total:" | awk '{print $$3}') && \
+	echo "$(GREEN)✓ Total coverage: $$COVERAGE$(NC)"
 
 ## coverage-check: Enforce coverage thresholds
 .PHONY: coverage-check
@@ -217,6 +217,12 @@ db-reset:
 run: build
 	@echo "$(GREEN)Running MCP server...$(NC)"
 	@$(BUILD_DIR)/$(BINARY_NAME) mcp --debug
+
+## demo: Run AST transformation demo
+.PHONY: demo
+demo: build
+	@echo "$(GREEN)Running Morfx Demo...$(NC)"
+	@go run ./demo/cmd run
 
 ## watch: Run with file watcher (requires entr)
 .PHONY: watch

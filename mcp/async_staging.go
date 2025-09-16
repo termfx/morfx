@@ -23,6 +23,7 @@ type AsyncStagingManager struct {
 	wg         sync.WaitGroup
 	ctx        context.Context
 	cancel     context.CancelFunc
+	closeOnce  sync.Once
 }
 
 // NewAsyncStagingManager creates concurrent staging manager
@@ -65,6 +66,19 @@ type stageResult struct {
 func (asm *AsyncStagingManager) CreateStageAsync(stage *models.Stage) <-chan error {
 	callback := make(chan error, 1)
 
+	// Check if context is done (manager closed)
+	select {
+	case <-asm.ctx.Done():
+		// Manager is closed, fallback to sync
+		go func() {
+			callback <- asm.CreateStage(stage)
+			close(callback)
+		}()
+		return callback
+	default:
+		// Continue with normal operation
+	}
+
 	select {
 	case asm.stageChan <- stageRequest{stage: stage, callback: callback}:
 		// Queued successfully
@@ -72,6 +86,13 @@ func (asm *AsyncStagingManager) CreateStageAsync(stage *models.Stage) <-chan err
 		// Queue full, fallback to sync
 		go func() {
 			callback <- asm.CreateStage(stage)
+			close(callback)
+		}()
+	default:
+		// Channel might be closed, fallback to sync
+		go func() {
+			callback <- asm.CreateStage(stage)
+			close(callback)
 		}()
 	}
 
@@ -87,7 +108,21 @@ func (asm *AsyncStagingManager) stageWorker() {
 		case <-asm.ctx.Done():
 			return
 
-		case req := <-asm.stageChan:
+		case req, ok := <-asm.stageChan:
+			// Check if channel was closed
+			if !ok {
+				return
+			}
+
+			// Validate request
+			if req.stage == nil {
+				if req.callback != nil {
+					req.callback <- fmt.Errorf("stage cannot be nil")
+					close(req.callback)
+				}
+				continue
+			}
+
 			start := time.Now()
 			err := asm.CreateStage(req.stage)
 
@@ -164,10 +199,12 @@ func (asm *AsyncStagingManager) BatchCreateStages(stages []*models.Stage) []erro
 
 // Close shuts down worker pool
 func (asm *AsyncStagingManager) Close() {
-	asm.cancel()
-	close(asm.stageChan)
-	asm.wg.Wait()
-	close(asm.resultChan)
+	asm.closeOnce.Do(func() {
+		asm.cancel()
+		close(asm.stageChan)
+		asm.wg.Wait()
+		close(asm.resultChan)
+	})
 }
 
 // debugLog is a helper for logging

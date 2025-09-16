@@ -128,6 +128,21 @@ func (s *StdioServer) executeTransform(
 	if path != "" {
 		// FILE WRITER MODE: Read from filesystem with safety checks
 
+		// Validate that path is a file, not a directory
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			return nil, WrapError(FileSystemError, "Failed to access file", err)
+		}
+		if fileInfo.IsDir() {
+			return nil, NewMCPError(
+				InvalidParams,
+				fmt.Sprintf(
+					"Path must be a file, not a directory: %s. Use the 'file_query' tool to search within directories.",
+					path,
+				),
+			)
+		}
+
 		// Acquire file lock if in file mode
 		lock, err := s.safety.LockFile(path)
 		if err != nil {

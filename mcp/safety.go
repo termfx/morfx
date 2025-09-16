@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -201,6 +202,10 @@ func (sm *SafetyManager) AtomicWrite(path, content string) error {
 
 // LockFile acquires an exclusive lock on a file
 func (sm *SafetyManager) LockFile(path string) (*FileLock, error) {
+	if path == "" {
+		return nil, NewMCPError(InvalidParams, "File path cannot be empty")
+	}
+
 	if !sm.config.FileLocking {
 		return &FileLock{path: path, manager: sm}, nil // No-op lock
 	}
@@ -294,18 +299,7 @@ func (sm *SafetyManager) isLockStale(lockPath string) bool {
 		return true // Invalid format = stale
 	}
 
-	// Check if process exists (Unix-specific)
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return true
-	}
-
-	// Send signal 0 to check if process exists
-	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return true // Process doesn't exist
-	}
-
-	return false
+	return !isProcessAlive(pid)
 }
 
 // Helper functions
@@ -408,4 +402,21 @@ func (fl *fileLock) release() error {
 		return os.Remove(fl.path)
 	}
 	return nil
+}
+
+// isProcessAlive checks if a process exists cross-platform
+func isProcessAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	if runtime.GOOS == "windows" {
+		// On Windows, FindProcess always succeeds, but we can test if process exists
+		// by trying to get its exit code
+		return process.Signal(os.Interrupt) == nil
+	}
+
+	// Unix-like: use signal 0 to test existence
+	return process.Signal(syscall.Signal(0)) == nil
 }

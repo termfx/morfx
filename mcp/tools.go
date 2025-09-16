@@ -21,7 +21,7 @@ func GetToolDefinitions() []ToolDefinition {
 	tools := []ToolDefinition{
 		{
 			Name:        "query",
-			Description: "Find code elements using natural language queries",
+			Description: "Find code elements using natural language queries in a single file",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -35,7 +35,7 @@ func GetToolDefinitions() []ToolDefinition {
 					},
 					"path": map[string]any{
 						"type":        "string",
-						"description": "File path to analyze (for file writer mode)",
+						"description": "File path to analyze (MUST be a single file, not a directory. For directory searches, use file_query tool instead)",
 					},
 					"query": map[string]any{
 						"type":        "object",
@@ -481,6 +481,21 @@ func (s *StdioServer) handleQueryTool(params json.RawMessage) (any, error) {
 	// Get source code
 	var source string
 	if args.Path != "" {
+		// Validate that path is a file, not a directory
+		fileInfo, err := os.Stat(args.Path)
+		if err != nil {
+			return nil, WrapError(FileSystemError, "Failed to access file", err)
+		}
+		if fileInfo.IsDir() {
+			return nil, NewMCPError(
+				InvalidParams,
+				fmt.Sprintf(
+					"Path must be a file, not a directory: %s. Use the 'file_query' tool to search within directories.",
+					args.Path,
+				),
+			)
+		}
+
 		// FILE WRITER MODE: Read from filesystem
 		content, err := os.ReadFile(args.Path)
 		if err != nil {

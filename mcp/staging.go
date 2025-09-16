@@ -25,14 +25,25 @@ func NewStagingManager(db *gorm.DB, config Config) *StagingManager {
 
 // CreateStage creates a new staged transformation
 func (sm *StagingManager) CreateStage(stage *models.Stage) error {
+	// Validate stage is not nil
+	if stage == nil {
+		return fmt.Errorf("stage cannot be nil")
+	}
+
 	// Generate ID if not set
 	if stage.ID == "" {
 		stage.ID = generateID("stg")
 	}
 
-	// Set defaults
-	stage.Status = "pending"
-	stage.ExpiresAt = time.Now().Add(sm.config.StagingTTL)
+	// Set defaults only if not already set
+	if stage.Status == "" {
+		stage.Status = "pending"
+	}
+
+	// Set expiration only if not already set
+	if stage.ExpiresAt.IsZero() {
+		stage.ExpiresAt = time.Now().Add(sm.config.StagingTTL)
+	}
 
 	// Save to database
 	return sm.db.Create(stage).Error
@@ -133,4 +144,15 @@ func (sm *StagingManager) CleanupExpiredStages() error {
 	return sm.db.Model(&models.Stage{}).
 		Where("status = ? AND expires_at < ?", "pending", time.Now()).
 		Update("status", "expired").Error
+}
+
+// DeleteAppliedStages removes applied stages from database
+func (sm *StagingManager) DeleteAppliedStages(sessionID string) error {
+	return sm.db.Where("session_id = ? AND status = ?", sessionID, "applied").
+		Delete(&models.Stage{}).Error
+}
+
+// DeleteStage removes a specific stage by ID
+func (sm *StagingManager) DeleteStage(stageID string) error {
+	return sm.db.Where("id = ?", stageID).Delete(&models.Stage{}).Error
 }

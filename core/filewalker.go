@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // FileWalker provides high-performance parallel file system traversal
@@ -244,39 +246,19 @@ func (fw *FileWalker) isExcluded(path string, patterns []string) bool {
 	return false
 }
 
-// matchPattern performs glob-style pattern matching with ** support
+// matchPattern performs robust glob-style pattern matching with ** support
 func (fw *FileWalker) matchPattern(path, pattern string) bool {
-	// Handle double asterisk for recursive matching
-	if strings.Contains(pattern, "**") {
-		// Convert **/*.go to regexp-like matching
-		parts := strings.Split(pattern, "**")
-		if len(parts) == 2 {
-			prefix := parts[0]
-			suffix := parts[1]
-
-			suffix = strings.TrimPrefix(suffix, "/")
-
-			// Check if path starts with prefix and ends with suffix
-			if prefix == "" || strings.HasPrefix(path, prefix) {
-				if suffix == "" {
-					return true
-				}
-				return strings.HasSuffix(path, suffix) ||
-					strings.Contains(path, suffix)
-			}
-		}
-	}
-
-	// Use filepath.Match for simple patterns
-	matched, err := filepath.Match(pattern, filepath.Base(path))
-	if err == nil && matched {
+	// Direct match with doublestar
+	if matched, err := doublestar.PathMatch(pattern, path); err == nil && matched {
 		return true
 	}
 
-	// Also check full path for patterns with separators
-	if strings.Contains(pattern, "/") {
-		matched, err := filepath.Match(pattern, path)
-		return err == nil && matched
+	// Try basename for simple patterns without path separators
+	if !strings.Contains(pattern, "/") {
+		basename := filepath.Base(path)
+		if matched, err := doublestar.PathMatch(pattern, basename); err == nil && matched {
+			return true
+		}
 	}
 
 	return false
