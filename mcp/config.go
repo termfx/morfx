@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -27,6 +28,9 @@ type Config struct {
 
 	// Debug
 	Debug bool
+
+	// LogWriter allows tests to redirect debug logging; defaults to stderr.
+	LogWriter io.Writer
 }
 
 // SafetyConfig holds safety-related configuration
@@ -44,9 +48,8 @@ type SafetyConfig struct {
 	// Hash validation
 	ValidateFileHashes bool `json:"validate_file_hashes"` // Check files weren't modified externally
 
-	// Atomic writes
-	AtomicWrites bool `json:"atomic_writes"` // Use atomic write operations
-	UseFsync     bool `json:"use_fsync"`     // Use fsync for durability
+	// Atomic writes (always enabled for safety)
+	UseFsync bool `json:"use_fsync"` // Use fsync for durability
 
 	// Backup & rollback
 	CreateBackups  bool   `json:"create_backups"`  // Create .bak files before writes
@@ -63,11 +66,15 @@ func DefaultConfig() Config {
 	// Use temp directory for database if current dir is not writable, otherwise skip database
 	dbPath := "./.morfx/db/morfx.db"
 	if !isDirectoryWritable(".") {
-		// Try temp directory first
-		if isDirectoryWritable("/tmp") {
-			dbPath = "/tmp/morfx.db"
+		tempDir := os.TempDir()
+		if tempDir != "" {
+			candidate := filepath.Join(tempDir, "morfx.db")
+			if isDirectoryWritable(tempDir) {
+				dbPath = candidate
+			} else {
+				dbPath = "skip"
+			}
 		} else {
-			// If even temp is not writable, skip database entirely
 			dbPath = "skip"
 		}
 	}
@@ -94,9 +101,8 @@ func DefaultConfig() Config {
 			// Hash validation
 			ValidateFileHashes: true, // Always validate file integrity
 
-			// Atomic writes
-			AtomicWrites: true,  // Use atomic operations
-			UseFsync:     false, // Performance over extreme durability by default
+			// Atomic writes (always enabled for safety)
+			UseFsync: false, // Performance over extreme durability by default
 
 			// Backup & rollback
 			CreateBackups:  false,        // No backups by default (can be overwhelming)
@@ -108,7 +114,8 @@ func DefaultConfig() Config {
 			LockTimeout: 30 * time.Second, // Reasonable timeout
 		},
 
-		Debug: false,
+		Debug:     false,
+		LogWriter: os.Stderr,
 	}
 }
 

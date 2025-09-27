@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.0] - 2025-09-27
+
+### Security
+- **Session Limits Enforced** - Resource consumption protection
+  - MaxStagesPerSession and MaxAppliesPerSession now actively prevent unlimited resource usage
+  - Staging operations validate session limits before creating or applying stages
+  - Clear error messages when limits are exceeded for better debugging
+- **Atomic Writes Always Enabled** - Data integrity guaranteed
+  - Removed unsafe AtomicWrites configuration toggle to eliminate data loss scenarios
+  - All file operations now use atomic write operations with temporary files and rename
+  - Updated documentation to reflect mandatory atomic write operations
+
+### Architecture
+- **Typed Interface System** - Compile-time safety
+  - Replaced runtime reflection with typed StagingManager interface for better reliability
+  - Added StagingStore and StagingToggle interfaces for clear contract definitions
+  - Enhanced type safety across tool dispatch and staging operations
+  - Improved error detection at compile time vs runtime failures
+
+### Fixed
+- **Apply Tool Timeout Issues** - Test infrastructure improvements
+  - Resolved timeout failures in MCP server tests by fixing interface implementation
+  - Updated test mocks to properly implement new typed interfaces
+  - Fixed session ID handling in test adapters for consistent behavior
+  - Enhanced test coverage with proper staging manager contracts
+
+### Changed
+- **Tool Handler Signatures** - Context-aware operations
+  - Updated all tool handlers to accept context for better cancellation support
+  - Enhanced progress reporting and cancellation handling across operations
+  - Improved error propagation with contextual information
+
 ## [v1.4.0] - 2024-09-16
 
 ### Added

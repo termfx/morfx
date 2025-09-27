@@ -73,27 +73,11 @@ func WrapError(code int, message string, err error) *MCPError {
 	return NewMCPError(code, message, err.Error())
 }
 
-// ErrorResponse creates a JSON-RPC error response
-func ErrorResponse(id any, code int, message string) Response {
-	return Response{
-		JSONRPC: "2.0",
-		Error: &Error{
-			Code:    code,
-			Message: message,
-		},
-		ID: id,
-	}
-}
-
 // ErrorResponseWithData creates a JSON-RPC error response with additional data
 func ErrorResponseWithData(id any, code int, message string, data any) Response {
-	return Response{
-		JSONRPC: "2.0",
-		Error: &Error{
-			Code:    code,
-			Message: message,
-			Data:    data,
-		},
-		ID: id,
+	resp := ErrorResponse(id, code, message)
+	if resp.Error != nil {
+		resp.Error.Data = data
 	}
+	return resp
 }

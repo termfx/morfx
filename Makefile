@@ -65,13 +65,13 @@ lint-strict: tools/golangci-lint
 
 ## modernize: Auto-fix and modernize entire codebase
 .PHONY: modernize
-modernize: tools/gofumpt tools/golines
+modernize: tools/gofumpt tools/golines tools/gopls
 	@echo "$(GREEN)Modernizing codebase...$(NC)"
 	@echo "  → Updating dependencies..."
 	@go get -u ./...
 	@go mod tidy
-	@echo "  → Running gopls modernize analyzer..."
-	@go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -fix -test ./...
+	@echo "  → Running gopls fixes..."
+	@$(GOBIN)/gopls fix ./...
 	@echo "  → Formatting with gofumpt..."
 	@$(GOBIN)/gofumpt -l -w -extra .
 	@echo "  → Fixing long lines..."
@@ -125,6 +125,12 @@ test-unit:
 test-integration:
 	@echo "$(GREEN)Running integration tests...$(NC)"
 	@go test -race -tags=integration ./...
+
+## stress: Run long-haul stress harness
+.PHONY: stress
+stress:
+	@echo "$(GREEN)Running stress harness...$(NC)"
+	@tools/scripts/stress.sh
 
 ## test-cov-silent: Run tests with coverage (minimal output)
 .PHONY: test-cov-silent

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/termfx/morfx/providers/catalog"
 )
 
 // FileWalker provides high-performance parallel file system traversal
@@ -56,7 +57,17 @@ func (fw *FileWalker) Walk(ctx context.Context, scope FileScope) (<-chan WalkRes
 	// Start directory scanner in separate goroutine
 	go func() {
 		defer close(paths)
-		fw.scanDirectory(ctx, scope.Path, scope, paths, 0)
+		processed := 0
+		var visited map[string]struct{}
+		if scope.FollowSymlinks {
+			visited = make(map[string]struct{})
+			if resolved, err := filepath.EvalSymlinks(scope.Path); err == nil {
+				visited[resolved] = struct{}{}
+			} else {
+				visited[scope.Path] = struct{}{}
+			}
+		}
+		fw.scanDirectory(ctx, scope.Path, scope, paths, 0, &processed, visited)
 	}()
 
 	// Close results when all workers finish
@@ -106,7 +117,12 @@ func (fw *FileWalker) scanDirectory(
 	scope FileScope,
 	paths chan<- string,
 	depth int,
+	processed *int,
+	visited map[string]struct{},
 ) {
+	if scope.MaxFiles > 0 && *processed >= scope.MaxFiles {
+		return
+	}
 	// Check context cancellation
 	select {
 	case <-ctx.Done():
@@ -125,18 +141,12 @@ func (fw *FileWalker) scanDirectory(
 		return // Skip directories we can't read
 	}
 
-	fileCount := 0
 	for _, entry := range entries {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
 			return
 		default:
-		}
-
-		// Check max files limit
-		if scope.MaxFiles > 0 && fileCount >= scope.MaxFiles {
-			return
 		}
 
 		fullPath := filepath.Join(dirPath, entry.Name())
@@ -146,18 +156,57 @@ func (fw *FileWalker) scanDirectory(
 			continue
 		}
 
-		if entry.IsDir() {
-			// Recurse into subdirectory
-			fw.scanDirectory(ctx, fullPath, scope, paths, depth+1)
-		} else {
-			// Check if file matches include patterns
-			if fw.isIncluded(fullPath, scope.Include) {
-				select {
-				case <-ctx.Done():
-					return
-				case paths <- fullPath:
-					fileCount++
+		// Handle symlinked directories when allowed
+		if entry.Type()&os.ModeSymlink != 0 && scope.FollowSymlinks {
+			resolvedPath, err := filepath.EvalSymlinks(fullPath)
+			if err != nil || resolvedPath == "" {
+				continue
+			}
+
+			info, err := os.Stat(resolvedPath)
+			if err != nil {
+				continue
+			}
+
+			if info.IsDir() {
+				if visited != nil {
+					if _, seen := visited[resolvedPath]; seen {
+						continue
+					}
+					visited[resolvedPath] = struct{}{}
 				}
+				fw.scanDirectory(ctx, fullPath, scope, paths, depth+1, processed, visited)
+				continue
+			}
+		}
+
+		if entry.IsDir() {
+			if visited != nil {
+				realPath := fullPath
+				if resolved, err := filepath.EvalSymlinks(fullPath); err == nil && resolved != "" {
+					realPath = resolved
+				}
+				if _, seen := visited[realPath]; seen {
+					continue
+				}
+				visited[realPath] = struct{}{}
+			}
+
+			// Recurse into subdirectory
+			fw.scanDirectory(ctx, fullPath, scope, paths, depth+1, processed, visited)
+			continue
+		}
+
+		// Check if file matches include patterns
+		if fw.isIncluded(fullPath, scope.Include) {
+			if scope.MaxFiles > 0 && *processed >= scope.MaxFiles {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case paths <- fullPath:
+				*processed++
 			}
 		}
 	}
@@ -187,6 +236,10 @@ func (fw *FileWalker) processFile(path string, scope FileScope) WalkResult {
 func (fw *FileWalker) detectLanguage(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 
+	if info, ok := catalog.LookupByExtension(ext); ok {
+		return info.ID
+	}
+
 	languageMap := map[string]string{
 		".go":    "go",
 		".py":    "python",
@@ -194,6 +247,8 @@ func (fw *FileWalker) detectLanguage(path string) string {
 		".ts":    "typescript",
 		".jsx":   "javascript",
 		".tsx":   "typescript",
+		".mjs":   "javascript",
+		".cjs":   "javascript",
 		".java":  "java",
 		".cpp":   "cpp",
 		".c":     "c",
@@ -202,6 +257,10 @@ func (fw *FileWalker) detectLanguage(path string) string {
 		".cs":    "csharp",
 		".rb":    "ruby",
 		".php":   "php",
+		".phtml": "php",
+		".php4":  "php",
+		".php5":  "php",
+		".phps":  "php",
 		".rs":    "rust",
 		".kt":    "kotlin",
 		".swift": "swift",
@@ -213,6 +272,9 @@ func (fw *FileWalker) detectLanguage(path string) string {
 		".elm":   "elm",
 		".ex":    "elixir",
 		".erl":   "erlang",
+		".pyw":   "python",
+		".pyi":   "python",
+		".d.ts":  "typescript",
 	}
 
 	if lang, exists := languageMap[ext]; exists {

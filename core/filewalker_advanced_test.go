@@ -586,6 +586,94 @@ func TestFileWalker_Walk_SymlinkHandling(t *testing.T) {
 	}
 }
 
+func TestFileWalker_Walk_FollowSymlinkDirectories(t *testing.T) {
+	walker := NewFileWalker()
+	tempDir := t.TempDir()
+
+	subDir := filepath.Join(tempDir, "sub")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatalf("Failed to create subdir: %v", err)
+	}
+
+	targetFile := filepath.Join(subDir, "target.go")
+	if err := os.WriteFile(targetFile, []byte("package main"), 0o644); err != nil {
+		t.Fatalf("Failed to create target file: %v", err)
+	}
+
+	symlinkDir := filepath.Join(tempDir, "link")
+	if err := os.Symlink(subDir, symlinkDir); err != nil {
+		t.Skipf("Skipping symlink directory test: %v", err)
+	}
+
+	// Create a symlink that would cause a loop if not guarded
+	loopLink := filepath.Join(subDir, "loop")
+	if err := os.Symlink(tempDir, loopLink); err != nil {
+		t.Skipf("Skipping loop symlink test: %v", err)
+	}
+
+	ctx := context.Background()
+
+	t.Run("without_follow", func(t *testing.T) {
+		scope := FileScope{
+			Path:           tempDir,
+			Include:        []string{"*.go"},
+			FollowSymlinks: false,
+		}
+
+		results, err := walker.Walk(ctx, scope)
+		if err != nil {
+			t.Fatalf("Walk failed: %v", err)
+		}
+
+		var files []string
+		for result := range results {
+			if result.Error == nil {
+				files = append(files, result.Path)
+			}
+		}
+
+		if len(files) != 1 || files[0] != targetFile {
+			t.Fatalf("Expected only target file without following symlinks, got %v", files)
+		}
+	})
+
+	t.Run("with_follow", func(t *testing.T) {
+		scope := FileScope{
+			Path:           tempDir,
+			Include:        []string{"*.go"},
+			FollowSymlinks: true,
+		}
+
+		results, err := walker.Walk(ctx, scope)
+		if err != nil {
+			t.Fatalf("Walk failed: %v", err)
+		}
+
+		var files []string
+		for result := range results {
+			if result.Error == nil {
+				files = append(files, result.Path)
+			}
+		}
+
+		if len(files) != 1 {
+			t.Fatalf("Expected exactly one file when following symlinks, got %v", files)
+		}
+
+		expected := []string{targetFile, filepath.Join(symlinkDir, "target.go")}
+		match := false
+		for _, candidate := range expected {
+			if files[0] == candidate {
+				match = true
+				break
+			}
+		}
+		if !match {
+			t.Fatalf("Unexpected file path when following symlinks: %v", files)
+		}
+	})
+}
+
 func TestFileWalker_Worker_ChannelClose(t *testing.T) {
 	walker := NewFileWalker()
 	tempDir := t.TempDir()

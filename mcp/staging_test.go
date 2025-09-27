@@ -1,9 +1,18 @@
+//go:build integration
+// +build integration
+
 package mcp
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -12,13 +21,14 @@ import (
 
 // TestNewStagingManager verifies staging manager creation
 func TestNewStagingManager(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
 
 	config := Config{
 		StagingTTL: 24 * time.Hour,
 	}
 
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	if sm == nil {
 		t.Fatal("StagingManager should not be nil")
@@ -35,11 +45,12 @@ func TestNewStagingManager(t *testing.T) {
 
 // TestCreateStage verifies stage creation functionality
 func TestCreateStage(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
 	config := Config{
 		StagingTTL: 24 * time.Hour,
 	}
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	tests := []struct {
 		name        string
@@ -84,7 +95,7 @@ func TestCreateStage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			originalID := tt.stage.ID
-			err := sm.CreateStage(tt.stage)
+			err := sm.CreateStage(context.Background(), tt.stage)
 
 			if tt.expectError && err == nil {
 				t.Fatalf("Expected error for %s, but got none", tt.description)
@@ -123,9 +134,10 @@ func TestCreateStage(t *testing.T) {
 	}
 } // TestGetStage verifies stage retrieval functionality
 func TestGetStage(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
 	config := Config{StagingTTL: 24 * time.Hour}
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	// Create a test stage
 	stage := &models.Stage{
@@ -136,7 +148,7 @@ func TestGetStage(t *testing.T) {
 		Operation: "replace",
 	}
 
-	err := sm.CreateStage(stage)
+	err := sm.CreateStage(context.Background(), stage)
 	if err != nil {
 		t.Fatalf("Failed to create test stage: %v", err)
 	}
@@ -194,11 +206,75 @@ func TestGetStage(t *testing.T) {
 	}
 }
 
+func TestCreateStageCancelled(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	sm := NewStagingManager(db, Config{StagingTTL: time.Hour}, nil)
+
+	stage := &models.Stage{
+		Language:  "go",
+		Original:  "package main",
+		Modified:  "package main // modified",
+		Operation: "replace",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sm.CreateStage(ctx, stage)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&models.Stage{}).Where("language = ?", "go").Count(&count).Error; err != nil {
+		t.Fatalf("failed counting stages: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected no stages persisted, found %d", count)
+	}
+}
+
+func TestApplyStageCancelled(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	sm := NewStagingManager(db, Config{StagingTTL: time.Hour}, nil)
+
+	stage := &models.Stage{
+		ID:        "stage-cancel",
+		Language:  "go",
+		Original:  "package main",
+		Modified:  "package main // mod",
+		Operation: "replace",
+		Status:    "pending",
+	}
+	if err := db.Create(stage).Error; err != nil {
+		t.Fatalf("failed to insert stage: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := sm.ApplyStage(ctx, stage.ID, false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	var refreshed models.Stage
+	if err := db.First(&refreshed, "id = ?", stage.ID).Error; err != nil {
+		t.Fatalf("failed to reload stage: %v", err)
+	}
+	if refreshed.Status != "pending" {
+		t.Errorf("expected stage to remain pending, got %s", refreshed.Status)
+	}
+}
+
 // TestListPendingStages verifies listing pending stages
 func TestListPendingStages(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
 	config := Config{StagingTTL: 24 * time.Hour}
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	// Create multiple test stages with different statuses
 	stages := []*models.Stage{
@@ -226,7 +302,7 @@ func TestListPendingStages(t *testing.T) {
 	}
 
 	for _, stage := range stages {
-		err := sm.CreateStage(stage)
+		err := sm.CreateStage(context.Background(), stage)
 		if err != nil {
 			t.Fatalf("Failed to create test stage %s: %v", stage.ID, err)
 		}
@@ -267,9 +343,10 @@ func TestListPendingStages(t *testing.T) {
 	}
 } // TestCleanupExpiredStages verifies expired stage cleanup
 func TestCleanupExpiredStages(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
-	config := Config{StagingTTL: 1 * time.Second} // Very short TTL for testing
-	sm := NewStagingManager(db, config)
+	config := Config{StagingTTL: 25 * time.Millisecond} // Very short TTL for testing
+	sm := NewStagingManager(db, config, nil)
 
 	// Create a stage that will expire quickly
 	stage := &models.Stage{
@@ -278,13 +355,13 @@ func TestCleanupExpiredStages(t *testing.T) {
 		Operation: "replace",
 	}
 
-	err := sm.CreateStage(stage)
+	err := sm.CreateStage(context.Background(), stage)
 	if err != nil {
 		t.Fatalf("Failed to create test stage: %v", err)
 	}
 
 	// Wait for expiration
-	time.Sleep(2 * time.Second)
+	time.Sleep(75 * time.Millisecond)
 
 	// Run cleanup
 	err = sm.CleanupExpiredStages()
@@ -323,9 +400,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 // TestApplyStage verifies stage application functionality
 func TestApplyStage(t *testing.T) {
+	t.Parallel()
 	db := setupTestDB(t)
 	config := Config{StagingTTL: 24 * time.Hour}
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	// Create a test stage
 	stage := &models.Stage{
@@ -337,7 +415,7 @@ func TestApplyStage(t *testing.T) {
 		Status:    "pending",
 	}
 
-	err := sm.CreateStage(stage)
+	err := sm.CreateStage(context.Background(), stage)
 	if err != nil {
 		t.Fatalf("Failed to create test stage: %v", err)
 	}
@@ -364,7 +442,7 @@ func TestApplyStage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := sm.ApplyStage(tt.stageID, false) // autoApplied = false
+			_, err := sm.ApplyStage(context.Background(), tt.stageID, false) // autoApplied = false
 
 			if tt.expectError && err == nil {
 				t.Fatalf("Expected error for %s, but got none", tt.description)
@@ -389,11 +467,62 @@ func TestApplyStage(t *testing.T) {
 	}
 }
 
+func TestApplyStageWritesFile(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	config := Config{StagingTTL: time.Hour}
+	safety := NewSafetyManager(DefaultConfig().Safety)
+	sm := NewStagingManager(db, config, safety)
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "apply.go")
+	original := "package main\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+
+	modified := "package main\n// applied\n"
+	scopeJSON, err := json.Marshal(map[string]any{"file_path": path})
+	if err != nil {
+		t.Fatalf("failed to marshal scope: %v", err)
+	}
+
+	stage := &models.Stage{
+		ID:              "file-apply",
+		Language:        "go",
+		Original:        original,
+		Modified:        modified,
+		Operation:       "replace",
+		Status:          "pending",
+		BaseDigest:      calculateSHA256(original),
+		ConfidenceScore: 0.95,
+		ConfidenceLevel: "high",
+		ScopeAST:        datatypes.JSON(scopeJSON),
+	}
+
+	if err := sm.CreateStage(context.Background(), stage); err != nil {
+		t.Fatalf("failed to create stage: %v", err)
+	}
+
+	if _, err := sm.ApplyStage(context.Background(), stage.ID, false); err != nil {
+		t.Fatalf("apply stage failed: %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read file after apply: %v", err)
+	}
+
+	if string(content) != modified {
+		t.Fatalf("expected file to be updated to %q, got %q", modified, string(content))
+	}
+}
+
 // Benchmark tests for performance verification
 func BenchmarkGetStage(b *testing.B) {
 	db := setupTestDB(&testing.T{})
 	config := Config{StagingTTL: 24 * time.Hour}
-	sm := NewStagingManager(db, config)
+	sm := NewStagingManager(db, config, nil)
 
 	// Create a test stage
 	stage := &models.Stage{
@@ -403,7 +532,7 @@ func BenchmarkGetStage(b *testing.B) {
 		Modified:  "modified code",
 		Operation: "replace",
 	}
-	sm.CreateStage(stage)
+	sm.CreateStage(context.Background(), stage)
 
 	for b.Loop() {
 		sm.GetStage("bench-get-test")

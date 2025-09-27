@@ -1,11 +1,14 @@
 package core
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -35,6 +38,7 @@ type TransactionManager struct {
 	logDir       string
 	currentTx    *TransactionLog
 	atomicWriter *AtomicWriter
+	mu           sync.Mutex
 }
 
 // NewTransactionManager creates a new transaction manager
@@ -49,11 +53,13 @@ func NewTransactionManager(logDir string, atomicWriter *AtomicWriter) *Transacti
 
 // BeginTransaction starts a new transaction
 func (tm *TransactionManager) BeginTransaction(description string) (*TransactionLog, error) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.currentTx != nil {
 		return nil, fmt.Errorf("transaction already in progress: %s", tm.currentTx.ID)
 	}
 
-	txID := fmt.Sprintf("tx_%d_%d", time.Now().Unix(), os.Getpid())
+	txID := newTransactionID()
 
 	tx := &TransactionLog{
 		ID:          txID,
@@ -76,6 +82,8 @@ func (tm *TransactionManager) BeginTransaction(description string) (*Transaction
 
 // AddOperation records a file operation in the current transaction
 func (tm *TransactionManager) AddOperation(opType, filePath string) (*TransactionOperation, error) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.currentTx == nil {
 		return nil, fmt.Errorf("no active transaction")
 	}
@@ -108,17 +116,20 @@ func (tm *TransactionManager) AddOperation(opType, filePath string) (*Transactio
 	}
 
 	tm.currentTx.Operations = append(tm.currentTx.Operations, op)
+	opPtr := &tm.currentTx.Operations[len(tm.currentTx.Operations)-1]
 
 	// Update transaction log
 	if err := tm.writeTransactionLog(tm.currentTx); err != nil {
 		return nil, fmt.Errorf("failed to update transaction log: %w", err)
 	}
 
-	return &op, nil
+	return opPtr, nil
 }
 
 // CompleteOperation marks an operation as completed
 func (tm *TransactionManager) CompleteOperation(filePath string, err error) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.currentTx == nil {
 		return fmt.Errorf("no active transaction")
 	}
@@ -142,6 +153,8 @@ func (tm *TransactionManager) CompleteOperation(filePath string, err error) erro
 
 // CommitTransaction marks transaction as successfully completed
 func (tm *TransactionManager) CommitTransaction() error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.currentTx == nil {
 		return fmt.Errorf("no active transaction")
 	}
@@ -164,6 +177,8 @@ func (tm *TransactionManager) CommitTransaction() error {
 
 // RollbackTransaction reverts all operations in current transaction
 func (tm *TransactionManager) RollbackTransaction() error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	if tm.currentTx == nil {
 		return fmt.Errorf("no active transaction")
 	}
@@ -327,7 +342,7 @@ func (tm *TransactionManager) writeTransactionLog(tx *TransactionLog) error {
 
 // generateBackupPath creates a unique backup path
 func (tm *TransactionManager) generateBackupPath(filePath string) string {
-	timestamp := time.Now().Format("20060102-150405")
+	ts := time.Now().UTC().Format("20060102-150405.000000000")
 	txID := "unknown"
 	if tm.currentTx != nil {
 		txID = tm.currentTx.ID
@@ -335,19 +350,33 @@ func (tm *TransactionManager) generateBackupPath(filePath string) string {
 
 	dir := filepath.Dir(filePath)
 	name := filepath.Base(filePath)
+	suffix := randomHexString(8)
 
-	return filepath.Join(dir, fmt.Sprintf(".morfx-backup-%s-%s-%s",
-		name, txID, timestamp))
+	return filepath.Join(dir, fmt.Sprintf(".morfx-backup-%s-%s-%s-%s",
+		name, txID, ts, suffix))
 }
 
 // createBackup creates a backup file
 func (tm *TransactionManager) createBackup(originalPath, backupPath string) error {
+	info, err := os.Stat(originalPath)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(originalPath)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(backupPath, content, 0o644)
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+
+	if err := os.WriteFile(backupPath, content, mode); err != nil {
+		return err
+	}
+	return os.Chmod(backupPath, mode)
 }
 
 // generateFileChecksum creates SHA256 hash of file content
@@ -359,4 +388,23 @@ func generateFileChecksum(filePath string) (string, error) {
 
 	hash := sha256.Sum256(content)
 	return fmt.Sprintf("%x", hash), nil
+}
+
+func newTransactionID() string {
+	ts := time.Now().UTC().UnixNano()
+	suffix := randomHexString(8)
+	return fmt.Sprintf("tx_%d_%s_%d", ts, suffix, os.Getpid())
+}
+
+func randomHexString(length int) string {
+	if length <= 0 {
+		length = 8
+	}
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		// Fallback to timestamp-derived value if we cannot read random bytes.
+		ts := time.Now().UTC().UnixNano()
+		return fmt.Sprintf("%x", ts)
+	}
+	return hex.EncodeToString(buf)
 }

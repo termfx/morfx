@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -15,8 +16,9 @@ func setupTestServerForLogging(t *testing.T) *StdioServer {
 	config.Debug = true
 
 	server := &StdioServer{
-		config: config,
-		writer: bufio.NewWriter(&buf),
+		config:       config,
+		writer:       bufio.NewWriter(&buf),
+		sessionState: NewSessionState(),
 	}
 
 	return server
@@ -37,7 +39,7 @@ func TestHandleSetLoggingLevel_ValidLevel(t *testing.T) {
 		Params: paramsJSON,
 	}
 
-	response := server.handleSetLoggingLevel(req)
+	response := server.handleSetLoggingLevel(context.Background(), req)
 
 	if response.Error != nil {
 		t.Errorf("Expected no error, got: %v", response.Error)
@@ -72,7 +74,7 @@ func TestHandleSetLoggingLevel_InvalidParams(t *testing.T) {
 		Params: invalidJSON,
 	}
 
-	response := server.handleSetLoggingLevel(req)
+	response := server.handleSetLoggingLevel(context.Background(), req)
 
 	if response.Error == nil {
 		t.Error("Expected error for invalid params")
@@ -84,13 +86,15 @@ func TestSendLogNotification_DebugEnabled(t *testing.T) {
 	server := setupTestServerForLogging(t)
 	server.writer = bufio.NewWriter(&buf)
 	server.config.Debug = true
+	server.sessionState.SetLoggingLevel(LogLevelDebug)
+	server.sessionState.SetLoggingLevel(LogLevelDebug)
 
 	// Test sending debug notification
 	data := LogData{"key": "value", "number": 42}
 	server.sendLogNotification(LogLevelDebug, "Test debug message", data)
 	server.writer.Flush()
 
-	output := buf.String()
+	output := strings.TrimSpace(buf.String())
 	if output == "" {
 		t.Error("Expected output for debug notification when debug enabled")
 	}
@@ -156,7 +160,7 @@ func TestSendLogNotification_DebugDisabled(t *testing.T) {
 	server.sendLogNotification(LogLevelDebug, "Test debug message", nil)
 	server.writer.Flush()
 
-	output := buf.String()
+	output := strings.TrimSpace(buf.String())
 	if output != "" {
 		t.Error("Expected no output for debug notification when debug disabled")
 	}
@@ -343,12 +347,13 @@ func TestLogDebug(t *testing.T) {
 	server := setupTestServerForLogging(t)
 	server.writer = bufio.NewWriter(&buf)
 	server.config.Debug = true
+	server.sessionState.SetLoggingLevel(LogLevelDebug)
 
 	data := LogData{"debug_info": "detailed"}
 	server.LogDebug("Debug message", data)
 	server.writer.Flush()
 
-	output := buf.String()
+	output := strings.TrimSpace(buf.String())
 	if output == "" {
 		t.Error("Expected output from LogDebug when debug enabled")
 	}
@@ -501,7 +506,8 @@ func TestSendProgressNotification(t *testing.T) {
 	progress := 50.0
 	total := 100.0
 
-	server.sendProgressNotification(progressToken, progress, total)
+	message := "Processing"
+	server.sendProgressNotification(progressToken, progress, total, message)
 	server.writer.Flush()
 
 	output := buf.String()
@@ -529,6 +535,10 @@ func TestSendProgressNotification(t *testing.T) {
 
 	if params["total"] != total {
 		t.Errorf("Expected total %f, got %v", total, params["total"])
+	}
+
+	if params["message"] != message {
+		t.Errorf("Expected message '%s', got %v", message, params["message"])
 	}
 }
 

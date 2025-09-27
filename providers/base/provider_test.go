@@ -2,6 +2,7 @@ package base
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -52,6 +53,10 @@ func (m *mockConfig) IsExported(name string) bool {
 	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
 }
 
+func (m *mockConfig) SupportedQueryTypes() []string {
+	return []string{"function", "struct", "variable"}
+}
+
 func newTestProvider() *Provider {
 	config := &mockConfig{
 		language:   "go",
@@ -76,8 +81,8 @@ func TestNew(t *testing.T) {
 		t.Error("Config not set properly")
 	}
 
-	if provider.parser == nil {
-		t.Error("Parser not initialized")
+	if provider.pool == nil {
+		t.Error("Parser pool not initialized")
 	}
 
 	if provider.cache == nil {
@@ -938,6 +943,56 @@ func TestCacheInvalidSource(t *testing.T) {
 
 	tree.Close()
 	tree2.Close()
+}
+
+// TestProviderQueryConcurrent ensures pooled parsers survive parallel use.
+func TestProviderQueryConcurrent(t *testing.T) {
+	provider := newTestProvider()
+	source := `package main
+
+func One() {}
+func Two() {}
+func Three() {}
+`
+	query := core.AgentQuery{Type: "function", Name: "*"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				result := provider.Query(source, query)
+				if result.Error != nil {
+					t.Errorf("query error: %v", result.Error)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestProviderStats(t *testing.T) {
+	provider := newTestProvider()
+	code := `package main
+
+func main() {}
+`
+	query := core.AgentQuery{Type: "function", Name: "main"}
+
+	result := provider.Query(code, query)
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	stats := provider.Stats()
+	if stats.BorrowCount == 0 || stats.ReturnCount == 0 {
+		t.Fatalf("expected borrow/return counters to be incremented, got %+v", stats)
+	}
+	if stats.Active != 0 {
+		t.Fatalf("expected no active parsers after query, got %d", stats.Active)
+	}
 }
 
 // TestCacheEmptySource tests cache with empty source

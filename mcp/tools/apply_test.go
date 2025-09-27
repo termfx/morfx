@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -46,6 +47,16 @@ func TestApplyTool_Execute(t *testing.T) {
 			expectErr: false,
 		},
 		{
+			name: "apply_specific_stage_with_sampling",
+			params: map[string]any{
+				"id": "stage2",
+			},
+			expectErr: false,
+			setup: func() {
+				server.samplingResults = []map[string]any{{"summary": "ok"}}
+			},
+		},
+		{
 			name: "apply_latest_stage",
 			params: map[string]any{
 				"latest": true,
@@ -70,7 +81,7 @@ func TestApplyTool_Execute(t *testing.T) {
 				"id": "non_existent",
 			},
 			expectErr: true,
-			errMsg:    "stage not found",
+			errMsg:    "failed to load stage",
 		},
 		{
 			name: "apply_with_conflicting_params",
@@ -108,32 +119,56 @@ func TestApplyTool_Execute(t *testing.T) {
 			}
 
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			server.samplingRequests = nil
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
-			} else {
-				assertNoError(t, err)
-				if result == nil {
-					t.Error("Expected result but got nil")
-				}
+				return
+			}
+			assertNoError(t, err)
+			if result == nil {
+				t.Fatal("Expected result but got nil")
+			}
 
-				// Verify result structure
-				if _, ok := result.(map[string]any); ok {
-					// Convert content array to map for backward compatibility
-					if content, ok := convertContentToMap(result); ok {
-						// Check for applied stages info
-						if applied, ok := content["applied"]; ok {
-							t.Logf("Applied stages: %v", applied)
-						}
-					} else {
-						// Just check that we have content
-						if !hasContentArray(result) {
-							t.Error("Result should have content array")
-						}
-					}
+			resultMap, ok := result.(map[string]any)
+			if !ok {
+				t.Fatalf("Expected map result, got %T", result)
+			}
+
+			structured, ok := resultMap["structuredContent"].(map[string]any)
+			if !ok {
+				t.Fatal("structuredContent missing from apply result")
+			}
+			mode, _ := structured["mode"].(string)
+			if mode == "" {
+				t.Error("structuredContent.mode should be populated")
+			}
+
+			applied := toStringSlice(resultMap["applied"])
+			if mode != "all" && len(applied) == 0 {
+				t.Errorf("expected applied stages for mode %s", mode)
+			}
+
+			switch tt.name {
+			case "apply_specific_stage_with_sampling":
+				if len(server.samplingRequests) == 0 {
+					t.Error("expected sampling request to be issued")
+				}
+				if _, ok := structured["sampling"].(map[string]any); !ok {
+					t.Error("expected sampling data in structuredContent")
+				}
+			case "apply_all_stages":
+				if len(applied) == 0 {
+					t.Error("expected applied stages for all mode")
 				}
 			}
+
+			if !hasContentArray(resultMap) {
+				t.Error("Result should include content array")
+			}
+			server.samplingResults = nil
+			server.samplingErr = nil
 		})
 	}
 }
@@ -147,7 +182,7 @@ func TestApplyTool_StagingDisabled(t *testing.T) {
 		"latest": true,
 	})
 
-	_, err := tool.handle(params)
+	_, err := tool.handle(context.Background(), params)
 	assertError(t, err, "staging is not enabled")
 }
 
@@ -179,23 +214,35 @@ func TestApplyTool_ApplyOrder(t *testing.T) {
 		"all": true,
 	})
 
-	result, err := tool.handle(params)
+	result, err := tool.handle(context.Background(), params)
 	assertNoError(t, err)
 
-	// Verify all stages were applied
-	if _, ok := result.(map[string]any); ok {
-		// Convert content array to map for backward compatibility
-		if content, ok := convertContentToMap(result); ok {
-			if appliedCount, ok := content["appliedCount"].(int); ok {
-				if appliedCount != 3 {
-					t.Errorf("Expected 3 stages applied, got %d", appliedCount)
-				}
-			} else {
-				// Just check that we have content
-				text := extractContentText(t, result)
-				t.Logf("Apply result: %s", text)
-			}
-		}
+	resultMap, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected apply result map, got %T", result)
+	}
+	structured, ok := resultMap["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("structuredContent missing from apply all response")
+	}
+	if mode, _ := structured["mode"].(string); mode != "all" {
+		t.Errorf("expected mode 'all', got %s", structured["mode"])
+	}
+	count := 0
+	switch v := structured["appliedCount"].(type) {
+	case int:
+		count = v
+	case float64:
+		count = int(v)
+	default:
+		t.Errorf("expected numeric appliedCount, got %T", structured["appliedCount"])
+	}
+	if count != len(stages) {
+		t.Errorf("Expected %d stages applied, got %d", len(stages), count)
+	}
+	applied := toStringSlice(resultMap["applied"])
+	if len(applied) != len(stages) {
+		t.Errorf("expected %d applied stage IDs, got %d", len(stages), len(applied))
 	}
 
 	// Verify stages were cleared after application
@@ -252,7 +299,7 @@ func TestApplyTool_InvalidJSON(t *testing.T) {
 
 	// Test with invalid JSON
 	invalidJSON := []byte(`{"invalid": json}`)
-	_, err := tool.handle(invalidJSON)
+	_, err := tool.handle(context.Background(), invalidJSON)
 
 	if err == nil {
 		t.Error("Expected error for invalid JSON")

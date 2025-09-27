@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,11 +9,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/termfx/morfx/mcp/types"
 )
 
 // TestGetToolDefinitions tests tool definition structure
 func TestGetToolDefinitions(t *testing.T) {
-	tools := GetToolDefinitions()
+	server := createTestServer(t)
+	tools := server.toolRegistry.GetDefinitions()
 
 	expectedTools := []string{
 		"query", "file_query", "replace", "file_replace",
@@ -24,7 +28,7 @@ func TestGetToolDefinitions(t *testing.T) {
 		t.Errorf("Expected %d tools, got %d", len(expectedTools), len(tools))
 	}
 
-	toolMap := make(map[string]ToolDefinition)
+	toolMap := make(map[string]types.ToolDefinition)
 	for _, tool := range tools {
 		toolMap[tool.Name] = tool
 	}
@@ -167,7 +171,7 @@ func TestHandleQueryTool(t *testing.T) {
 				t.Fatalf("Failed to marshal params: %v", err)
 			}
 
-			result, err := server.handleQueryTool(params)
+			result, err := server.handleQueryTool(context.Background(), params)
 
 			if tt.expectErr {
 				if err == nil {
@@ -258,7 +262,7 @@ func helper() {
 				t.Fatalf("Failed to marshal params: %v", err)
 			}
 
-			result, err := server.handleQueryTool(params)
+			result, err := server.handleQueryTool(context.Background(), params)
 
 			if tt.expectErr {
 				if err == nil {
@@ -301,21 +305,18 @@ func TestRegisterBuiltinTools(t *testing.T) {
 		"apply", "append",
 	}
 
-	server.mu.RLock()
-	defer server.mu.RUnlock()
+	registered := server.toolRegistry.Names()
 
 	for _, toolName := range expectedTools {
-		if _, exists := server.tools[toolName]; !exists {
+		if !slices.Contains(registered, toolName) {
 			t.Errorf("Tool '%s' should be registered", toolName)
 		}
 	}
 
-	// Verify we don't have unexpected tools
-	if len(server.tools) != len(expectedTools) {
-		t.Errorf("Expected %d tools, found %d", len(expectedTools), len(server.tools))
-		for name := range server.tools {
-			found := slices.Contains(expectedTools, name)
-			if !found {
+	if len(registered) != len(expectedTools) {
+		t.Errorf("Expected %d tools, found %d", len(expectedTools), len(registered))
+		for _, name := range registered {
+			if !slices.Contains(expectedTools, name) {
 				t.Logf("Unexpected tool found: %s", name)
 			}
 		}
@@ -344,7 +345,7 @@ func TestHandleCallTool(t *testing.T) {
 			}),
 		}
 
-		response := server.handleCallTool(request)
+		response := server.handleCallTool(context.Background(), request)
 
 		if response.Error != nil {
 			t.Errorf("Unexpected error: %v", response.Error)
@@ -362,7 +363,7 @@ func TestHandleCallTool(t *testing.T) {
 			}),
 		}
 
-		response := server.handleCallTool(request)
+		response := server.handleCallTool(context.Background(), request)
 
 		if response.Error == nil {
 			t.Error("Expected error for nonexistent tool")
@@ -377,7 +378,7 @@ func TestHandleCallTool(t *testing.T) {
 			Params: json.RawMessage(`invalid json`),
 		}
 
-		response := server.handleCallTool(request)
+		response := server.handleCallTool(context.Background(), request)
 
 		if response.Error == nil {
 			t.Error("Expected error for invalid params")
@@ -394,7 +395,7 @@ func TestHandleCallTool(t *testing.T) {
 			}),
 		}
 
-		response := server.handleCallTool(request)
+		response := server.handleCallTool(context.Background(), request)
 
 		if response.Error == nil {
 			t.Error("Expected error for missing tool name")
@@ -404,7 +405,8 @@ func TestHandleCallTool(t *testing.T) {
 
 // TestToolSchemaValidation tests that tool schemas are properly structured
 func TestToolSchemaValidation(t *testing.T) {
-	tools := GetToolDefinitions()
+	server := createTestServer(t)
+	tools := server.toolRegistry.GetDefinitions()
 
 	for _, tool := range tools {
 		t.Run(tool.Name, func(t *testing.T) {
@@ -541,13 +543,13 @@ func TestToolExecutionTimeout(t *testing.T) {
 	server := createTestServer(t)
 
 	// Register a slow tool for testing
-	server.RegisterTool("slow_tool", func(params json.RawMessage) (any, error) {
-		time.Sleep(100 * time.Millisecond)
+	server.RegisterTool("slow_tool", func(ctx context.Context, params json.RawMessage) (any, error) {
+		time.Sleep(20 * time.Millisecond)
 		return "completed", nil
 	})
 
 	// Register a tool that returns an error
-	server.RegisterTool("error_tool", func(params json.RawMessage) (any, error) {
+	server.RegisterTool("error_tool", func(ctx context.Context, params json.RawMessage) (any, error) {
 		return nil, NewMCPError(-32603, "Intentional error", map[string]any{"test": true})
 	})
 
@@ -581,17 +583,23 @@ func TestToolExecutionTimeout(t *testing.T) {
 				}),
 			}
 
-			response := server.handleCallTool(request)
+			response := server.handleCallTool(context.Background(), request)
+
+			result, ok := response.Result.(types.CallToolResult)
+			if !ok {
+				t.Fatalf("expected CallToolResult, got %T", response.Result)
+			}
 
 			if tt.expectErr {
-				if response.Error == nil {
-					t.Error("Expected error but got none")
-				} else if tt.expectData && response.Error.Data == nil {
-					t.Error("Expected error data but got none")
+				if !result.IsError {
+					t.Error("Expected error result but got success")
+				}
+				if tt.expectData && result.StructuredContent == nil {
+					t.Error("Expected structured error data")
 				}
 			} else {
-				if response.Error != nil {
-					t.Errorf("Unexpected error: %v", response.Error)
+				if result.IsError {
+					t.Errorf("Unexpected error: %+v", result.StructuredContent)
 				}
 			}
 		})
@@ -650,16 +658,7 @@ func TestToolInputValidation(t *testing.T) {
 				t.Fatalf("Failed to marshal params: %v", err)
 			}
 
-			// Get the tool handler directly
-			server.mu.RLock()
-			handler, exists := server.tools[tt.toolName]
-			server.mu.RUnlock()
-
-			if !exists {
-				t.Fatalf("Tool %s not found", tt.toolName)
-			}
-
-			_, err = handler(params)
+			_, err = server.toolRegistry.Execute(context.Background(), tt.toolName, params)
 
 			if tt.expectErr {
 				if err == nil {

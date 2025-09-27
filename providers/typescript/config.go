@@ -29,34 +29,60 @@ func (c *Config) GetLanguage() *sitter.Language {
 
 // MapQueryTypeToNodeTypes maps query types to TypeScript AST node types
 func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
-	switch queryType {
-	case "function", "func":
-		return []string{
-			"function_declaration",
-			"function_expression",
-			"arrow_function",
-			"method_definition",
-			"method_signature",
-			"public_field_definition",
-		}
-	case "class":
-		return []string{"class_declaration", "class_expression"}
-	case "interface":
-		return []string{"interface_declaration"}
-	case "type":
-		return []string{"type_alias_declaration"}
-	case "enum":
-		return []string{"enum_declaration"}
-	case "variable", "var", "const", "let":
-		return []string{"variable_declarator", "lexical_declaration"}
-	case "import", "export":
-		return []string{"import_statement", "export_statement"}
-	case "module", "namespace":
-		return []string{"module_declaration", "namespace_declaration"}
-	default:
-		// Try to use the query type directly as node type
-		return []string{queryType}
+	if nodes, ok := c.aliasMap()[queryType]; ok {
+		return nodes
 	}
+	return []string{queryType}
+}
+
+func (c *Config) aliasMap() map[string][]string {
+	return map[string][]string{
+		"function":    {"function_declaration", "function_expression", "arrow_function", "method_definition", "method_signature", "public_field_definition"},
+		"func":        {"function_declaration", "function_expression", "arrow_function", "method_definition", "method_signature", "public_field_definition"},
+		"fn":          {"function_declaration", "function_expression", "arrow_function", "method_definition", "method_signature", "public_field_definition"},
+		"class":       {"class_declaration", "class_expression"},
+		"interface":   {"interface_declaration"},
+		"iface":       {"interface_declaration"},
+		"type":        {"type_alias_declaration"},
+		"enum":        {"enum_declaration"},
+		"enum_member": {"enum_member"},
+		"member":      {"enum_member"},
+		"method":      {"method_definition", "method_signature"},
+		"getter":      {"method_definition", "method_signature"},
+		"setter":      {"method_definition", "method_signature"},
+		"accessor":    {"method_definition", "method_signature"},
+		"constructor": {"method_definition"},
+		"ctor":        {"method_definition"},
+		"variable":    {"variable_declaration", "lexical_declaration", "variable_declarator"},
+		"var":         {"variable_declaration", "lexical_declaration", "variable_declarator"},
+		"const":       {"variable_declaration", "lexical_declaration", "variable_declarator"},
+		"let":         {"variable_declaration", "lexical_declaration", "variable_declarator"},
+		"lambda":      {"arrow_function"},
+		"arrow":       {"arrow_function"},
+		"array":       {"array", "array_pattern"},
+		"object":      {"object", "object_pattern"},
+		"import":      {"import_statement"},
+		"export":      {"export_statement"},
+		"module":      {"module_declaration"},
+		"namespace":   {"namespace_declaration"},
+		"property":    {"public_field_definition", "private_field_definition", "field_definition", "property_signature"},
+		"prop":        {"public_field_definition", "private_field_definition", "field_definition", "property_signature"},
+		"field":       {"public_field_definition", "private_field_definition", "field_definition", "property_signature"},
+		"signature":   {"method_signature", "function_signature", "construct_signature", "index_signature", "call_signature"},
+		"decorator":   {"decorator"},
+		"comment":     {"comment"},
+		"comments":    {"comment"},
+	}
+}
+
+// SupportedQueryTypes returns colloquial query types/aliases for TypeScript
+func (c *Config) SupportedQueryTypes() []string {
+	m := c.aliasMap()
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // ExtractNodeName extracts name from TypeScript AST nodes
@@ -80,13 +106,27 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 				return source[child.StartByte():child.EndByte()]
 			}
 		}
-	case "public_field_definition":
+	case "public_field_definition", "private_field_definition", "field_definition":
 		// Class field definition: fieldName = value
 		for i := 0; i < int(node.ChildCount()); i++ {
 			child := node.Child(i)
 			if child.Type() == "property_identifier" {
 				return source[child.StartByte():child.EndByte()]
 			}
+		}
+	case "property_signature":
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+			return source[nameNode.StartByte():nameNode.EndByte()]
+		}
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "property_identifier" {
+				return source[child.StartByte():child.EndByte()]
+			}
+		}
+	case "enum_member":
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+			return source[nameNode.StartByte():nameNode.EndByte()]
 		}
 	case "variable_declarator":
 		if idNode := node.ChildByFieldName("id"); idNode != nil {
@@ -151,6 +191,8 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 			}
 		}
 		return "anonymous"
+	case "comment":
+		return c.commentSummary(source[node.StartByte():node.EndByte()])
 	}
 
 	// Fallback: try to find first identifier child
@@ -162,6 +204,21 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 	}
 
 	return ""
+}
+
+func (c *Config) commentSummary(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimPrefix(trimmed, "///")
+	trimmed = strings.TrimPrefix(trimmed, "//")
+	trimmed = strings.TrimPrefix(trimmed, "/*")
+	trimmed = strings.TrimPrefix(trimmed, "/**")
+	trimmed = strings.TrimSuffix(trimmed, "*/")
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	trimmed = strings.TrimSpace(trimmed)
+	if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
 }
 
 // IsExported checks if identifier is exported (TS uses various export patterns)
@@ -178,6 +235,8 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	switch node.Type() {
 	case "variable_declaration", "lexical_declaration":
 		return c.expandVariableDeclaration(node, source, query)
+	case "variable_declarator":
+		return c.expandVariableDeclarator(node, source, query)
 	case "arrow_function":
 		name := c.getArrowFunctionName(node, source)
 		return []core.CodeMatch{{
@@ -190,6 +249,10 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 			Line:      node.StartPoint().Row,
 			Column:    node.StartPoint().Column,
 		}}
+	case "import_statement":
+		return c.expandImportStatement(node, source, query)
+	case "export_statement":
+		return c.expandExportStatement(node, source, query)
 	default:
 		name := c.ExtractNodeName(node, source)
 		return []core.CodeMatch{{
@@ -317,4 +380,59 @@ func (c *Config) getArrowFunctionName(node *sitter.Node, source string) string {
 		}
 	}
 	return "anonymous"
+}
+
+func (c *Config) expandImportStatement(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		switch child.Type() {
+		case "import_specifier":
+			if alias := child.ChildByFieldName("alias"); alias != nil {
+				name := source[alias.StartByte():alias.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := source[nameNode.StartByte():nameNode.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+		case "namespace_import":
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := source[nameNode.StartByte():nameNode.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+		}
+	}
+	if len(matches) == 0 {
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+	}
+	return matches
+}
+
+func (c *Config) expandExportStatement(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "export_specifier" {
+			if alias := child.ChildByFieldName("alias"); alias != nil {
+				name := source[alias.StartByte():alias.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := source[nameNode.StartByte():nameNode.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+		}
+	}
+	if len(matches) == 0 {
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+	}
+	return matches
 }

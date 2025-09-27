@@ -1,10 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/termfx/morfx/mcp/types"
 )
 
 // TestHandleInitialize verifies MCP initialization protocol compliance
@@ -21,7 +25,7 @@ func TestHandleInitialize(t *testing.T) {
 				Method: "initialize",
 				ID:     1,
 				Params: mustMarshal(map[string]any{
-					"protocolVersion": "2024-11-05",
+					"protocolVersion": supportedProtocolVersion,
 					"capabilities":    map[string]any{},
 					"clientInfo": map[string]any{
 						"name":    "test-client",
@@ -30,7 +34,7 @@ func TestHandleInitialize(t *testing.T) {
 				}),
 			},
 			expectedResult: map[string]any{
-				"protocolVersion": "2024-11-05",
+				"protocolVersion": supportedProtocolVersion,
 				"capabilities": map[string]any{
 					"tools": map[string]any{
 						"listChanged": true,
@@ -46,7 +50,7 @@ func TestHandleInitialize(t *testing.T) {
 				},
 				"serverInfo": map[string]any{
 					"name":    "morfx",
-					"version": "1.3.0",
+					"version": "1.5.0",
 				},
 			},
 			expectError: false,
@@ -59,7 +63,7 @@ func TestHandleInitialize(t *testing.T) {
 				Params: json.RawMessage(`{"invalid": "data"}`),
 			},
 			expectedResult: map[string]any{
-				"protocolVersion": "2024-11-05",
+				"protocolVersion": supportedProtocolVersion,
 				"capabilities": map[string]any{
 					"tools": map[string]any{
 						"listChanged": true,
@@ -75,7 +79,7 @@ func TestHandleInitialize(t *testing.T) {
 				},
 				"serverInfo": map[string]any{
 					"name":    "morfx",
-					"version": "1.3.0",
+					"version": "1.5.0",
 				},
 			},
 			expectError: false, // Should handle gracefully
@@ -86,7 +90,9 @@ func TestHandleInitialize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := createTestServer(t)
 
-			response := server.handleInitialize(tt.request)
+			response := server.handleInitialize(context.Background(), tt.request)
+
+			assertJSONRPC(t, response)
 
 			// Verify response structure
 			if response.Error != nil && !tt.expectError {
@@ -134,21 +140,20 @@ func TestHandleListTools(t *testing.T) {
 		ID:     1,
 	}
 
-	response := server.handleListTools(request)
+	response := server.handleListTools(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error != nil {
 		t.Fatalf("unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(listToolsResult)
 	if !ok {
-		t.Fatal("result is not a map")
+		t.Fatalf("result is not listToolsResult: %T", response.Result)
 	}
 
-	tools, ok := result["tools"].([]ToolDefinition)
-	if !ok {
-		t.Fatal("tools is not a ToolDefinition slice")
-	}
+	tools := res.Tools
 
 	// Verify we have the expected tools
 	expectedTools := []string{
@@ -172,6 +177,20 @@ func TestHandleListTools(t *testing.T) {
 			t.Errorf("missing expected tool: %s", expected)
 		}
 	}
+
+	first := tools[0]
+	if first.StructuredKey != "structuredContent" {
+		t.Errorf("expected structured key 'structuredContent', got %q", first.StructuredKey)
+	}
+	if first.OutputSchema == nil {
+		t.Error("expected output schema to be populated")
+	}
+	if stability, ok := first.Annotations["stability"].(string); !ok || stability == "" {
+		t.Errorf("expected stability annotation, got %v", first.Annotations["stability"])
+	}
+	if progress, ok := first.Annotations["progress"].(bool); !ok || !progress {
+		t.Errorf("expected progress annotation true, got %v", first.Annotations["progress"])
+	}
 }
 
 // TestHandleListResources verifies resource listing functionality
@@ -183,21 +202,20 @@ func TestHandleListResources(t *testing.T) {
 		ID:     1,
 	}
 
-	response := server.handleListResources(request)
+	response := server.handleListResources(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error != nil {
 		t.Fatalf("unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(listResourcesResult)
 	if !ok {
-		t.Fatal("result is not a map")
+		t.Fatalf("result is not listResourcesResult: %T", response.Result)
 	}
 
-	resources, ok := result["resources"].([]ResourceDefinition)
-	if !ok {
-		t.Fatal("resources is not a ResourceDefinition slice")
-	}
+	resources := res.Resources
 
 	// Verify we have the expected resources
 	expectedResources := []string{
@@ -208,14 +226,33 @@ func TestHandleListResources(t *testing.T) {
 		"morfx://config/settings",
 	}
 
-	if len(resources) != len(expectedResources) {
-		t.Errorf("resource count mismatch: got %d, want %d", len(resources), len(expectedResources))
+	if len(resources) < len(expectedResources) {
+		t.Errorf("resource count mismatch: got %d, want at least %d", len(resources), len(expectedResources))
 	}
 
-	// Verify specific resources exist
-	resourceURIs := make(map[string]bool)
+	resourceURIs := make(map[string]bool, len(resources))
 	for _, resource := range resources {
 		resourceURIs[resource.URI] = true
+	}
+
+	var serverInfo *types.ResourceDefinition
+	for i := range resources {
+		if resources[i].URI == "morfx://server/info" {
+			serverInfo = &resources[i]
+			break
+		}
+	}
+	if serverInfo == nil {
+		t.Fatal("expected morfx://server/info definition")
+	}
+	if serverInfo.Size == nil || *serverInfo.Size == 0 {
+		t.Errorf("expected server info resource to report size, got %v", serverInfo.Size)
+	}
+	if cache, ok := serverInfo.Annotations["cacheControl"]; !ok || cache != "static" {
+		t.Errorf("expected cacheControl=static annotation, got %v", serverInfo.Annotations["cacheControl"])
+	}
+	if audience, ok := serverInfo.Annotations["audience"]; !ok || audience != "developer" {
+		t.Errorf("expected audience=developer annotation, got %v", serverInfo.Annotations["audience"])
 	}
 
 	for _, expected := range expectedResources {
@@ -234,21 +271,20 @@ func TestHandleListPrompts(t *testing.T) {
 		ID:     1,
 	}
 
-	response := server.handleListPrompts(request)
+	response := server.handleListPrompts(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error != nil {
 		t.Fatalf("unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(listPromptsResult)
 	if !ok {
-		t.Fatal("result is not a map")
+		t.Fatalf("result is not listPromptsResult: %T", response.Result)
 	}
 
-	prompts, ok := result["prompts"].([]PromptDefinition)
-	if !ok {
-		t.Fatal("prompts is not a PromptDefinition slice")
-	}
+	prompts := res.Prompts
 
 	// Verify we have the expected prompts
 	expectedPrompts := []string{
@@ -259,12 +295,11 @@ func TestHandleListPrompts(t *testing.T) {
 		"best-practices",
 	}
 
-	if len(prompts) != len(expectedPrompts) {
-		t.Errorf("prompt count mismatch: got %d, want %d", len(prompts), len(expectedPrompts))
+	if len(prompts) < len(expectedPrompts) {
+		t.Errorf("prompt count mismatch: got %d, want at least %d", len(prompts), len(expectedPrompts))
 	}
 
-	// Verify specific prompts exist
-	promptNames := make(map[string]bool)
+	promptNames := make(map[string]bool, len(prompts))
 	for _, prompt := range prompts {
 		promptNames[prompt.Name] = true
 	}
@@ -281,11 +316,14 @@ func TestMethodNotFound(t *testing.T) {
 	server := createTestServer(t)
 
 	request := Request{
-		Method: "unknown/method",
-		ID:     1,
+		JSONRPC: JSONRPCVersion,
+		Method:  "unknown/method",
+		ID:      1,
 	}
 
 	response := server.handleRequest(request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error == nil {
 		t.Fatal("expected error for unknown method")
@@ -304,6 +342,7 @@ func createTestServer(t *testing.T) *StdioServer {
 	config := DefaultConfig()
 	config.DatabaseURL = "skip" // No database for unit tests
 	config.Debug = false
+	config.LogWriter = io.Discard
 
 	server, err := NewStdioServer(config)
 	if err != nil {
@@ -319,6 +358,13 @@ func mustMarshal(v any) json.RawMessage {
 		panic(err)
 	}
 	return data
+}
+
+func assertJSONRPC(t *testing.T, resp Response) {
+	t.Helper()
+	if resp.JSONRPC != JSONRPCVersion {
+		t.Fatalf("expected jsonrpc %s, got %s", JSONRPCVersion, resp.JSONRPC)
+	}
 }
 
 // Benchmark tests for performance verification
@@ -338,8 +384,9 @@ func BenchmarkHandleInitialize(b *testing.B) {
 		}),
 	}
 
+	ctx := context.Background()
 	for b.Loop() {
-		server.handleInitialize(request)
+		server.handleInitialize(ctx, request)
 	}
 }
 
@@ -351,7 +398,7 @@ func BenchmarkHandleListTools(b *testing.B) {
 	}
 
 	for b.Loop() {
-		server.handleListTools(request)
+		server.handleListTools(context.Background(), request)
 	}
 }
 
@@ -360,7 +407,7 @@ func TestHandleCallToolWithMCPError(t *testing.T) {
 	server := createTestServer(t)
 
 	// Register a tool that returns an MCP error
-	server.RegisterTool("error_tool", func(params json.RawMessage) (any, error) {
+	server.RegisterTool("error_tool", func(ctx context.Context, params json.RawMessage) (any, error) {
 		return nil, NewMCPError(-32603, "Intentional test error", map[string]any{
 			"details": "This is a test error",
 			"code":    "TEST_ERROR",
@@ -376,28 +423,43 @@ func TestHandleCallToolWithMCPError(t *testing.T) {
 		}),
 	}
 
-	response := server.handleCallTool(request)
+	response := server.handleCallTool(context.Background(), request)
 
-	if response.Error == nil {
-		t.Fatal("Expected error response")
+	assertJSONRPC(t, response)
+
+	if response.Error != nil {
+		t.Fatalf("Unexpected transport error: %v", response.Error)
 	}
 
-	if response.Error.Code != -32603 {
-		t.Errorf("Expected error code -32603, got %d", response.Error.Code)
-	}
-
-	if response.Error.Data == nil {
-		t.Error("Expected error data but got none")
-	}
-
-	// Verify error data structure
-	errorData, ok := response.Error.Data.(map[string]any)
+	callResult, ok := response.Result.(types.CallToolResult)
 	if !ok {
-		t.Errorf("Expected error data to be a map, got %T", response.Error.Data)
-	} else {
-		if errorData["details"] != "This is a test error" {
-			t.Errorf("Expected error details, got %v", errorData["details"])
+		t.Fatalf("Expected CallToolResult, got %T", response.Result)
+	}
+
+	if !callResult.IsError {
+		t.Fatal("Expected CallToolResult to be marked as error")
+	}
+
+	structured, ok := callResult.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("Expected structured content map, got %T", callResult.StructuredContent)
+	}
+
+	switch code := structured["code"].(type) {
+	case int:
+		if code != -32603 {
+			t.Errorf("Expected structured error code -32603, got %d", code)
 		}
+	case float64:
+		if int(code) != -32603 {
+			t.Errorf("Expected structured error code -32603, got %v", code)
+		}
+	default:
+		t.Errorf("Unexpected code type %T", structured["code"])
+	}
+
+	if structured["message"] != "Intentional test error" {
+		t.Errorf("Expected structured error message, got %v", structured["message"])
 	}
 }
 
@@ -406,7 +468,7 @@ func TestHandleCallToolWithGenericError(t *testing.T) {
 	server := createTestServer(t)
 
 	// Register a tool that returns a generic error
-	server.RegisterTool("generic_error_tool", func(params json.RawMessage) (any, error) {
+	server.RegisterTool("generic_error_tool", func(ctx context.Context, params json.RawMessage) (any, error) {
 		return nil, errors.New("generic error message")
 	})
 
@@ -419,7 +481,9 @@ func TestHandleCallToolWithGenericError(t *testing.T) {
 		}),
 	}
 
-	response := server.handleCallTool(request)
+	response := server.handleCallTool(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error == nil {
 		t.Fatal("Expected error response")
@@ -445,7 +509,7 @@ func TestHandleInitializedNotification(t *testing.T) {
 		ID:     nil, // Notification has no ID
 	}
 
-	response := server.handleInitialized(request)
+	response := server.handleInitialized(context.Background(), request)
 
 	// Should return empty response for notification
 	if response.JSONRPC != "" {
@@ -454,7 +518,9 @@ func TestHandleInitializedNotification(t *testing.T) {
 
 	// Test with ID (shouldn't happen but handle gracefully)
 	request.ID = 1
-	response = server.handleInitialized(request)
+	response = server.handleInitialized(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error != nil {
 		t.Errorf("Unexpected error: %v", response.Error)
@@ -474,7 +540,9 @@ func TestHandlePing(t *testing.T) {
 		ID:     "ping-123",
 	}
 
-	response := server.handlePing(request)
+	response := server.handlePing(context.Background(), request)
+
+	assertJSONRPC(t, response)
 
 	if response.Error != nil {
 		t.Errorf("Unexpected error: %v", response.Error)
@@ -518,11 +586,24 @@ func TestHandleRequestRouting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			request := Request{
-				Method: tt.method,
-				ID:     1,
+				JSONRPC: JSONRPCVersion,
+				Method:  tt.method,
+				ID:      1,
+			}
+
+			switch tt.method {
+			case "initialize":
+				request.Params = mustMarshal(map[string]any{
+					"protocolVersion": supportedProtocolVersion,
+					"capabilities":    map[string]any{},
+				})
+			case "tools/call", "resources/read", "prompts/get":
+				// leave params nil to trigger invalid params as expected
 			}
 
 			response := server.handleRequest(request)
+
+			assertJSONRPC(t, response)
 
 			if tt.expectError {
 				if response.Error == nil {
@@ -573,7 +654,7 @@ func TestHandleInitializeWithVaryingClientInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			params := map[string]any{
-				"protocolVersion": "2024-11-05",
+				"protocolVersion": supportedProtocolVersion,
 				"capabilities":    map[string]any{},
 			}
 
@@ -587,7 +668,9 @@ func TestHandleInitializeWithVaryingClientInfo(t *testing.T) {
 				Params: mustMarshal(params),
 			}
 
-			response := server.handleInitialize(request)
+			response := server.handleInitialize(context.Background(), request)
+
+			assertJSONRPC(t, response)
 
 			if response.Error != nil {
 				t.Errorf("Unexpected error: %v", response.Error)

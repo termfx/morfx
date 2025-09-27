@@ -50,8 +50,9 @@ func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tre
 		if time.Since(ast.timestamp) > c.maxAge {
 			c.cache.Delete(hash)
 			c.evictions.Add(1)
+			ast.tree.Close()
 		} else {
-			return ast.tree, true
+			return ast.tree.Copy(), true
 		}
 	}
 
@@ -65,13 +66,18 @@ func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tre
 
 	// Store in cache (lock-free write)
 	cachedAST := &CachedAST{
-		tree:      tree,
+		tree:      tree.Copy(),
 		source:    source,
 		hash:      hash,
 		timestamp: time.Now(),
 	}
 
-	c.cache.Store(hash, cachedAST)
+	if _, loaded := c.cache.LoadOrStore(hash, cachedAST); loaded {
+		// Another goroutine populated the cache first. Release our stored copy
+		// and continue returning the freshly parsed tree to the caller.
+		cachedAST.tree.Close()
+		return tree, false
+	}
 
 	// Start single cleanup goroutine on first miss
 	c.cleanupOnce.Do(func() {
@@ -89,10 +95,27 @@ func (c *ASTCache) hash(source []byte) string {
 
 // cleanupOldEntries removes expired entries
 func (c *ASTCache) cleanupOldEntries() {
+	interval := c.maxAge
+	if interval <= 0 {
+		interval = time.Minute
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		c.pruneExpired()
+		<-ticker.C
+	}
+}
+
+func (c *ASTCache) pruneExpired() {
+	now := time.Now()
 	c.cache.Range(func(key, value any) bool {
 		ast := value.(*CachedAST)
-		if time.Since(ast.timestamp) > c.maxAge {
+		if now.Sub(ast.timestamp) > c.maxAge {
 			c.cache.Delete(key)
+			ast.tree.Close()
 			c.evictions.Add(1)
 		}
 		return true

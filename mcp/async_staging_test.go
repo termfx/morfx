@@ -1,38 +1,24 @@
+//go:build integration
+// +build integration
+
 package mcp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-
 	"github.com/termfx/morfx/models"
 )
-
-func setupAsyncStagingDB(t *testing.T) *gorm.DB {
-	// Use a temporary file instead of :memory: for concurrent access
-	tempDB := t.TempDir() + "/test.db"
-	db, err := gorm.Open(sqlite.Open(tempDB+"?cache=shared&mode=rwc"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Auto-migrate the schema
-	if err := db.AutoMigrate(&models.Session{}, &models.Stage{}, &models.Apply{}); err != nil {
-		t.Fatalf("Failed to migrate database: %v", err)
-	}
-
-	return db
-}
 
 func TestNewAsyncStagingManager(t *testing.T) {
 	db := setupAsyncStagingDB(t)
 	config := DefaultConfig()
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 
 	if asm == nil {
 		t.Fatal("AsyncStagingManager should not be nil")
@@ -71,7 +57,7 @@ func TestAsyncStagingManager_CreateStageAsync_Success(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false // Reduce noise in tests
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	stage := &models.Stage{
@@ -115,7 +101,7 @@ func TestAsyncStagingManager_CreateStageAsync_QueueFull(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Fill the queue by sending many requests quickly
@@ -160,7 +146,7 @@ func TestAsyncStagingManager_BatchCreateStages(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Create multiple stages for batch processing
@@ -215,7 +201,7 @@ func TestAsyncStagingManager_BatchCreateStages_WithErrors(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Create a unique ID base for this test to avoid conflicts
@@ -230,7 +216,7 @@ func TestAsyncStagingManager_BatchCreateStages_WithErrors(t *testing.T) {
 	}
 
 	// Create first stage directly to ensure it exists
-	err := asm.CreateStage(firstStage)
+	err := asm.CreateStage(context.Background(), firstStage)
 	if err != nil {
 		t.Fatalf("Failed to create first stage: %v", err)
 	}
@@ -268,12 +254,45 @@ func TestAsyncStagingManager_BatchCreateStages_WithErrors(t *testing.T) {
 	}
 }
 
+func TestCreateStageAsyncWithContextCancelled(t *testing.T) {
+	db := setupAsyncStagingDB(t)
+	config := DefaultConfig()
+	config.Debug = false
+
+	asm := NewAsyncStagingManager(db, config, nil)
+	defer asm.Close()
+
+	stage := &models.Stage{
+		ID:        "async-cancel",
+		SessionID: "test-session",
+		Status:    "pending",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	callback := asm.CreateStageAsyncWithContext(ctx, stage)
+	err := <-callback
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&models.Stage{}).Where("id = ?", stage.ID).Count(&count).Error; err != nil {
+		t.Fatalf("failed counting stages: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected stage not persisted, found %d", count)
+	}
+}
+
 func TestAsyncStagingManager_WorkerPool(t *testing.T) {
 	db := setupAsyncStagingDB(t)
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Test concurrent stage creation
@@ -328,7 +347,7 @@ func TestAsyncStagingManager_Close(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 
 	// Create a stage to verify workers are running
 	stage := &models.Stage{
@@ -387,13 +406,13 @@ func TestAsyncStagingManager_StageWorker_ContextCancellation(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 
 	// Cancel context immediately
 	asm.cancel()
 
 	// Give workers time to exit
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 
 	// Try to create a stage - should use fallback
 	stage := &models.Stage{
@@ -421,7 +440,7 @@ func TestAsyncStagingManager_ResultCollector(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = true // Enable debug to trigger metrics logging
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Create multiple stages to trigger result collection
@@ -461,7 +480,7 @@ func TestAsyncStagingManager_ResultCollector(t *testing.T) {
 	// Result collector should be processing metrics
 	// We can't easily test the metrics output without more complex setup,
 	// but we verify the mechanism doesn't crash
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 }
 
 func TestAsyncStagingManager_DebugLog(t *testing.T) {
@@ -469,7 +488,7 @@ func TestAsyncStagingManager_DebugLog(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = true
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Test debugLog function (should not panic)
@@ -486,7 +505,7 @@ func TestAsyncStagingManager_Integration(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Test full integration: create, verify, apply
@@ -543,7 +562,7 @@ func TestAsyncStagingManager_Integration(t *testing.T) {
 	}
 
 	// 4. Apply stage
-	apply, err := asm.ApplyStage("integration-stage", false)
+	apply, err := asm.ApplyStage(context.Background(), "integration-stage", false)
 	if err != nil {
 		t.Fatalf("Failed to apply stage: %v", err)
 	}
@@ -558,7 +577,7 @@ func TestAsyncStagingManager_ErrorHandling(t *testing.T) {
 	config := DefaultConfig()
 	config.Debug = false
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 	defer asm.Close()
 
 	// Test with nil stage
@@ -579,7 +598,7 @@ func TestAsyncStagingManager_MultipleClose(t *testing.T) {
 	db := setupAsyncStagingDB(t)
 	config := DefaultConfig()
 
-	asm := NewAsyncStagingManager(db, config)
+	asm := NewAsyncStagingManager(db, config, nil)
 
 	// Multiple close calls should be safe
 	asm.Close()

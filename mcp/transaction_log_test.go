@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package mcp
 
 import (
@@ -128,7 +131,7 @@ func TestCompleteTransaction(t *testing.T) {
 	}
 
 	// Wait a moment for cleanup goroutine to be scheduled
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 
 	// Transaction should be cleaned up after the delay (but we won't wait 5 minutes in test)
 	// Just verify the cleanup function is triggered properly

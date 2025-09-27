@@ -65,6 +65,9 @@ func TestAtomicWriter_WriteFile_WithBackup_Extended(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create initial file: %v", err)
 	}
+	if err := os.Chmod(testFile, 0o755); err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
 
 	// Create atomic writer with backup enabled
 	config := AtomicWriteConfig{
@@ -100,6 +103,14 @@ func TestAtomicWriter_WriteFile_WithBackup_Extended(t *testing.T) {
 		}
 		if string(backupContent) != initialContent {
 			t.Errorf("Backup content = %q, want %q", string(backupContent), initialContent)
+		}
+
+		if info, err := os.Stat(backupFile); err == nil {
+			if perm := info.Mode().Perm(); perm != 0o755 {
+				t.Errorf("Backup permissions = %v, want 0755", perm)
+			}
+		} else {
+			t.Fatalf("Failed to stat backup file: %v", err)
 		}
 	}
 

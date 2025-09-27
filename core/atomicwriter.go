@@ -13,6 +13,8 @@ type FileLock struct {
 	path   string
 	locked bool
 	mu     sync.Mutex
+	cond   *sync.Cond
+	refCnt int
 }
 
 // AtomicWriteConfig controls atomic writing behavior
@@ -109,29 +111,36 @@ func (aw *AtomicWriter) WriteFile(path, content string) error {
 
 // acquireLock gets an exclusive file lock
 func (aw *AtomicWriter) acquireLock(path string) error {
-	aw.mu.Lock()
-	defer aw.mu.Unlock()
-
-	// Check if we already have a lock for this file
-	if _, exists := aw.locks[path]; exists {
-		return nil // Already locked
-	}
-
-	// Create lock file path
 	lockPath := path + ".lock"
 
-	// Try to acquire lock with timeout
+	aw.mu.Lock()
+	lock, exists := aw.locks[path]
+	if !exists {
+		lock = &FileLock{}
+		aw.locks[path] = lock
+	}
+	if lock.cond == nil {
+		lock.cond = sync.NewCond(&lock.mu)
+	}
+	lock.path = lockPath
+	lock.refCnt++
+	aw.mu.Unlock()
+
+	// Wait for in-process writers to finish
+	lock.mu.Lock()
+	for lock.locked {
+		lock.cond.Wait()
+	}
+	lock.mu.Unlock()
+
 	deadline := time.Now().Add(aw.config.LockTimeout)
-	for time.Now().Before(deadline) {
+	for {
 		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
-			// Lock acquired
-			lock := &FileLock{
-				file:   lockFile,
-				path:   lockPath,
-				locked: true,
-			}
-			aw.locks[path] = lock
+			lock.mu.Lock()
+			lock.file = lockFile
+			lock.locked = true
+			lock.mu.Unlock()
 
 			// Write PID to lock file for debugging
 			fmt.Fprintf(lockFile, "%d\n", os.Getpid())
@@ -140,45 +149,56 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 			return nil
 		}
 
-		// Check if it's because file exists (lock held by another process)
 		if os.IsExist(err) {
-			// Check if lock is stale
 			if aw.isLockStale(lockPath) {
-				os.Remove(lockPath) // Remove stale lock
+				os.Remove(lockPath)
 				continue
 			}
-
-			// Wait a bit and retry
+			if time.Now().After(deadline) {
+				aw.decrementRefCount(path, lock)
+				return fmt.Errorf("timeout waiting for lock on %s", path)
+			}
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
+		aw.decrementRefCount(path, lock)
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
-
-	return fmt.Errorf("timeout waiting for lock on %s", path)
 }
 
 // releaseLock releases the file lock
 func (aw *AtomicWriter) releaseLock(path string) error {
-	aw.mu.Lock()
-	defer aw.mu.Unlock()
-
+	aw.mu.RLock()
 	lock, exists := aw.locks[path]
+	aw.mu.RUnlock()
 	if !exists {
 		return nil // Already released
 	}
 
 	lock.mu.Lock()
-	defer lock.mu.Unlock()
-
 	if lock.locked {
 		lock.file.Close()
 		os.Remove(lock.path)
 		lock.locked = false
+		lock.file = nil
+		lock.cond.Broadcast()
 	}
+	lock.refCnt--
+	remove := lock.refCnt == 0
+	lock.mu.Unlock()
 
-	delete(aw.locks, path)
+	if remove {
+		aw.mu.Lock()
+		if l, ok := aw.locks[path]; ok {
+			l.mu.Lock()
+			if l.refCnt == 0 && !l.locked {
+				delete(aw.locks, path)
+			}
+			l.mu.Unlock()
+		}
+		aw.mu.Unlock()
+	}
 	return nil
 }
 
@@ -200,6 +220,11 @@ func (aw *AtomicWriter) isLockStale(lockPath string) bool {
 
 // createBackup creates a backup copy with timestamp
 func (aw *AtomicWriter) createBackup(originalPath, backupPath string) error {
+	info, err := os.Stat(originalPath)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(originalPath)
 	if err != nil {
 		return err
@@ -209,15 +234,49 @@ func (aw *AtomicWriter) createBackup(originalPath, backupPath string) error {
 	timestamp := time.Now().Format("20060102-150405")
 	backupPath = fmt.Sprintf("%s.%s", backupPath, timestamp)
 
-	return os.WriteFile(backupPath, content, 0o644)
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		perm = 0o644
+	}
+
+	if err := os.WriteFile(backupPath, content, perm); err != nil {
+		return err
+	}
+	return os.Chmod(backupPath, perm)
 }
 
 // Cleanup removes all locks (call on shutdown)
 func (aw *AtomicWriter) Cleanup() {
-	aw.mu.Lock()
-	defer aw.mu.Unlock()
-
+	aw.mu.RLock()
+	paths := make([]string, 0, len(aw.locks))
 	for path := range aw.locks {
+		paths = append(paths, path)
+	}
+	aw.mu.RUnlock()
+
+	for _, path := range paths {
 		aw.releaseLock(path)
+	}
+}
+
+// decrementRefCount adjusts the reference count when acquisition fails.
+func (aw *AtomicWriter) decrementRefCount(path string, lock *FileLock) {
+	lock.mu.Lock()
+	if lock.refCnt > 0 {
+		lock.refCnt--
+	}
+	remove := lock.refCnt == 0 && !lock.locked
+	lock.mu.Unlock()
+
+	if remove {
+		aw.mu.Lock()
+		if l, ok := aw.locks[path]; ok {
+			l.mu.Lock()
+			if l.refCnt == 0 && !l.locked {
+				delete(aw.locks, path)
+			}
+			l.mu.Unlock()
+		}
+		aw.mu.Unlock()
 	}
 }

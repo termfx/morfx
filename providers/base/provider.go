@@ -1,10 +1,13 @@
 package base
 
 import (
-	"context"
 	"fmt"
+	"math"
+	"path"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/pmezard/go-difflib/difflib"
 	sitter "github.com/smacker/go-tree-sitter"
@@ -24,28 +27,49 @@ type LanguageConfig interface {
 	MapQueryTypeToNodeTypes(queryType string) []string
 	ExtractNodeName(node *sitter.Node, source string) string
 	IsExported(name string) bool // For confidence calculation
+
+	// For discovery/specification
+	SupportedQueryTypes() []string
+}
+
+// SmartAppendConfig allows language configs to provide smarter append behaviour.
+type SmartAppendConfig interface {
+	SmartAppend(source string, target *sitter.Node, content string) (string, bool)
 }
 
 // Provider provides common functionality for all language providers
 type Provider struct {
 	config LanguageConfig
-	parser *sitter.Parser
 	cache  *ASTCache
+	pool   *sync.Pool
+	stats  providerStats
+}
+
+type providerStats struct {
+	borrowCount atomic.Int64
+	returnCount atomic.Int64
+	active      atomic.Int64
 }
 
 // New creates a base provider with language-specific config
 func New(config LanguageConfig) *Provider {
-	parser := sitter.NewParser()
 	lang := config.GetLanguage()
 	if lang == nil {
 		panic(fmt.Sprintf("Failed to load %s language for tree-sitter", config.Language()))
 	}
-	parser.SetLanguage(lang)
+
+	pool := &sync.Pool{
+		New: func() any {
+			parser := sitter.NewParser()
+			parser.SetLanguage(lang)
+			return parser
+		},
+	}
 
 	return &Provider{
 		config: config,
-		parser: parser,
 		cache:  GlobalCache,
+		pool:   pool,
 	}
 }
 
@@ -59,11 +83,48 @@ func (p *Provider) Extensions() []string {
 	return p.config.Extensions()
 }
 
+// SupportedQueryTypes lists human-friendly query types/aliases
+func (p *Provider) SupportedQueryTypes() []string {
+	return p.config.SupportedQueryTypes()
+}
+
+// borrowParser retrieves a parser instance from the pool.
+func (p *Provider) borrowParser() *sitter.Parser {
+	parser := p.pool.Get().(*sitter.Parser)
+	p.stats.borrowCount.Add(1)
+	p.stats.active.Add(1)
+	return parser
+}
+
+// releaseParser returns a parser instance to the pool.
+func (p *Provider) releaseParser(parser *sitter.Parser) {
+	if parser != nil {
+		p.stats.returnCount.Add(1)
+		p.stats.active.Add(-1)
+		p.pool.Put(parser)
+	}
+}
+
+// Stats returns the current parser pool metrics for this provider.
+func (p *Provider) Stats() providers.Stats {
+	return providers.Stats{
+		BorrowCount: p.stats.borrowCount.Load(),
+		ReturnCount: p.stats.returnCount.Load(),
+		Active:      p.stats.active.Load(),
+	}
+}
+
 // Query finds code elements matching the query
 func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult {
-	tree, err := p.parser.ParseCtx(context.TODO(), nil, []byte(source))
-	if err != nil || tree == nil {
-		return core.QueryResult{Error: fmt.Errorf("failed to parse source: %v", err)}
+	parser := p.borrowParser()
+	defer p.releaseParser(parser)
+
+	tree, hit := p.cache.GetOrParse(parser, []byte(source))
+	if tree == nil {
+		if hit {
+			return core.QueryResult{Error: fmt.Errorf("failed to copy cached tree")}
+		}
+		return core.QueryResult{Error: fmt.Errorf("failed to parse source")}
 	}
 	defer tree.Close()
 
@@ -131,11 +192,16 @@ func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQ
 
 // Transform applies a transformation operation
 func (p *Provider) Transform(source string, op core.TransformOp) core.TransformResult {
-	tree, err := p.parser.ParseCtx(context.TODO(), nil, []byte(source))
-	if err != nil || tree == nil {
-		return core.TransformResult{
-			Error: fmt.Errorf("failed to parse source: %v", err),
+	parser := p.borrowParser()
+	defer p.releaseParser(parser)
+
+	tree, hit := p.cache.GetOrParse(parser, []byte(source))
+	if tree == nil {
+		err := fmt.Errorf("failed to parse source")
+		if hit {
+			err = fmt.Errorf("failed to copy cached tree")
 		}
+		return core.TransformResult{Error: err}
 	}
 	defer tree.Close()
 
@@ -155,7 +221,10 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 
 	// Calculate confidence
 	confidence := p.calculateConfidence(op, nodes, source)
-	var modified string
+	var (
+		modified string
+		err      error
+	)
 
 	switch op.Method {
 	case "replace":
@@ -181,6 +250,8 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 	// Generate diff
 	diff := p.generateDiff(source, modified)
 
+	p.adjustConfidence(&confidence, op, source, modified, nodes)
+
 	return core.TransformResult{
 		Modified:   modified,
 		Diff:       diff,
@@ -191,7 +262,10 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 
 // Validate checks syntax
 func (p *Provider) Validate(source string) providers.ValidationResult {
-	tree := p.parser.Parse(nil, []byte(source))
+	parser := p.borrowParser()
+	defer p.releaseParser(parser)
+
+	tree := parser.Parse(nil, []byte(source))
 	if tree == nil {
 		return providers.ValidationResult{
 			Valid:  false,
@@ -215,28 +289,12 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 		return true
 	}
 
-	// Check for *middle* pattern first (has * at both ends or in middle)
-	if strings.Contains(pattern, "*") {
-		parts := strings.Split(pattern, "*")
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			// Pattern like "prefix*suffix"
-			return strings.HasPrefix(name, parts[0]) && strings.HasSuffix(name, parts[1])
-		}
-		if len(parts) == 3 && parts[0] == "" && parts[2] == "" {
-			// Pattern like "*middle*"
-			return strings.Contains(name, parts[1])
-		}
-		// Check for *suffix pattern
-		if parts[0] == "" && len(parts) == 2 {
-			return strings.HasSuffix(name, parts[1])
-		}
-		// Check for prefix* pattern
-		if parts[len(parts)-1] == "" && len(parts) == 2 {
-			return strings.HasPrefix(name, parts[0])
-		}
+	matched, err := path.Match(pattern, name)
+	if err != nil {
+		return false
 	}
 
-	return name == pattern
+	return matched
 }
 
 // findTargets finds all matches for the query with proper expansion
@@ -426,6 +484,12 @@ func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, conte
 	// For append, we only use first target
 	target := targets[0]
 
+	if smart, ok := p.config.(SmartAppendConfig); ok {
+		if modified, handled := smart.SmartAppend(source, target, content); handled {
+			return modified, nil
+		}
+	}
+
 	// This is language-agnostic - append after target
 	insertPos := target.EndByte()
 
@@ -547,19 +611,77 @@ func (p *Provider) calculateConfidence(
 		score = 1
 	}
 
-	// Determine level
-	level := "high"
-	if score < 0.8 {
-		level = "medium"
-	}
-	if score < 0.5 {
-		level = "low"
-	}
-
 	return core.ConfidenceScore{
 		Score:   score,
-		Level:   level,
+		Level:   confidenceLevel(score),
 		Factors: factors,
+	}
+}
+
+func (p *Provider) adjustConfidence(conf *core.ConfidenceScore, op core.TransformOp, original, modified string, targets []*sitter.Node) {
+	if conf == nil {
+		return
+	}
+
+	if validation := p.Validate(modified); !validation.Valid {
+		conf.Score -= 0.4
+		conf.Factors = append(conf.Factors, core.ConfidenceFactor{
+			Name:   "post_validation_failed",
+			Impact: -0.4,
+			Reason: "Transformed code failed syntax validation",
+		})
+	}
+
+	if len(targets) > 3 {
+		conf.Score -= 0.1
+		conf.Factors = append(conf.Factors, core.ConfidenceFactor{
+			Name:   "large_target_set",
+			Impact: -0.1,
+			Reason: fmt.Sprintf("Operation affected %d nodes", len(targets)),
+		})
+	}
+
+	if strings.Count(op.Target.Name, "*") > 1 {
+		conf.Score -= 0.1
+		conf.Factors = append(conf.Factors, core.ConfidenceFactor{
+			Name:   "broad_wildcard",
+			Impact: -0.1,
+			Reason: "Wildcard pattern is very broad",
+		})
+	}
+
+	if len(modified) > 0 && len(original) > 0 {
+		delta := math.Abs(float64(len(modified)-len(original))) / float64(len(original))
+		if delta > 0.3 {
+			conf.Score -= 0.1
+			conf.Factors = append(conf.Factors, core.ConfidenceFactor{
+				Name:   "large_size_delta",
+				Impact: -0.1,
+				Reason: "Transformation changed file size significantly",
+			})
+		}
+	}
+
+	clampConfidence(conf)
+}
+
+func clampConfidence(conf *core.ConfidenceScore) {
+	if conf.Score < 0 {
+		conf.Score = 0
+	} else if conf.Score > 1 {
+		conf.Score = 1
+	}
+	conf.Level = confidenceLevel(conf.Score)
+}
+
+func confidenceLevel(score float64) string {
+	switch {
+	case score < 0.5:
+		return "low"
+	case score < 0.8:
+		return "medium"
+	default:
+		return "high"
 	}
 }
 

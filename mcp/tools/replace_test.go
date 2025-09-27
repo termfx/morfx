@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -101,7 +102,7 @@ func TestReplaceTool_Execute(t *testing.T) {
 			}
 
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -147,7 +148,7 @@ func oldFunction() {
 }`,
 	})
 
-	result, err := tool.handle(params)
+	result, err := tool.handle(context.Background(), params)
 	assertNoError(t, err)
 
 	// Verify staging was used
@@ -157,9 +158,12 @@ func oldFunction() {
 			t.Fatal("Result should have content array")
 		}
 
-		// For staging tests, we would check for stageId if staging was enabled
-		// But since we're using mock staging that doesn't return stageId,
-		// we'll just verify the result structure is correct
+		if _, hasID := resultMap["id"].(string); !hasID {
+			t.Error("Result should include stage identifier")
+		}
+		if res, ok := resultMap["result"].(string); !ok || res != "staged" {
+			t.Errorf("Expected staged result, got %v", resultMap["result"])
+		}
 	}
 }
 

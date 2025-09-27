@@ -132,7 +132,7 @@ func TestInitFunctionExecution(t *testing.T) {
 
 	// Test that rootCmd has the right structure
 	assert.Equal(t, "morfx", rootCmd.Use)
-	assert.Equal(t, "1.3.0", rootCmd.Version)
+	assert.Equal(t, "1.5.0", rootCmd.Version)
 
 	// Test that mcpCmd is added to rootCmd
 	subCommands := rootCmd.Commands()
@@ -272,7 +272,7 @@ func TestCommandStructure(t *testing.T) {
 		assert.Equal(t, "morfx", rootCmd.Use)
 		assert.Contains(t, rootCmd.Short, "Code transformation engine")
 		assert.Contains(t, rootCmd.Long, "Morfx MCP Server")
-		assert.Equal(t, "1.3.0", rootCmd.Version)
+		assert.Equal(t, "1.5.0", rootCmd.Version)
 	})
 
 	t.Run("mcp command properties", func(t *testing.T) {

@@ -21,7 +21,7 @@ through the Model Context Protocol (MCP) for AI agents.
 
 The server communicates via JSON-RPC 2.0 over stdio and supports language-agnostic
 code querying, replacement, deletion, and insertion operations with confidence scoring.`,
-		Version: "1.3.0",
+		Version: "1.5.0",
 	}
 
 	// MCP server command

@@ -69,7 +69,10 @@ func NewFileReplaceTool(server types.ServerInterface) *FileReplaceTool {
 }
 
 // handle executes the file replace tool
-func (t *FileReplaceTool) handle(params json.RawMessage) (any, error) {
+func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var args struct {
 		Scope       core.FileScope  `json:"scope"`
 		Target      json.RawMessage `json:"target"`
@@ -81,11 +84,19 @@ func (t *FileReplaceTool) handle(params json.RawMessage) (any, error) {
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, types.WrapError(types.InvalidParams, "Invalid file replace parameters", err)
 	}
+	notifyProgress(ctx, t.server, 5, 100, "validating")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Parse target
 	var target core.AgentQuery
 	if err := json.Unmarshal(args.Target, &target); err != nil {
 		return nil, types.WrapError(types.InvalidParams, "Invalid target structure", err)
+	}
+	notifyProgress(ctx, t.server, 20, 100, "prepared target")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Create transform operation
@@ -100,15 +111,23 @@ func (t *FileReplaceTool) handle(params json.RawMessage) (any, error) {
 		Backup:   args.Backup,
 		Parallel: true,
 	}
+	notifyProgress(ctx, t.server, 35, 100, "prepared operation")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Execute with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	opCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	fileProcessor := t.server.GetFileProcessor()
-	result, err := fileProcessor.TransformFiles(ctx, fileOp)
+	result, err := fileProcessor.TransformFiles(opCtx, fileOp)
 	if err != nil {
 		return nil, types.WrapError(types.TransformFailed, "File replace failed", err)
+	}
+	notifyProgress(ctx, t.server, 80, 100, "processed files")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Format response
@@ -143,6 +162,13 @@ func (t *FileReplaceTool) formatResponse(result *core.FileTransformResult, dryRu
 			if file.MatchCount > 0 {
 				response += fmt.Sprintf("📄 %s: %d changes\n", file.FilePath, file.MatchCount)
 			}
+		}
+	}
+
+	if len(result.Errors) > 0 {
+		response += "\n⚠️  Encountered issues while processing:\n"
+		for _, err := range result.Errors {
+			response += fmt.Sprintf("- %s\n", err)
 		}
 	}
 

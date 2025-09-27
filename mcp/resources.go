@@ -4,17 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
-)
 
-// ResourceDefinition describes a resource available to the client
-type ResourceDefinition struct {
-	URI         string         `json:"uri"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	MimeType    string         `json:"mimeType,omitempty"`
-	Annotations map[string]any `json:"annotations,omitempty"`
-}
+	"github.com/termfx/morfx/mcp/resources"
+	"github.com/termfx/morfx/mcp/types"
+)
 
 // ResourceContent represents the content of a resource
 type ResourceContent struct {
@@ -24,12 +19,51 @@ type ResourceContent struct {
 	Blob     []byte `json:"blob,omitempty"`
 }
 
-// GetResourceDefinitions returns all available resource definitions
-func GetResourceDefinitions() []ResourceDefinition {
-	return []ResourceDefinition{
+// ResourceDefinitions returns all available resource definitions
+
+var builtinResourceURIs = map[string]struct{}{
+	"morfx://server/info":         {},
+	"morfx://server/capabilities": {},
+	"morfx://providers/languages": {},
+	"morfx://session/current":     {},
+	"morfx://config/settings":     {},
+}
+
+func resourceContentLength(content *ResourceContent) int64 {
+	if content == nil {
+		return 0
+	}
+	if content.Text != "" {
+		return int64(len(content.Text))
+	}
+	if len(content.Blob) > 0 {
+		return int64(len(content.Blob))
+	}
+	return 0
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
+func (s *StdioServer) lookupResource(uri string) (types.Resource, bool) {
+	if s != nil && s.resourceRegistry != nil {
+		if res, ok := s.resourceRegistry.Get(uri); ok {
+			return res, true
+		}
+	}
+	if res, ok := resources.Registry.Get(uri); ok {
+		return res, true
+	}
+	return nil, false
+}
+
+func (s *StdioServer) ResourceDefinitions() []types.ResourceDefinition {
+	defs := []types.ResourceDefinition{
 		{
 			URI:         "morfx://server/info",
-			Name:        "Server Information",
+			Name:        "server-info",
+			Title:       "Server Information",
 			Description: "Current server status, configuration, and runtime information",
 			MimeType:    "application/json",
 			Annotations: map[string]any{
@@ -39,7 +73,8 @@ func GetResourceDefinitions() []ResourceDefinition {
 		},
 		{
 			URI:         "morfx://server/capabilities",
-			Name:        "Server Capabilities",
+			Name:        "server-capabilities",
+			Title:       "Server Capabilities",
 			Description: "Detailed information about server capabilities and supported features",
 			MimeType:    "application/json",
 			Annotations: map[string]any{
@@ -49,7 +84,8 @@ func GetResourceDefinitions() []ResourceDefinition {
 		},
 		{
 			URI:         "morfx://providers/languages",
-			Name:        "Supported Languages",
+			Name:        "providers-languages",
+			Title:       "Supported Languages",
 			Description: "List of programming languages supported for code transformations",
 			MimeType:    "application/json",
 			Annotations: map[string]any{
@@ -59,7 +95,8 @@ func GetResourceDefinitions() []ResourceDefinition {
 		},
 		{
 			URI:         "morfx://session/current",
-			Name:        "Current Session",
+			Name:        "session-current",
+			Title:       "Current Session",
 			Description: "Information about the current transformation session",
 			MimeType:    "application/json",
 			Annotations: map[string]any{
@@ -69,7 +106,8 @@ func GetResourceDefinitions() []ResourceDefinition {
 		},
 		{
 			URI:         "morfx://config/settings",
-			Name:        "Configuration Settings",
+			Name:        "config-settings",
+			Title:       "Configuration Settings",
 			Description: "Current server configuration and settings",
 			MimeType:    "application/json",
 			Annotations: map[string]any{
@@ -78,74 +116,143 @@ func GetResourceDefinitions() []ResourceDefinition {
 			},
 		},
 	}
-}
 
-// handleListResources returns available resources to the client
-func (s *StdioServer) handleListResources(req Request) Response {
-	resources := GetResourceDefinitions()
-
-	return SuccessResponse(req.ID, map[string]any{
-		"resources": resources,
-	})
-}
-
-// handleReadResource returns the content of a specific resource
-func (s *StdioServer) handleReadResource(req Request) Response {
-	var params struct {
-		URI string `json:"uri"`
-	}
-
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return ErrorResponse(req.ID, InvalidParams, "Invalid resource read parameters")
-	}
-
-	s.debugLog("Reading resource: %s", params.URI)
-
-	// Generate resource content based on URI
-	content, err := s.generateResourceContent(params.URI)
-	if err != nil {
-		if mcpErr, ok := err.(*MCPError); ok {
-			return ErrorResponseWithData(req.ID, mcpErr.Code, mcpErr.Message, mcpErr.Data)
+	for i := range defs {
+		enrichResourceDefinition(&defs[i], nil)
+		if s != nil {
+			s.enrichRuntimeResourceMetadata(&defs[i])
 		}
-		return ErrorResponse(req.ID, InternalError, err.Error())
 	}
 
-	return SuccessResponse(req.ID, map[string]any{
-		"contents": []ResourceContent{*content},
-	})
+	appendDynamic := func(res types.Resource) {
+		uri := res.URI()
+		definition := types.ResourceDefinition{
+			URI:         uri,
+			Name:        uri,
+			Title:       res.Name(),
+			Description: res.Description(),
+			MimeType:    res.MimeType(),
+			Annotations: map[string]any{
+				"title": res.Name(),
+			},
+		}
+		enrichResourceDefinition(&definition, res)
+		if s != nil {
+			s.enrichRuntimeResourceMetadata(&definition)
+		}
+		defs = append(defs, definition)
+	}
+
+	seen := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		seen[def.URI] = struct{}{}
+	}
+
+	for _, res := range resources.Registry.List() {
+		if _, exists := seen[res.URI()]; exists {
+			continue
+		}
+		appendDynamic(res)
+		seen[res.URI()] = struct{}{}
+	}
+
+	if s != nil && s.resourceRegistry != nil {
+		for _, res := range s.resourceRegistry.List() {
+			if _, exists := seen[res.URI()]; exists {
+				continue
+			}
+			appendDynamic(res)
+			seen[res.URI()] = struct{}{}
+		}
+	}
+
+	return defs
 }
 
-// handleSubscribeResource subscribes to resource changes
-func (s *StdioServer) handleSubscribeResource(req Request) Response {
-	var params struct {
-		URI string `json:"uri"`
+func (s *StdioServer) enrichRuntimeResourceMetadata(def *types.ResourceDefinition) {
+	if def == nil {
+		return
+	}
+	if def.Annotations == nil {
+		def.Annotations = make(map[string]any)
+	}
+	if _, ok := def.Annotations["audience"]; !ok {
+		def.Annotations["audience"] = "developer"
 	}
 
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return ErrorResponse(req.ID, InvalidParams, "Invalid resource subscribe parameters")
+	if _, builtin := builtinResourceURIs[def.URI]; builtin {
+		if _, ok := def.Annotations["cacheControl"]; !ok {
+			def.Annotations["cacheControl"] = "static"
+		}
+		if _, ok := def.Annotations["stability"]; !ok {
+			def.Annotations["stability"] = "stable"
+		}
+		if def.Size == nil {
+			if def.URI == "morfx://server/capabilities" {
+				return
+			}
+			var content *ResourceContent
+			switch def.URI {
+			case "morfx://server/info":
+				content, _ = s.generateServerInfo()
+			case "morfx://server/capabilities":
+				content, _ = s.generateServerCapabilities()
+			case "morfx://providers/languages":
+				content, _ = s.generateSupportedLanguages()
+			case "morfx://session/current":
+				content, _ = s.generateCurrentSession()
+			case "morfx://config/settings":
+				content, _ = s.generateConfigSettings()
+			}
+			if size := resourceContentLength(content); size > 0 {
+				def.Size = int64Ptr(size)
+			}
+		}
+		return
 	}
 
-	s.debugLog("Subscribing to resource: %s", params.URI)
-
-	// For now, just acknowledge the subscription
-	// In a full implementation, you'd track subscriptions and send notifications
-	return SuccessResponse(req.ID, map[string]any{})
+	if _, ok := def.Annotations["cacheControl"]; !ok {
+		def.Annotations["cacheControl"] = "dynamic"
+	}
+	if _, ok := def.Annotations["stability"]; !ok {
+		def.Annotations["stability"] = "experimental"
+	}
+	if def.Size != nil {
+		return
+	}
+	if res, ok := resources.Registry.Get(def.URI); ok {
+		if text, err := res.Contents(); err == nil {
+			def.Size = int64Ptr(int64(len(text)))
+		}
+	}
 }
 
-// handleUnsubscribeResource unsubscribes from resource changes
-func (s *StdioServer) handleUnsubscribeResource(req Request) Response {
-	var params struct {
-		URI string `json:"uri"`
+func enrichResourceDefinition(def *types.ResourceDefinition, res types.Resource) {
+	if def.Title == "" {
+		def.Title = def.Name
 	}
-
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return ErrorResponse(req.ID, InvalidParams, "Invalid resource unsubscribe parameters")
+	if def.Annotations == nil {
+		def.Annotations = make(map[string]any)
 	}
+	if _, ok := def.Annotations["category"]; !ok {
+		def.Annotations["category"] = resourceCategory(def.URI)
+	}
+	if _, ok := def.Annotations["readonly"]; !ok {
+		def.Annotations["readonly"] = true
+	}
+	if res != nil {
+		if text, err := res.Contents(); err == nil {
+			size := int64(len(text))
+			def.Size = &size
+		}
+	}
+}
 
-	s.debugLog("Unsubscribing from resource: %s", params.URI)
-
-	// For now, just acknowledge the unsubscription
-	return SuccessResponse(req.ID, map[string]any{})
+func resourceCategory(uri string) string {
+	if idx := strings.Index(uri, "://"); idx != -1 {
+		return uri[:idx]
+	}
+	return "custom"
 }
 
 // generateResourceContent creates the actual content for a resource URI
@@ -162,6 +269,17 @@ func (s *StdioServer) generateResourceContent(uri string) (*ResourceContent, err
 	case "morfx://config/settings":
 		return s.generateConfigSettings()
 	default:
+		if res, ok := s.lookupResource(uri); ok {
+			text, err := res.Contents()
+			if err != nil {
+				return nil, types.WrapError(InternalError, "Failed to read resource", err)
+			}
+			return &ResourceContent{
+				URI:      uri,
+				MimeType: res.MimeType(),
+				Text:     text,
+			}, nil
+		}
 		return nil, NewMCPError(MethodNotFound, "Resource not found", map[string]any{
 			"uri": uri,
 		})
@@ -170,9 +288,21 @@ func (s *StdioServer) generateResourceContent(uri string) (*ResourceContent, err
 
 // generateServerInfo creates server information resource content
 func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
+	dbInfo := map[string]any{
+		"enabled": s.db != nil,
+	}
+	if s.db != nil {
+		dbInfo["type"] = "sqlite"
+	} else {
+		dbInfo["type"] = "none"
+	}
+	if s.config.DatabaseURL != "" {
+		dbInfo["has_url"] = true
+	}
+
 	info := map[string]any{
 		"name":    "Morfx MCP Server",
-		"version": "1.3.0",
+		"version": "1.5.0",
 		"runtime": map[string]any{
 			"go_version": runtime.Version(),
 			"platform":   fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
@@ -181,11 +311,7 @@ func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 		"uptime": map[string]any{
 			"started_at": time.Now().Format(time.RFC3339),
 		},
-		"database": map[string]any{
-			"enabled": s.db != nil,
-			"type":    "sqlite",
-			"url":     s.config.DatabaseURL,
-		},
+		"database": dbInfo,
 		"features": map[string]any{
 			"staging":   s.staging != nil,
 			"sessions":  s.session != nil,
@@ -209,13 +335,13 @@ func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 // generateServerCapabilities creates server capabilities resource content
 func (s *StdioServer) generateServerCapabilities() (*ResourceContent, error) {
 	capabilities := map[string]any{
-		"protocol_version": "2024-11-05",
+		"protocol_version": supportedProtocolVersion,
 		"tools": map[string]any{
-			"count":    len(s.tools),
+			"count":    len(s.toolRegistry.List()),
 			"features": []string{"query", "transform", "stage", "apply"},
 		},
 		"resources": map[string]any{
-			"count":    len(GetResourceDefinitions()),
+			"count":    len(s.ResourceDefinitions()),
 			"features": []string{"read", "subscribe", "notifications"},
 		},
 		"prompts": map[string]any{
@@ -336,13 +462,16 @@ func (s *StdioServer) generateCurrentSession() (*ResourceContent, error) {
 // generateConfigSettings creates configuration settings resource content
 func (s *StdioServer) generateConfigSettings() (*ResourceContent, error) {
 	settings := map[string]any{
-		"database_url":            s.config.DatabaseURL,
 		"auto_apply_enabled":      s.config.AutoApplyEnabled,
 		"auto_apply_threshold":    s.config.AutoApplyThreshold,
 		"staging_ttl_minutes":     s.config.StagingTTL.Minutes(),
 		"max_stages_per_session":  s.config.MaxStagesPerSession,
 		"max_applies_per_session": s.config.MaxAppliesPerSession,
 		"debug":                   s.config.Debug,
+	}
+
+	if s.config.DatabaseURL != "" {
+		settings["database_url_present"] = true
 	}
 
 	data, err := json.MarshalIndent(settings, "", "  ")

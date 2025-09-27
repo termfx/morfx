@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -47,7 +48,7 @@ func TestRegistry_Register(t *testing.T) {
 			"properties": map[string]any{},
 			"required":   []string{},
 		},
-		handler: func(params json.RawMessage) (any, error) {
+		handler: func(ctx context.Context, params json.RawMessage) (any, error) {
 			return map[string]any{"result": "custom"}, nil
 		},
 	}
@@ -100,7 +101,7 @@ func TestRegistry_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			params := createTestParams(tt.params)
-			result, err := Registry.Execute(tt.tool, params)
+			result, err := Registry.Execute(context.Background(), tt.tool, params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -165,7 +166,7 @@ func TestRegistry_ThreadSafety(t *testing.T) {
 				name:        toolName,
 				description: "Concurrent test tool",
 				inputSchema: map[string]any{},
-				handler: func(params json.RawMessage) (any, error) {
+				handler: func(ctx context.Context, params json.RawMessage) (any, error) {
 					return nil, nil
 				},
 			}

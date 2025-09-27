@@ -36,6 +36,14 @@ func (m *MockProvider) Validate(source string) ValidationResult {
 	return ValidationResult{Valid: true}
 }
 
+func (m *MockProvider) SupportedQueryTypes() []string {
+	return []string{"function", "class", "variable"}
+}
+
+func (m *MockProvider) Stats() Stats {
+	return Stats{}
+}
+
 func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
 

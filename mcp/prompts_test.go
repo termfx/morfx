@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -56,21 +57,18 @@ func TestHandleListPromptsDetailed(t *testing.T) {
 		Params: json.RawMessage(`{}`),
 	}
 
-	response := server.handleListPrompts(req)
+	response := server.handleListPrompts(context.Background(), req)
 
 	if response.Error != nil {
 		t.Errorf("Expected no error, got: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(listPromptsResult)
 	if !ok {
-		t.Fatalf("Expected result to be map, got %T", response.Result)
+		t.Fatalf("Expected listPromptsResult, got %T", response.Result)
 	}
 
-	prompts, ok := result["prompts"].([]PromptDefinition)
-	if !ok {
-		t.Fatalf("Expected prompts to be []PromptDefinition, got %T", result["prompts"])
-	}
+	prompts := res.Prompts
 
 	if len(prompts) == 0 {
 		t.Error("Expected at least one prompt")
@@ -97,21 +95,18 @@ func TestHandleGetPrompt_CodeAnalysis(t *testing.T) {
 		Params: paramsJSON,
 	}
 
-	response := server.handleGetPrompt(req)
+	response := server.handleGetPrompt(context.Background(), req)
 
 	if response.Error != nil {
 		t.Errorf("Expected no error, got: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(getPromptResult)
 	if !ok {
-		t.Fatalf("Expected result to be map, got %T", response.Result)
+		t.Fatalf("Expected getPromptResult, got %T", response.Result)
 	}
 
-	messages, ok := result["messages"].([]PromptMessage)
-	if !ok {
-		t.Fatalf("Expected messages to be []PromptMessage, got %T", result["messages"])
-	}
+	messages := res.Messages
 
 	if len(messages) == 0 {
 		t.Error("Expected at least one message")
@@ -131,7 +126,7 @@ func TestHandleGetPrompt_InvalidParams(t *testing.T) {
 		Params: invalidJSON,
 	}
 
-	response := server.handleGetPrompt(req)
+	response := server.handleGetPrompt(context.Background(), req)
 
 	if response.Error == nil {
 		t.Error("Expected error for invalid params")
@@ -154,7 +149,7 @@ func TestHandleGetPrompt_UnknownPrompt(t *testing.T) {
 		Params: paramsJSON,
 	}
 
-	response := server.handleGetPrompt(req)
+	response := server.handleGetPrompt(context.Background(), req)
 
 	if response.Error == nil {
 		t.Error("Expected error for unknown prompt")

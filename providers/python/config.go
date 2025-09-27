@@ -29,21 +29,43 @@ func (c *Config) GetLanguage() *sitter.Language {
 
 // MapQueryTypeToNodeTypes maps query types to Python AST node types
 func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
-	switch queryType {
-	case "function", "func":
-		return []string{"function_definition", "async_function_definition"}
-	case "class":
-		return []string{"class_definition"}
-	case "variable", "var":
-		return []string{"assignment", "global_statement", "nonlocal_statement"}
-	case "import":
-		return []string{"import_statement", "import_from_statement"}
-	case "decorator":
-		return []string{"decorator"}
-	default:
-		// Try to use the query type directly as node type
-		return []string{queryType}
+	if nodes, ok := c.aliasMap()[queryType]; ok {
+		return nodes
 	}
+	return []string{queryType}
+}
+
+func (c *Config) aliasMap() map[string][]string {
+	return map[string][]string{
+		"function":   {"function_definition", "async_function_definition"},
+		"func":       {"function_definition", "async_function_definition"},
+		"fn":         {"function_definition", "async_function_definition"},
+		"method":     {"function_definition", "async_function_definition"},
+		"def":        {"function_definition", "async_function_definition"},
+		"class":      {"class_definition"},
+		"cls":        {"class_definition"},
+		"type":       {"type_alias_statement"},
+		"alias":      {"type_alias_statement"},
+		"type_alias": {"type_alias_statement"},
+		"variable":   {"assignment", "augmented_assignment", "global_statement", "nonlocal_statement"},
+		"var":        {"assignment", "augmented_assignment", "global_statement", "nonlocal_statement"},
+		"import":     {"import_statement", "import_from_statement"},
+		"from":       {"import_from_statement"},
+		"decorator":  {"decorator"},
+		"lambda":     {"lambda"},
+		"comment":    {"comment"},
+		"comments":   {"comment"},
+	}
+}
+
+// SupportedQueryTypes returns colloquial query types/aliases for Python
+func (c *Config) SupportedQueryTypes() []string {
+	m := c.aliasMap()
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // ExtractNodeName extracts name from Python AST nodes
@@ -53,13 +75,15 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
 			return source[nameNode.StartByte():nameNode.EndByte()]
 		}
-	case "assignment":
+	case "assignment", "augmented_assignment":
 		// Find left side of assignment
 		if leftNode := node.ChildByFieldName("left"); leftNode != nil {
 			if leftNode.Type() == "identifier" {
 				return source[leftNode.StartByte():leftNode.EndByte()]
 			}
 		}
+	case "lambda":
+		return "anonymous"
 	case "import_statement":
 		// Get first imported module
 		for i := 0; i < int(node.ChildCount()); i++ {
@@ -73,6 +97,10 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		if moduleNode := node.ChildByFieldName("module_name"); moduleNode != nil {
 			return source[moduleNode.StartByte():moduleNode.EndByte()]
 		}
+	case "type_alias_statement":
+		if left := node.ChildByFieldName("left"); left != nil {
+			return source[left.StartByte():left.EndByte()]
+		}
 	case "decorator":
 		// Get decorator name
 		for i := 0; i < int(node.ChildCount()); i++ {
@@ -81,6 +109,8 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 				return source[child.StartByte():child.EndByte()]
 			}
 		}
+	case "comment":
+		return c.commentSummary(source[node.StartByte():node.EndByte()])
 	}
 
 	// Fallback: try to find first identifier child
@@ -98,9 +128,23 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 	return ""
 }
 
+func (c *Config) commentSummary(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	trimmed = strings.TrimPrefix(trimmed, "//")
+	trimmed = strings.TrimPrefix(trimmed, "/*")
+	trimmed = strings.TrimPrefix(trimmed, "/**")
+	trimmed = strings.TrimSuffix(trimmed, "*/")
+	trimmed = strings.TrimSpace(trimmed)
+	if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
+}
+
 // ValidateAssignment ensures assignments are actual variable definitions, not attribute assignments
 func (c *Config) ValidateAssignment(node *sitter.Node, source, queryType string) bool {
-	if node.Type() != "assignment" || queryType != "variable" {
+	if (node.Type() != "assignment" && node.Type() != "augmented_assignment") || queryType != "variable" {
 		return true // Not assignment or not variable query
 	}
 
@@ -139,6 +183,12 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	switch node.Type() {
 	case "assignment":
 		return c.expandAssignment(node, source, query)
+	case "augmented_assignment":
+		return c.expandAssignment(node, source, query)
+	case "import_statement":
+		return c.expandImport(node, source, query)
+	case "import_from_statement":
+		return c.expandImportFrom(node, source, query)
 	default:
 		name := c.ExtractNodeName(node, source)
 		return []core.CodeMatch{{
@@ -227,5 +277,63 @@ func (c *Config) expandPatternList(node *sitter.Node, source string, query core.
 		}
 	}
 
+	return matches
+}
+
+func (c *Config) expandImport(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+	// import a as b, c
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "aliased_import" {
+			if alias := child.ChildByFieldName("alias"); alias != nil {
+				name := source[alias.StartByte():alias.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := source[nameNode.StartByte():nameNode.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+		}
+		if child.Type() == "dotted_name" || child.Type() == "identifier" {
+			name := source[child.StartByte():child.EndByte()]
+			matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+		}
+	}
+	if len(matches) == 0 {
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+	}
+	return matches
+}
+
+func (c *Config) expandImportFrom(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+	// from x import a as b, c
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "aliased_import" {
+			if alias := child.ChildByFieldName("alias"); alias != nil {
+				name := source[alias.StartByte():alias.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := source[nameNode.StartByte():nameNode.EndByte()]
+				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				continue
+			}
+		}
+		if child.Type() == "identifier" {
+			name := source[child.StartByte():child.EndByte()]
+			matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+		}
+	}
+	if len(matches) == 0 {
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+	}
 	return matches
 }

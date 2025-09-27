@@ -163,26 +163,18 @@ func parseCoverageFile(filename string) ([]PackageCoverage, error) {
 		}
 
 		filepath := fileParts[0]
-		// Extract package path from the filepath
-		// e.g., "github.com/termfx/morfx/providers/golang/provider.go" -> "providers/golang"
-		var packageName string
-		if strings.Contains(filepath, "github.com/termfx/morfx/") {
-			// Remove the base path and get the package directory
-			relativePath := strings.TrimPrefix(filepath, "github.com/termfx/morfx/")
-			pathParts := strings.Split(relativePath, "/")
-			if len(pathParts) > 1 {
-				// Join the directory parts (exclude filename)
-				packageName = strings.Join(pathParts[:len(pathParts)-1], "/")
-			} else if len(pathParts) == 1 {
-				// Single directory
-				packageName = strings.TrimSuffix(pathParts[0], ".go")
-			}
+		if filepath == "" {
+			continue
+		}
+		packageName := filepath
+		if idx := strings.LastIndex(packageName, "/"); idx != -1 {
+			packageName = packageName[:idx]
 		} else {
-			// Fallback to old logic for edge cases
-			packagePath := strings.Split(filepath, "/")
-			if len(packagePath) > 0 {
-				packageName = packagePath[len(packagePath)-1]
-			}
+			packageName = strings.TrimSuffix(packageName, ".go")
+		}
+		packageName = strings.TrimSpace(packageName)
+		if packageName == "" {
+			continue
 		}
 
 		// Parse coverage data

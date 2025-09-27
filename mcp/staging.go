@@ -1,7 +1,11 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,21 +17,53 @@ import (
 type StagingManager struct {
 	db     *gorm.DB
 	config Config
+	safety *SafetyManager
+}
+
+// IsEnabled reports whether staging support is active. The manager is enabled
+// whenever it has a backing database connection.
+func (sm *StagingManager) IsEnabled() bool {
+	return sm != nil && sm.db != nil
 }
 
 // NewStagingManager creates a new staging manager
-func NewStagingManager(db *gorm.DB, config Config) *StagingManager {
+func NewStagingManager(db *gorm.DB, config Config, safety *SafetyManager) *StagingManager {
 	return &StagingManager{
 		db:     db,
 		config: config,
+		safety: safety,
 	}
 }
 
-// CreateStage creates a new staged transformation
-func (sm *StagingManager) CreateStage(stage *models.Stage) error {
+// CreateStage creates a new staged transformation while honoring cancellation.
+func (sm *StagingManager) CreateStage(ctx context.Context, stage *models.Stage) error {
 	// Validate stage is not nil
 	if stage == nil {
 		return fmt.Errorf("stage cannot be nil")
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	db := sm.db.WithContext(ctx)
+
+	// Check session limits before creating stage
+	if stage.SessionID != "" && sm.config.MaxStagesPerSession > 0 {
+		var pendingCount int64
+		if err := db.Model(&models.Stage{}).
+			Where("session_id = ? AND status = ?", stage.SessionID, "pending").
+			Count(&pendingCount).Error; err != nil {
+			return fmt.Errorf("failed to check stage count: %w", err)
+		}
+
+		if pendingCount >= int64(sm.config.MaxStagesPerSession) {
+			return fmt.Errorf("session stage limit exceeded: %d >= %d", pendingCount, sm.config.MaxStagesPerSession)
+		}
 	}
 
 	// Generate ID if not set
@@ -46,7 +82,11 @@ func (sm *StagingManager) CreateStage(stage *models.Stage) error {
 	}
 
 	// Save to database
-	return sm.db.Create(stage).Error
+	if err := db.Create(stage).Error; err != nil {
+		return err
+	}
+
+	return ctx.Err()
 }
 
 // GetStage retrieves a stage by ID
@@ -59,16 +99,24 @@ func (sm *StagingManager) GetStage(id string) (*models.Stage, error) {
 	return &stage, nil
 }
 
-// ApplyStage applies a staged transformation
-func (sm *StagingManager) ApplyStage(stageID string, autoApplied bool) (*models.Apply, error) {
-	// Start transaction
-	return sm.applyInTransaction(stageID, autoApplied)
-}
+// ApplyStage applies a staged transformation while honoring cancellation.
+func (sm *StagingManager) ApplyStage(ctx context.Context, stageID string, autoApplied bool) (*models.Apply, error) {
+	var (
+		apply      *models.Apply
+		stageWrite *fileWriteGuard
+	)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (*models.Apply, error) {
-	var apply *models.Apply
+	err := sm.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 
-	err := sm.db.Transaction(func(tx *gorm.DB) error {
 		// Get the stage
 		var stage models.Stage
 		if err := tx.First(&stage, "id = ?", stageID).Error; err != nil {
@@ -86,6 +134,29 @@ func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (
 			stage.Status = "expired"
 			tx.Save(&stage)
 			return fmt.Errorf("stage expired")
+		}
+
+		// Check apply session limits before applying
+		if stage.SessionID != "" && sm.config.MaxAppliesPerSession > 0 {
+			var applyCount int64
+			if err := tx.Model(&models.Apply{}).
+				Joins("JOIN stages ON applies.stage_id = stages.id").
+				Where("stages.session_id = ?", stage.SessionID).
+				Count(&applyCount).Error; err != nil {
+				return fmt.Errorf("failed to check apply count: %w", err)
+			}
+
+			if applyCount >= int64(sm.config.MaxAppliesPerSession) {
+				return fmt.Errorf("session apply limit exceeded: %d >= %d", applyCount, sm.config.MaxAppliesPerSession)
+			}
+		}
+
+		if !autoApplied {
+			var err error
+			stageWrite, err = sm.prepareStageWrite(&stage)
+			if err != nil {
+				return err
+			}
 		}
 
 		// Create apply record
@@ -123,10 +194,127 @@ func (sm *StagingManager) applyInTransaction(stageID string, autoApplied bool) (
 		return nil
 	})
 	if err != nil {
+		if stageWrite != nil {
+			_ = stageWrite.Rollback()
+		}
 		return nil, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		if stageWrite != nil {
+			_ = stageWrite.Rollback()
+		}
+		return nil, err
+	}
+
+	if stageWrite != nil {
+		stageWrite.Commit()
+	}
+
 	return apply, nil
+}
+
+func (sm *StagingManager) prepareStageWrite(stage *models.Stage) (*fileWriteGuard, error) {
+	if stage == nil {
+		return nil, fmt.Errorf("stage cannot be nil")
+	}
+
+	if len(stage.ScopeAST) == 0 {
+		return nil, nil
+	}
+
+	var scope map[string]any
+	if err := json.Unmarshal(stage.ScopeAST, &scope); err != nil {
+		return nil, fmt.Errorf("failed to decode stage scope: %w", err)
+	}
+
+	pathVal, ok := scope["file_path"].(string)
+	if !ok || pathVal == "" {
+		return nil, nil
+	}
+	path := pathVal
+
+	if stage.Modified == "" {
+		return nil, fmt.Errorf("stage %s has no modified content", stage.ID)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create parent directory: %w", err)
+	}
+
+	if sm.safety != nil {
+		op := &SafetyOperation{
+			Files: []SafetyFile{{
+				Path:       path,
+				Size:       int64(len(stage.Modified)),
+				Confidence: stage.ConfidenceScore,
+			}},
+			GlobalConfidence: stage.ConfidenceScore,
+		}
+
+		if err := sm.safety.ValidateOperation(op); err != nil {
+			return nil, err
+		}
+
+		if stage.BaseDigest != "" {
+			if err := sm.safety.ValidateFileIntegrity([]FileIntegrityCheck{{
+				Path:         path,
+				ExpectedHash: stage.BaseDigest,
+			}}); err != nil {
+				return nil, err
+			}
+		}
+
+		handle, err := sm.safety.AtomicWrite(path, stage.Modified)
+		if err != nil {
+			return nil, err
+		}
+
+		return &fileWriteGuard{
+			commitFn: func() {
+				if handle != nil {
+					handle.Commit()
+				}
+			},
+			rollbackFn: func() error {
+				if handle != nil {
+					return handle.Rollback()
+				}
+				return nil
+			},
+		}, nil
+	}
+
+	var (
+		originalBytes  []byte
+		originalExists bool
+		filePerm       os.FileMode = 0o644
+	)
+
+	if info, err := os.Stat(path); err == nil {
+		filePerm = info.Mode().Perm()
+		if data, readErr := os.ReadFile(path); readErr == nil {
+			originalBytes = data
+			originalExists = true
+		}
+	}
+
+	if err := os.WriteFile(path, []byte(stage.Modified), filePerm); err != nil {
+		return nil, err
+	}
+
+	return &fileWriteGuard{
+		commitFn: func() {},
+		rollbackFn: func() error {
+			if originalExists {
+				return os.WriteFile(path, originalBytes, filePerm)
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		},
+	}, nil
 }
 
 // ListPendingStages lists all pending stages for a session

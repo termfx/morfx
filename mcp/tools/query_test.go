@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -125,7 +126,7 @@ func TestQueryTool_Execute(t *testing.T) {
 			}
 
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -217,7 +218,7 @@ func helper() {
 		},
 	})
 
-	result, err := tool.handle(params)
+	result, err := tool.handle(context.Background(), params)
 	assertNoError(t, err)
 
 	if result == nil {
@@ -234,7 +235,7 @@ func helper() {
 		},
 	})
 
-	_, err = tool.handle(params)
+	_, err = tool.handle(context.Background(), params)
 	if err == nil {
 		t.Error("Expected error for non-existent file")
 	}

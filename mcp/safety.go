@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -38,7 +36,7 @@ func NewSafetyManager(config SafetyConfig) *SafetyManager {
 // ValidateOperation checks if an operation meets safety requirements
 func (sm *SafetyManager) ValidateOperation(op *SafetyOperation) error {
 	// Check file count limits
-	if len(op.Files) > sm.config.MaxFiles {
+	if sm.config.MaxFiles > 0 && len(op.Files) > sm.config.MaxFiles {
 		return NewMCPError(TooManyFiles,
 			fmt.Sprintf("Operation exceeds file limit: %d > %d", len(op.Files), sm.config.MaxFiles),
 			map[string]any{
@@ -50,7 +48,7 @@ func (sm *SafetyManager) ValidateOperation(op *SafetyOperation) error {
 	// Check individual file sizes and total size
 	var totalSize int64
 	for _, file := range op.Files {
-		if file.Size > sm.config.MaxFileSize {
+		if sm.config.MaxFileSize > 0 && file.Size > sm.config.MaxFileSize {
 			return NewMCPError(FileTooLarge,
 				fmt.Sprintf("File exceeds size limit: %s (%d bytes > %d bytes)",
 					file.Path, file.Size, sm.config.MaxFileSize),
@@ -63,7 +61,7 @@ func (sm *SafetyManager) ValidateOperation(op *SafetyOperation) error {
 		totalSize += file.Size
 	}
 
-	if totalSize > sm.config.MaxTotalSize {
+	if sm.config.MaxTotalSize > 0 && totalSize > sm.config.MaxTotalSize {
 		return NewMCPError(TotalSizeTooLarge,
 			fmt.Sprintf("Total operation size exceeds limit: %d > %d", totalSize, sm.config.MaxTotalSize),
 			map[string]any{
@@ -139,17 +137,21 @@ func (sm *SafetyManager) ValidateFileIntegrity(files []FileIntegrityCheck) error
 	return nil
 }
 
-// AtomicWrite performs an atomic write operation
-func (sm *SafetyManager) AtomicWrite(path, content string) error {
-	if !sm.config.AtomicWrites {
-		// Fall back to regular write
-		return os.WriteFile(path, []byte(content), 0o644)
+// AtomicWrite performs an atomic write operation and, when transaction logging
+// is enabled, returns a handle that can later be used to commit or roll back
+// the persisted change. Atomic writes are always enabled for safety.
+func (sm *SafetyManager) AtomicWrite(path, content string) (*AtomicWriteHandle, error) {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return nil, WrapError(FileSystemError, fmt.Sprintf("Failed to stat file %s", path), err)
 	}
 
 	// Create temporary file with random suffix
 	suffix, err := generateRandomSuffix()
 	if err != nil {
-		return WrapError(AtomicWriteFailed, "Failed to generate random suffix", err)
+		return nil, WrapError(AtomicWriteFailed, "Failed to generate random suffix", err)
 	}
 
 	tmpPath := path + ".tmp." + suffix
@@ -159,34 +161,36 @@ func (sm *SafetyManager) AtomicWrite(path, content string) error {
 	if sm.config.CreateBackups {
 		backupPath = path + sm.config.BackupSuffix
 		if err := sm.createBackup(path, backupPath); err != nil {
-			return WrapError(BackupFailed, "Failed to create backup", err)
+			return nil, WrapError(BackupFailed, "Failed to create backup", err)
 		}
 	}
 
 	// Write to temporary file
-	if err := os.WriteFile(tmpPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(content), mode); err != nil {
 		sm.cleanupFailedWrite(tmpPath, backupPath)
-		return WrapError(AtomicWriteFailed, "Failed to write temporary file", err)
+		return nil, WrapError(AtomicWriteFailed, "Failed to write temporary file", err)
 	}
 
 	// Fsync if requested
 	if sm.config.UseFsync {
 		if err := sm.syncFile(tmpPath); err != nil {
 			sm.cleanupFailedWrite(tmpPath, backupPath)
-			return WrapError(AtomicWriteFailed, "Failed to sync temporary file", err)
+			return nil, WrapError(AtomicWriteFailed, "Failed to sync temporary file", err)
 		}
 	}
 
-	// Log transaction
+	var txID string
 	if sm.txLog != nil {
-		txID := sm.txLog.BeginTransaction(path, tmpPath, backupPath)
-		defer sm.txLog.CompleteTransaction(txID)
+		txID = sm.txLog.BeginTransaction(path, tmpPath, backupPath)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
 		sm.cleanupFailedWrite(tmpPath, backupPath)
-		return WrapError(AtomicWriteFailed, "Failed to rename temporary file", err)
+		if txID != "" {
+			sm.txLog.FailTransaction(txID, err)
+		}
+		return nil, WrapError(AtomicWriteFailed, "Failed to rename temporary file", err)
 	}
 
 	// Fsync directory if requested
@@ -197,7 +201,36 @@ func (sm *SafetyManager) AtomicWrite(path, content string) error {
 		}
 	}
 
-	return nil
+	if txID == "" {
+		return nil, nil
+	}
+
+	return &AtomicWriteHandle{txLog: sm.txLog, txID: txID}, nil
+}
+
+// AtomicWriteHandle allows callers to finalize or revert a logged atomic write.
+type AtomicWriteHandle struct {
+	txLog *TransactionLog
+	txID  string
+}
+
+// Commit marks the associated transaction as completed.
+func (h *AtomicWriteHandle) Commit() {
+	if h == nil || h.txLog == nil || h.txID == "" {
+		return
+	}
+	h.txLog.CompleteTransaction(h.txID)
+	h.txID = ""
+}
+
+// Rollback reverts the write using the recorded backup.
+func (h *AtomicWriteHandle) Rollback() error {
+	if h == nil || h.txLog == nil || h.txID == "" {
+		return nil
+	}
+	err := h.txLog.RollbackTransaction(h.txID)
+	h.txID = ""
+	return err
 }
 
 // LockFile acquires an exclusive lock on a file
@@ -305,14 +338,27 @@ func (sm *SafetyManager) isLockStale(lockPath string) bool {
 // Helper functions
 
 func (sm *SafetyManager) createBackup(src, dst string) error {
-	content, err := os.ReadFile(src)
+	info, err := os.Stat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // No file to backup
 		}
 		return err
 	}
-	return os.WriteFile(dst, content, 0o644)
+
+	content, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	if err := os.WriteFile(dst, content, mode); err != nil {
+		return err
+	}
+	return os.Chmod(dst, mode)
 }
 
 func (sm *SafetyManager) cleanupFailedWrite(tmpPath, backupPath string) {
@@ -402,21 +448,4 @@ func (fl *fileLock) release() error {
 		return os.Remove(fl.path)
 	}
 	return nil
-}
-
-// isProcessAlive checks if a process exists cross-platform
-func isProcessAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	if runtime.GOOS == "windows" {
-		// On Windows, FindProcess always succeeds, but we can test if process exists
-		// by trying to get its exit code
-		return process.Signal(os.Interrupt) == nil
-	}
-
-	// Unix-like: use signal 0 to test existence
-	return process.Signal(syscall.Signal(0)) == nil
 }

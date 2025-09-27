@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,7 +33,7 @@ type LogMessage struct {
 }
 
 // handleSetLoggingLevel handles logging level configuration
-func (s *StdioServer) handleSetLoggingLevel(req Request) Response {
+func (s *StdioServer) handleSetLoggingLevel(ctx context.Context, req Request) Response {
 	var params struct {
 		Level LogLevel `json:"level"`
 	}
@@ -41,20 +42,19 @@ func (s *StdioServer) handleSetLoggingLevel(req Request) Response {
 		return ErrorResponse(req.ID, InvalidParams, "Invalid logging level parameters")
 	}
 
-	// Use the existing debug logging mechanism
+	s.sessionState.SetLoggingLevel(params.Level)
+
 	if s.config.Debug {
-		fmt.Fprintf(os.Stderr, "[DEBUG] Setting logging level to: %s\n", params.Level)
+		fmt.Fprintf(os.Stderr, "[DEBUG] Logging level set to: %s\n", params.Level)
 	}
 
-	// Store the logging level (in a real implementation, you'd store this in server state)
-	// For now, just acknowledge the setting
 	return SuccessResponse(req.ID, map[string]any{})
 }
 
 // sendLogNotification sends a log message notification to the client
 func (s *StdioServer) sendLogNotification(level LogLevel, message string, data LogData) {
-	if !s.config.Debug && level == LogLevelDebug {
-		return // Don't send debug logs unless debug mode is enabled
+	if !shouldEmitLog(s.sessionState.LoggingLevel(), level) {
+		return
 	}
 
 	// Create or use existing data map
@@ -74,15 +74,7 @@ func (s *StdioServer) sendLogNotification(level LogLevel, message string, data L
 		},
 	}
 
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		s.debugLog("Failed to marshal log notification: %v", err)
-		return
-	}
-
-	// Send notification
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	s.emitNotification(notification)
 }
 
 // LogInfo sends an info level log notification
@@ -131,14 +123,7 @@ func (s *StdioServer) sendResourceUpdatedNotification(uri string) {
 		},
 	}
 
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		s.debugLog("Failed to marshal resource notification: %v", err)
-		return
-	}
-
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	s.emitNotification(notification)
 }
 
 // sendResourceListChangedNotification sends a notification when the resource list changes
@@ -149,14 +134,7 @@ func (s *StdioServer) sendResourceListChangedNotification() {
 		"params":  map[string]any{},
 	}
 
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		s.debugLog("Failed to marshal resource list notification: %v", err)
-		return
-	}
-
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	s.emitNotification(notification)
 }
 
 // sendToolListChangedNotification sends a notification when the tool list changes
@@ -167,14 +145,7 @@ func (s *StdioServer) sendToolListChangedNotification() {
 		"params":  map[string]any{},
 	}
 
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		s.debugLog("Failed to marshal tool list notification: %v", err)
-		return
-	}
-
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	s.emitNotification(notification)
 }
 
 // sendPromptListChangedNotification sends a notification when the prompt list changes
@@ -185,34 +156,77 @@ func (s *StdioServer) sendPromptListChangedNotification() {
 		"params":  map[string]any{},
 	}
 
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		s.debugLog("Failed to marshal prompt list notification: %v", err)
-		return
+	s.emitNotification(notification)
+}
+
+// sendCancelledNotification informs the client that a server-initiated request was aborted.
+func (s *StdioServer) sendCancelledNotification(requestID string, progressToken string) {
+	params := map[string]any{}
+	if requestID != "" {
+		params["requestId"] = requestID
+	}
+	if progressToken != "" {
+		params["progressToken"] = progressToken
 	}
 
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	notification := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  params,
+	}
+
+	s.emitNotification(notification)
 }
 
 // sendProgressNotification sends a progress notification for long-running operations
-func (s *StdioServer) sendProgressNotification(progressToken string, progress, total float64) {
+func (s *StdioServer) sendProgressNotification(progressToken string, progress, total float64, message string) {
+	params := map[string]any{
+		"progressToken": progressToken,
+		"progress":      progress,
+		"total":         total,
+	}
+	if message != "" {
+		params["message"] = message
+	}
+
 	notification := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "notifications/progress",
-		"params": map[string]any{
-			"progressToken": progressToken,
-			"progress":      progress,
-			"total":         total,
-		},
+		"params":  params,
 	}
 
-	notificationJSON, err := json.Marshal(notification)
+	s.emitNotification(notification)
+}
+
+func shouldEmitLog(min LogLevel, level LogLevel) bool {
+	order := map[LogLevel]int{
+		LogLevelDebug:     0,
+		LogLevelInfo:      1,
+		LogLevelNotice:    2,
+		LogLevelWarning:   3,
+		LogLevelError:     4,
+		LogLevelCritical:  5,
+		LogLevelAlert:     6,
+		LogLevelEmergency: 7,
+	}
+	// Default to info if unknown
+	minRank, ok := order[min]
+	if !ok {
+		minRank = order[LogLevelInfo]
+	}
+	levelRank, ok := order[level]
+	if !ok {
+		levelRank = order[LogLevelInfo]
+	}
+	return levelRank >= minRank
+}
+
+func (s *StdioServer) emitNotification(payload map[string]any) {
+	payload["jsonrpc"] = JSONRPCVersion
+	notificationJSON, err := json.Marshal(payload)
 	if err != nil {
-		s.debugLog("Failed to marshal progress notification: %v", err)
+		s.debugLog("Failed to marshal notification %v: %v", payload["method"], err)
 		return
 	}
-
-	fmt.Fprintf(s.writer, "%s\n", notificationJSON)
-	s.writer.Flush()
+	s.writeFrame(notificationJSON)
 }

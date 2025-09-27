@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -21,31 +22,39 @@ type Provider interface {
 	Transform(source string, op TransformOp) TransformResult
 }
 
+// FileSafety allows higher-level safety systems to enforce policy before modifications.
+type FileSafety interface {
+	ValidateBatch(scope FileScope, files []WalkResult) error
+	ValidateFileChange(file WalkResult, confidence ConfidenceScore) error
+}
+
 // FileProcessor handles file-based transformations using providers
 type FileProcessor struct {
 	walker        *FileWalker
 	providers     ProviderRegistry
 	workers       int
 	atomicWriter  *AtomicWriter
-	txManager     *TransactionManager
 	safetyEnabled bool
+	txLogDir      string
+	safety        FileSafety
 }
 
 // NewFileProcessor creates a new file processor
 func NewFileProcessor(providerRegistry ProviderRegistry) *FileProcessor {
 	atomicConfig := DefaultAtomicConfig()
 	atomicConfig.UseFsync = false // Performance over safety by default
+	atomicConfig.BackupOriginal = false
 
 	atomicWriter := NewAtomicWriter(atomicConfig)
-	txManager := NewTransactionManager(".morfx/transactions", atomicWriter)
+	workers := resolveWorkerCount(8)
 
 	return &FileProcessor{
 		walker:        NewFileWalker(),
 		providers:     providerRegistry,
-		workers:       8, // Parallel file processing workers
+		workers:       workers,
 		atomicWriter:  atomicWriter,
-		txManager:     txManager,
 		safetyEnabled: true,
+		txLogDir:      ".morfx/transactions",
 	}
 }
 
@@ -55,23 +64,29 @@ func NewFileProcessorWithSafety(
 	safetyEnabled bool,
 	atomicConfig AtomicWriteConfig,
 ) *FileProcessor {
+	if safetyEnabled {
+		atomicConfig.BackupOriginal = false
+	}
 	atomicWriter := NewAtomicWriter(atomicConfig)
-	txManager := NewTransactionManager(".morfx/transactions", atomicWriter)
+	workers := resolveWorkerCount(8)
 
 	return &FileProcessor{
 		walker:        NewFileWalker(),
 		providers:     providerRegistry,
-		workers:       8,
+		workers:       workers,
 		atomicWriter:  atomicWriter,
-		txManager:     txManager,
 		safetyEnabled: safetyEnabled,
+		txLogDir:      ".morfx/transactions",
 	}
+}
+
+// SetSafety configures an optional safety delegate that can enforce policy checks.
+func (fp *FileProcessor) SetSafety(safety FileSafety) {
+	fp.safety = safety
 }
 
 // QueryFiles searches for code elements across multiple files
 func (fp *FileProcessor) QueryFiles(ctx context.Context, scope FileScope, query AgentQuery) ([]FileMatch, error) {
-	start := time.Now()
-
 	// Discover files
 	results, err := fp.walker.Walk(ctx, scope)
 	if err != nil {
@@ -103,10 +118,6 @@ func (fp *FileProcessor) QueryFiles(ctx context.Context, scope FileScope, query 
 	close(matches)
 	<-collectorDone // Wait for collector to finish
 
-	// Add timing metadata
-	duration := time.Since(start)
-	fmt.Printf("Query completed in %v, found %d matches across files\n", duration, len(allMatches))
-
 	return allMatches, nil
 }
 
@@ -115,18 +126,27 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 	start := time.Now()
 
 	// Start transaction if safety enabled
-	var tx *TransactionLog
+	var (
+		txManager *TransactionManager
+		tx        *TransactionLog
+		txActive  bool
+		txID      string
+	)
+
 	if fp.safetyEnabled && !op.DryRun {
+		txManager = NewTransactionManager(fp.txLogDir, fp.atomicWriter)
 		var err error
-		tx, err = fp.txManager.BeginTransaction(fmt.Sprintf("Transform files: %s", op.TransformOp.Target.Type))
+		tx, err = txManager.BeginTransaction(fmt.Sprintf("Transform files: %s", op.TransformOp.Target.Type))
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin transaction: %w", err)
 		}
+		txID = tx.ID
+		txActive = true
 
 		// Ensure cleanup on any error
 		defer func() {
-			if tx != nil && fp.txManager.currentTx != nil {
-				fp.txManager.RollbackTransaction()
+			if txActive && txManager != nil {
+				txManager.RollbackTransaction()
 			}
 		}()
 	}
@@ -138,15 +158,30 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 	}
 
 	// Collect file paths
-	var filePaths []WalkResult
+	var (
+		filePaths  []WalkResult
+		walkErrors []string
+	)
 	for result := range walkResults {
-		if result.Error == nil {
-			filePaths = append(filePaths, result)
+		if result.Error != nil {
+			errMsg := result.Error.Error()
+			if result.Path != "" {
+				errMsg = fmt.Sprintf("%s: %v", result.Path, result.Error)
+			}
+			walkErrors = append(walkErrors, errMsg)
+			continue
 		}
+		filePaths = append(filePaths, result)
 	}
 
 	scanDuration := time.Since(start)
 	transformStart := time.Now()
+
+	if fp.safety != nil {
+		if err := fp.safety.ValidateBatch(op.Scope, filePaths); err != nil {
+			return nil, err
+		}
+	}
 
 	// Process files in parallel
 	resultChan := make(chan FileTransformDetail, len(filePaths))
@@ -162,7 +197,7 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 
-			detail := fp.transformFile(wr, op, tx)
+			detail := fp.transformFile(wr, op, tx, txManager)
 			resultChan <- detail
 		}(walkResult)
 	}
@@ -188,19 +223,23 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 			hasErrors = true
 		}
 	}
+	if len(walkErrors) > 0 {
+		hasErrors = true
+	}
 
 	transformDuration := time.Since(transformStart)
 
 	// Handle transaction completion
-	if fp.safetyEnabled && !op.DryRun && tx != nil {
+	if fp.safetyEnabled && !op.DryRun && txManager != nil && tx != nil {
 		if hasErrors {
-			if err := fp.txManager.RollbackTransaction(); err != nil {
+			if err := txManager.RollbackTransaction(); err != nil {
 				return nil, fmt.Errorf("failed to rollback transaction: %w", err)
 			}
 		} else {
-			if err := fp.txManager.CommitTransaction(); err != nil {
+			if err := txManager.CommitTransaction(); err != nil {
 				return nil, fmt.Errorf("failed to commit transaction: %w", err)
 			}
+			txActive = false
 			tx = nil // Prevent rollback in defer
 		}
 	}
@@ -216,12 +255,8 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 		TransformDuration: transformDuration.Milliseconds(),
 		Files:             details,
 		Confidence:        overallConfidence,
-		TransactionID: func() string {
-			if tx != nil {
-				return tx.ID
-			}
-			return ""
-		}(),
+		TransactionID:     txID,
+		Errors:            walkErrors,
 	}, nil
 }
 
@@ -295,10 +330,12 @@ func (fp *FileProcessor) queryFile(walkResult WalkResult, query AgentQuery) []Fi
 }
 
 // transformFile applies transformation to a single file
+
 func (fp *FileProcessor) transformFile(
 	walkResult WalkResult,
 	op FileTransformOp,
 	tx *TransactionLog,
+	txManager *TransactionManager,
 ) FileTransformDetail {
 	detail := FileTransformDetail{
 		FilePath:     walkResult.Path,
@@ -333,6 +370,13 @@ func (fp *FileProcessor) transformFile(
 	detail.Confidence = result.Confidence
 	detail.Diff = result.Diff
 
+	if fp.safety != nil && detail.MatchCount > 0 {
+		if err := fp.safety.ValidateFileChange(walkResult, result.Confidence); err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+	}
+
 	// Check if content actually changed
 	if result.Modified == originalContent {
 		return detail // No changes
@@ -342,8 +386,8 @@ func (fp *FileProcessor) transformFile(
 	detail.ModifiedSize = int64(len(result.Modified))
 
 	// Register operation in transaction if safety enabled
-	if fp.safetyEnabled && !op.DryRun && tx != nil {
-		txOp, err := fp.txManager.AddOperation("modify", walkResult.Path)
+	if fp.safetyEnabled && !op.DryRun && tx != nil && txManager != nil {
+		txOp, err := txManager.AddOperation("modify", walkResult.Path)
 		if err != nil {
 			detail.Error = fmt.Sprintf("failed to register transaction operation: %v", err)
 			return detail
@@ -374,15 +418,15 @@ func (fp *FileProcessor) transformFile(
 			detail.Error = fmt.Sprintf("failed to write file: %v", writeErr)
 
 			// Mark operation as failed in transaction
-			if fp.safetyEnabled && tx != nil {
-				fp.txManager.CompleteOperation(walkResult.Path, writeErr)
+			if fp.safetyEnabled && tx != nil && txManager != nil {
+				txManager.CompleteOperation(walkResult.Path, writeErr)
 			}
 			return detail
 		}
 
 		// Mark operation as completed in transaction
-		if fp.safetyEnabled && tx != nil {
-			if err := fp.txManager.CompleteOperation(walkResult.Path, nil); err != nil {
+		if fp.safetyEnabled && tx != nil && txManager != nil {
+			if err := txManager.CompleteOperation(walkResult.Path, nil); err != nil {
 				detail.Error = fmt.Sprintf("failed to complete transaction operation: %v", err)
 				return detail
 			}
@@ -394,12 +438,25 @@ func (fp *FileProcessor) transformFile(
 
 // createBackup creates a backup copy of the file
 func (fp *FileProcessor) createBackup(originalPath, backupPath string) error {
+	info, err := os.Stat(originalPath)
+	if err != nil {
+		return err
+	}
+
 	content, err := os.ReadFile(originalPath)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(backupPath, content, 0o644)
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+
+	if err := os.WriteFile(backupPath, content, mode); err != nil {
+		return err
+	}
+	return os.Chmod(backupPath, mode)
 }
 
 // writeFile writes content to file with proper permissions
@@ -407,11 +464,24 @@ func (fp *FileProcessor) writeFile(path, content string) error {
 	// Get original file info for permissions
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				return err
+			}
+			return nil
+		}
 		return err
 	}
 
 	// Write with original permissions
-	return os.WriteFile(path, []byte(content), info.Mode())
+	perm := info.Mode().Perm()
+	if perm == 0 {
+		perm = 0o644
+	}
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm)
 }
 
 // calculateOverallConfidence computes aggregate confidence across all files
@@ -542,4 +612,16 @@ func (fp *FileProcessor) Cleanup() {
 	if fp.atomicWriter != nil {
 		fp.atomicWriter.Cleanup()
 	}
+}
+
+func resolveWorkerCount(defaultWorkers int) int {
+	value := os.Getenv("MORFX_WORKERS")
+	if value == "" {
+		return defaultWorkers
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return defaultWorkers
+	}
+	return n
 }

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -62,14 +63,14 @@ func (r *toolRegistry) List() []types.Tool {
 }
 
 // Execute runs a tool by name with the given parameters
-func (r *toolRegistry) Execute(name string, params json.RawMessage) (any, error) {
+func (r *toolRegistry) Execute(ctx context.Context, name string, params json.RawMessage) (any, error) {
 	tool, exists := r.Get(name)
 	if !exists {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 
 	handler := tool.Handler()
-	return handler(params)
+	return handler(ctx, params)
 }
 
 // RegisterAll registers all built-in tools
@@ -97,8 +98,8 @@ func Get(name string) (types.Tool, bool) {
 }
 
 // Execute runs a tool by name
-func Execute(name string, params []byte) (any, error) {
-	return Registry.Execute(name, params)
+func Execute(ctx context.Context, name string, params []byte) (any, error) {
+	return Registry.Execute(ctx, name, params)
 }
 
 // GetDefinitions returns all tool definitions
@@ -109,8 +110,10 @@ func GetDefinitions() []types.ToolDefinition {
 	for _, tool := range tools {
 		definitions = append(definitions, types.ToolDefinition{
 			Name:        tool.Name(),
+			Title:       tool.Name(),
 			Description: tool.Description(),
 			InputSchema: tool.InputSchema(),
+			Annotations: map[string]any{"title": tool.Name()},
 		})
 	}
 

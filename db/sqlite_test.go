@@ -48,21 +48,21 @@ func TestConnect(t *testing.T) {
 		},
 		{
 			name:          "connection with URL DSN (Turso)",
-			dsn:           "libsql://test.turso.io",
+			dsn:           "libsql://127.0.0.1:19999",
 			debug:         false,
 			expectedError: true, // Will fail without proper credentials
 			errorContains: "failed to connect",
 		},
 		{
 			name:          "connection with HTTP URL",
-			dsn:           "http://example.com/db",
+			dsn:           "http://127.0.0.1:19999/db",
 			debug:         false,
 			expectedError: true,
 			errorContains: "failed to connect",
 		},
 		{
 			name:          "connection with HTTPS URL",
-			dsn:           "https://example.com/db",
+			dsn:           "https://127.0.0.1:19999/db",
 			debug:         false,
 			expectedError: true,
 			errorContains: "failed to connect",

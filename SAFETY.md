@@ -19,7 +19,7 @@ The safety system consists of three main components:
 ### 🔒 Atomic File Operations
 
 ```go
-// Configure atomic writing
+// Configure atomic writing (always enabled for safety)
 config := core.AtomicWriteConfig{
     UseFsync:       true,  // Force fsync for durability
     LockTimeout:    10 * time.Second,
@@ -32,10 +32,29 @@ err := atomicWriter.WriteFile("/path/to/file.go", newContent)
 ```
 
 **Benefits:**
-- Prevents partial writes and corruption
-- Uses temporary files + atomic rename
+- Prevents partial writes and corruption (always enabled)
+- Uses temporary files + atomic rename for all operations
 - Optional fsync for durability guarantees
 - Concurrent access protection via file locking
+
+### 🧵 Thread-Safe Parser Pool
+
+Morfx now multiplexes tree-sitter parsers through per-language pools so
+concurrent queries never share mutable state.
+
+```go
+provider := providers.NewRegistry()
+goProvider := golang.New()
+provider.Register(goProvider)
+
+// Query files in parallel – each worker borrows a dedicated parser.
+matches := goProvider.Query(source, query)
+```
+
+**Benefits:**
+- Eliminates the upstream tree-sitter race when multiple goroutines parse simultaneously
+- Preserves throughput via pooling and cached AST clones
+- Simplifies concurrency reasoning for agent-driven batch operations
 
 ### 📋 Transaction Logging
 
@@ -74,6 +93,7 @@ if result.Confidence.Score < 0.3 {
 - Protection against corruption and failed operations
 - Automatic recovery from batch transformation errors
 - Confidence-based safety checks prevent risky changes
+- Stress harness (`make stress`) continuously exercises rollback paths before release.
 
 ### 📊 Confidence-Based Validation
 
@@ -104,25 +124,25 @@ for _, file := range result.Files {
 
 ### Safety Levels
 
-**High Performance (Low Safety)**
+**High Performance (Balanced Safety)**
 ```go
 config := core.AtomicWriteConfig{
-    UseFsync:       false, // Skip fsync
+    UseFsync:       false, // Skip fsync for performance
     LockTimeout:    1 * time.Second,
-    BackupOriginal: false, // Skip backup
+    BackupOriginal: false, // Skip backup for speed
 }
-processor := core.NewFileProcessorWithSafety(registry, false, config)
+processor := core.NewFileProcessorWithSafety(registry, true, config)
 ```
 
 **Balanced (Default)**
 ```go
-processor := core.NewFileProcessor(registry) // Uses DefaultAtomicConfig
+processor := core.NewFileProcessor(registry) // Uses DefaultAtomicConfig with atomic writes
 ```
 
 **Maximum Safety**
 ```go
 config := core.AtomicWriteConfig{
-    UseFsync:       true,  // Force fsync
+    UseFsync:       true,  // Force fsync for durability
     LockTimeout:    30 * time.Second,
     BackupOriginal: true,  // Always backup
 }
@@ -143,6 +163,25 @@ if processor.IsSafetyEnabled() {
 // Cleanup on shutdown (important!)
 defer processor.Cleanup()
 ```
+
+### Safety Manager Limits
+
+Morfx enforces batch limits through the MCP safety manager before any file
+transformations run. The primary knobs are available on `mcp.SafetyConfig`:
+
+| Field | Description |
+| --- | --- |
+| `MaxFiles` | Maximum number of files in a single operation. Set to `0` for no cap. |
+| `MaxFileSize` | Maximum size per file in bytes. Set to `0` to disable the check. |
+| `MaxTotalSize` | Maximum total bytes across the batch. Set to `0` for unlimited. |
+| `ConfidenceMode` | `per_file`, `global`, or `both`. |
+| `PerFileThreshold` | Minimum confidence score per file. |
+| `GlobalThreshold` | Minimum aggregate confidence score. |
+
+The file-scoped MCP tools (`file_replace`, `file_delete`, etc.) now perform these
+checks before scheduling any work, and the core file processor validates each
+file’s confidence score prior to writing. If you need to remove a limit, set the
+corresponding value to `0` rather than a negative number.
 
 ## File System Layout
 
@@ -256,7 +295,7 @@ config := core.AtomicWriteConfig{
     LockTimeout:    1 * time.Second,
     BackupOriginal: false, // Skip backup for speed
 }
-processor := core.NewFileProcessorWithSafety(registry, false, config)
+processor := core.NewFileProcessorWithSafety(registry, true, config)
 ```
 
 ### Maximum Safety Mode
@@ -277,8 +316,8 @@ processor := core.NewFileProcessorWithSafety(registry, true, config)
 // Before
 processor := core.NewFileProcessor(registry)
 
-// After  
-processor := core.NewFileProcessor(registry) // Safety enabled by default
+// After
+processor := core.NewFileProcessor(registry) // Atomic writes always enabled
 // or
 processor := core.NewFileProcessorWithSafety(registry, true, customConfig)
 defer processor.Cleanup()

@@ -21,15 +21,15 @@ func TestRootCommand(t *testing.T) {
 	cmd := &cobra.Command{
 		Use:     "morfx",
 		Short:   "Code transformation engine with MCP protocol support",
-		Version: "1.3.0",
+		Version: "1.5.0",
 	}
 
 	if cmd.Use != "morfx" {
 		t.Errorf("Expected Use='morfx', got '%s'", cmd.Use)
 	}
 
-	if cmd.Version != "1.3.0" {
-		t.Errorf("Expected Version='1.3.0', got '%s'", cmd.Version)
+	if cmd.Version != "1.5.0" {
+		t.Errorf("Expected Version='1.5.0', got '%s'", cmd.Version)
 	}
 
 	_ = cmd.Short // Suppress unused warning
@@ -143,7 +143,7 @@ through the Model Context Protocol (MCP) for AI agents.`,
 func TestVersionOutput(t *testing.T) {
 	cmd := &cobra.Command{
 		Use:     "morfx",
-		Version: "1.3.0",
+		Version: "1.5.0",
 	}
 
 	buf := new(bytes.Buffer)
@@ -157,7 +157,7 @@ func TestVersionOutput(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "1.3.0") {
+	if !strings.Contains(output, "1.5.0") {
 		t.Error("Version output should contain version number")
 	}
 }

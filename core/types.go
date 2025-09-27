@@ -122,6 +122,7 @@ type FileTransformResult struct {
 	Files             []FileTransformDetail `json:"files"`                    // Per-file results
 	Confidence        ConfidenceScore       `json:"confidence"`               // Overall confidence
 	TransactionID     string                `json:"transaction_id,omitempty"` // Transaction ID for rollback
+	Errors            []string              `json:"errors,omitempty"`         // Non-fatal errors encountered during processing
 	Error             error                 `json:"-"`
 }
 

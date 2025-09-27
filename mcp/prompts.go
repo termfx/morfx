@@ -1,24 +1,12 @@
 package mcp
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	prompts "github.com/termfx/morfx/mcp/prompts"
+	"github.com/termfx/morfx/mcp/types"
 )
-
-// PromptDefinition describes a prompt available to the client
-type PromptDefinition struct {
-	Name        string                     `json:"name"`
-	Description string                     `json:"description,omitempty"`
-	Arguments   []PromptArgumentDefinition `json:"arguments,omitempty"`
-}
-
-// PromptArgumentDefinition describes an argument for a prompt
-type PromptArgumentDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-}
 
 // PromptContent represents the content of a prompt response
 type PromptContent struct {
@@ -33,135 +21,104 @@ type PromptMessage struct {
 }
 
 // GetPromptDefinitions returns all available prompt definitions
-func GetPromptDefinitions() []PromptDefinition {
-	return []PromptDefinition{
+
+func GetPromptDefinitions() []types.PromptDefinition {
+	definitions := []types.PromptDefinition{
 		{
 			Name:        "code-analysis",
+			Title:       "Code Analysis",
 			Description: "Analyze code structure and suggest transformations",
-			Arguments: []PromptArgumentDefinition{
-				{
-					Name:        "language",
-					Description: "Programming language of the code",
-					Required:    true,
-				},
-				{
-					Name:        "code",
-					Description: "Source code to analyze",
-					Required:    true,
-				},
-				{
-					Name:        "focus",
-					Description: "Specific aspect to focus on (functions, structs, methods, etc.)",
-					Required:    false,
-				},
+			Arguments: []types.PromptArgument{
+				{Name: "language", Description: "Programming language of the code", Required: true},
+				{Name: "code", Description: "Source code to analyze", Required: true},
+				{Name: "focus", Description: "Optional focus area (functions, structs, methods, etc.)"},
+			},
+			Annotations: map[string]any{
+				"category": "analysis",
+				"audience": "developer",
 			},
 		},
 		{
 			Name:        "transformation-guide",
+			Title:       "Transformation Guide",
 			Description: "Generate step-by-step guide for code transformations",
-			Arguments: []PromptArgumentDefinition{
-				{
-					Name:        "operation",
-					Description: "Type of transformation (replace, delete, insert, etc.)",
-					Required:    true,
-				},
-				{
-					Name:        "target",
-					Description: "What to transform (function name, struct name, etc.)",
-					Required:    true,
-				},
-				{
-					Name:        "language",
-					Description: "Programming language",
-					Required:    false,
-				},
+			Arguments: []types.PromptArgument{
+				{Name: "operation", Description: "Type of transformation (replace, delete, insert, etc.)", Required: true},
+				{Name: "target", Description: "What to transform (function name, struct name, etc.)", Required: true},
+				{Name: "language", Description: "Programming language"},
+			},
+			Annotations: map[string]any{
+				"category": "guidance",
+				"audience": "developer",
 			},
 		},
 		{
 			Name:        "confidence-explanation",
+			Title:       "Confidence Explanation",
 			Description: "Explain confidence scores and factors for transformations",
-			Arguments: []PromptArgumentDefinition{
-				{
-					Name:        "score",
-					Description: "Confidence score (0.0-1.0)",
-					Required:    true,
-				},
-				{
-					Name:        "factors",
-					Description: "JSON string of confidence factors",
-					Required:    false,
-				},
+			Arguments: []types.PromptArgument{
+				{Name: "score", Description: "Confidence score (0.0-1.0)", Required: true},
+				{Name: "factors", Description: "JSON string of confidence factors"},
+			},
+			Annotations: map[string]any{
+				"category": "insight",
+				"audience": "developer",
 			},
 		},
 		{
 			Name:        "query-builder",
+			Title:       "Query Builder",
 			Description: "Help build queries for finding code elements",
-			Arguments: []PromptArgumentDefinition{
-				{
-					Name:        "description",
-					Description: "Natural language description of what to find",
-					Required:    true,
-				},
-				{
-					Name:        "language",
-					Description: "Programming language",
-					Required:    false,
-				},
+			Arguments: []types.PromptArgument{
+				{Name: "description", Description: "Natural language description of what to find", Required: true},
+				{Name: "language", Description: "Programming language"},
+			},
+			Annotations: map[string]any{
+				"category": "analysis",
+				"audience": "developer",
 			},
 		},
 		{
 			Name:        "best-practices",
+			Title:       "Best Practices",
 			Description: "Provide best practices and recommendations for code transformations",
-			Arguments: []PromptArgumentDefinition{
-				{
-					Name:        "language",
-					Description: "Programming language",
-					Required:    true,
-				},
-				{
-					Name:        "operation",
-					Description: "Type of operation being performed",
-					Required:    false,
-				},
+			Arguments: []types.PromptArgument{
+				{Name: "language", Description: "Programming language", Required: true},
+				{Name: "operation", Description: "Type of operation being performed"},
+			},
+			Annotations: map[string]any{
+				"category": "guidance",
+				"audience": "developer",
 			},
 		},
 	}
-}
 
-// handleListPrompts returns available prompts to the client
-func (s *StdioServer) handleListPrompts(req Request) Response {
-	prompts := GetPromptDefinitions()
-
-	return SuccessResponse(req.ID, map[string]any{
-		"prompts": prompts,
-	})
-}
-
-// handleGetPrompt returns the content of a specific prompt
-func (s *StdioServer) handleGetPrompt(req Request) Response {
-	var params struct {
-		Name      string            `json:"name"`
-		Arguments map[string]string `json:"arguments,omitempty"`
+	seen := make(map[string]struct{}, len(definitions))
+	for _, def := range definitions {
+		seen[def.Name] = struct{}{}
 	}
 
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return ErrorResponse(req.ID, InvalidParams, "Invalid prompt parameters")
-	}
-
-	s.debugLog("Getting prompt: %s", params.Name)
-
-	// Generate prompt content based on name
-	messages, err := s.generatePromptContent(params.Name, params.Arguments)
-	if err != nil {
-		if mcpErr, ok := err.(*MCPError); ok {
-			return ErrorResponseWithData(req.ID, mcpErr.Code, mcpErr.Message, mcpErr.Data)
+	for _, prompt := range prompts.Registry.List() {
+		name := prompt.Name()
+		if _, exists := seen[name]; exists {
+			continue
 		}
-		return ErrorResponse(req.ID, InternalError, err.Error())
+
+		definitions = append(definitions, types.PromptDefinition{
+			Name:        name,
+			Title:       strings.Title(strings.ReplaceAll(name, "_", " ")),
+			Description: prompt.Description(),
+			Arguments:   prompt.Arguments(),
+			Annotations: map[string]any{
+				"category": "custom",
+				"audience": "developer",
+			},
+		})
+
+		seen[name] = struct{}{}
 	}
 
-	return SuccessResponse(req.ID, map[string]any{
-		"messages": messages,
-	})
+	return definitions
 }
 
 // generatePromptContent creates the actual content for a prompt

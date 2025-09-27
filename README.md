@@ -1,16 +1,16 @@
 # Morfx MCP Server
 
-[![Version](https://img.shields.io/badge/version-v1.4.0-blue.svg)](https://github.com/termfx/morfx/releases)
+[![Version](https://img.shields.io/badge/version-v1.5.0-blue.svg)](https://github.com/termfx/morfx/releases)
 
 > **Enterprise-grade code transformations for AI agents**
 
-Morfx is a Model Context Protocol (MCP) server that provides deterministic AST-based code transformations for AI agents. Transform code with confidence using natural language queries, intelligent staging, and automatic safety verification.
+Morfx is a Model Context Protocol (MCP) server that provides deterministic AST-based code transformations for AI agents. The 2025-06-18 MCP spec is implemented end-to-end, including server-initiated workflows, structured tool results, and cancellable progress reporting.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Go 1.24+ 
+- Go 1.25+ (project tested against Go 1.25.0)
 - SQLite database (automatically created)
 - Any AI agent with MCP protocol support
 
@@ -82,6 +82,11 @@ Ask your AI agent to transform code using morfx:
 - Language-native semantic understanding
 - Context-aware code placement algorithms
 
+**Thread-Safe Provider Engine**
+- Per-language parser pools eliminate data races under heavy concurrency
+- Shared AST cache with safe cloning keeps performance predictable
+- Unified language catalog syncs file detection with provider capabilities
+
 **Confidence Scoring System**
 - Risk assessment for every transformation
 - Auto-apply based on configurable thresholds
@@ -95,14 +100,13 @@ Ask your AI agent to transform code using morfx:
 ## 🎯 Core Features
 
 ### MCP Protocol Integration
-- Full MCP 2024-11-05 protocol compliance
-- Stdio communication with JSON-RPC 2.0
-- Complete tools, resources, and prompts support
-- Real-time logging and notifications
-- Zero-latency local transformations
-- Read-only filesystem compatible
-- Automatic fallback to stateless mode
-- Perfect for development workflows
+- Full MCP 2025-06-18 protocol compliance with strict JSON-RPC 2.0 framing and `_meta` support
+- Server-initiated sampling, elicitation, and roots negotiations with cancellation + progress tokens
+- Structured `CallToolResult` responses, enriched registry metadata, and paginated listings
+- Real-time logging + progress notifications filtered by negotiated logging level
+- Zero-latency local transformations with offline-friendly stdio transport
+- Read-only filesystem compatible with automatic fallback to stateless mode
+- Drop-in upgrade path for existing MCP clients (see `docs/mcp_refactor_plan.md` for rollout notes)
 
 ### Natural Language Queries
 
@@ -151,6 +155,8 @@ Every transformation includes confidence assessment:
 
 The database is automatically created and initialized on first run using SQLite.
 
+For hosted libSQL/Turso instances, set `MORFX_DATABASE_URL` to the remote DSN (for example `libsql://tenant.turso.io`) and provide the auth token via `MORFX_LIBSQL_AUTH_TOKEN` in your `.env`. Remote connections use the pure Go libSQL client, so no CGO flags are required.
+
 ### Server Configuration
 
 ```bash
@@ -173,6 +179,7 @@ morfx mcp --debug
 MORFX_AUTO_APPLY=true          # Enable auto-apply
 MORFX_AUTO_THRESHOLD=0.85      # Confidence threshold (0.0-1.0)
 MORFX_DEBUG=true              # Enable debug logging
+MORFX_WORKERS=12              # Override file processing worker count
 ```
 
 ## 🛡️ Safety & Reliability
@@ -181,6 +188,7 @@ MORFX_DEBUG=true              # Enable debug logging
 - All transformations staged before application
 - 15-minute expiration for review
 - Automatic safety checks with validation
+- Safety limits defined in `SafetyConfig` apply to every file-scoped tool; set limits to `0` when you need an unlimited batch.
 
 **Validation**
 - Syntax validation before and after transformations
@@ -191,6 +199,20 @@ MORFX_DEBUG=true              # Enable debug logging
 - Comprehensive error categorization
 - Automatic retry with exponential backoff
 - Session isolation prevents cascading failures
+
+## 📈 Observability
+
+- Parser pool metrics via `base.Provider.Stats()` expose borrow/return counters.
+- MCP stdio metrics via `StdioServer.Metrics()` report inbound/outbound message counts.
+- Configure file-processing parallelism with `MORFX_WORKERS`.  
+
+See `docs/observability.md` for hands-on examples.
+
+## 📦 Release & Rollout
+
+- Follow the step-by-step `docs/release_checklist.md` before tagging a build.
+- Run the long-haul harness via `make stress` (or `tools/scripts/stress.sh`).
+- Share upgrade notes using the partner playbook in `docs/partner_playbook.md`.
 
 ## 🚀 Use Cases
 
@@ -215,6 +237,12 @@ Morfx is designed for production workloads:
 # Run all tests
 go test ./...
 
+# Run with the race detector for concurrency regressions
+go test -race ./...
+
+# Run integration suites (async staging, long-running flows)
+go test -tags=integration ./...
+
 # With coverage
 go test -cover ./...
 
@@ -225,7 +253,7 @@ go test -tags=integration ./...
 ## 📋 Requirements
 
 **Runtime**
-- Go 1.24 or later
+- Go 1.25 or later
 - SQLite database (automatically created)
 - 256MB RAM minimum
 - Linux/macOS/Windows

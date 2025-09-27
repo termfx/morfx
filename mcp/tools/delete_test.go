@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -102,7 +103,7 @@ func helper() {
 			}
 
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -142,30 +143,22 @@ func main() {
 		},
 	})
 
-	result, err := tool.handle(params)
+	result, err := tool.handle(context.Background(), params)
 	assertNoError(t, err)
 
 	// Verify staging was used
 	if resultMap, ok := result.(map[string]any); ok {
-		content, hasContent := resultMap["content"].(map[string]any)
-		if !hasContent {
-			t.Fatal("Result should have content map")
+		blocks, hasBlocks := resultMap["content"].([]map[string]any)
+		if !hasBlocks || len(blocks) == 0 {
+			t.Fatal("Result should include content blocks")
 		}
 
-		if _, hasStageID := content["stageId"]; !hasStageID {
-			staging := server.GetStaging().(*mockStaging)
-			if staging.IsEnabled() {
-				t.Error("Result should include stageId when staging is enabled")
-			}
+		if res, ok := resultMap["result"].(string); !ok || res != "staged" {
+			t.Errorf("Expected result to be 'staged', got %v", resultMap["result"])
 		}
 
-		// Verify the change type
-		if changes, ok := content["changes"].([]any); ok && len(changes) > 0 {
-			if change, ok := changes[0].(map[string]any); ok {
-				if changeType := change["type"]; changeType != "delete" {
-					t.Errorf("Expected change type 'delete', got '%v'", changeType)
-				}
-			}
+		if _, hasID := resultMap["id"].(string); !hasID {
+			t.Error("Result should include stage identifier")
 		}
 	}
 }

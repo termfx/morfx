@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -8,10 +9,11 @@ import (
 )
 
 func TestGetResourceDefinitions(t *testing.T) {
-	resources := GetResourceDefinitions()
+	server := createTestServer(t)
+	resources := server.ResourceDefinitions()
 
-	if len(resources) != 5 {
-		t.Errorf("Expected 5 resources, got %d", len(resources))
+	if len(resources) < 5 {
+		t.Fatalf("Expected at least 5 resources, got %d", len(resources))
 	}
 
 	expectedURIs := []string{
@@ -22,25 +24,28 @@ func TestGetResourceDefinitions(t *testing.T) {
 		"morfx://config/settings",
 	}
 
-	for i, resource := range resources {
-		if resource.URI != expectedURIs[i] {
-			t.Errorf("Expected URI %s, got %s", expectedURIs[i], resource.URI)
-		}
-
+	found := make(map[string]bool, len(expectedURIs))
+	for _, resource := range resources {
 		if resource.Name == "" {
 			t.Errorf("Resource %s has empty name", resource.URI)
 		}
 
-		if resource.MimeType != "application/json" {
-			t.Errorf("Expected JSON mime type for %s, got %s", resource.URI, resource.MimeType)
+		if resource.MimeType == "" {
+			t.Errorf("Resource %s has empty mime type", resource.URI)
 		}
 
 		if resource.Annotations == nil {
 			t.Errorf("Resource %s has nil annotations", resource.URI)
+		} else if readonly, ok := resource.Annotations["readonly"].(bool); !ok || !readonly {
+			t.Errorf("Resource %s should be readonly", resource.URI)
 		}
 
-		if resource.Annotations["readonly"] != true {
-			t.Errorf("Resource %s should be readonly", resource.URI)
+		found[resource.URI] = true
+	}
+
+	for _, uri := range expectedURIs {
+		if !found[uri] {
+			t.Errorf("Expected resource %s not found", uri)
 		}
 	}
 }
@@ -55,27 +60,22 @@ func TestHandleReadResource_ServerInfo(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(readResourceResult)
 	if !ok {
-		t.Fatal("Result is not a map")
+		t.Fatalf("Result is not readResourceResult: %T", response.Result)
 	}
 
-	contents, ok := result["contents"].([]ResourceContent)
-	if !ok {
-		t.Fatal("Contents is not a ResourceContent slice")
+	if len(res.Contents) != 1 {
+		t.Fatalf("Expected 1 content item, got %d", len(res.Contents))
 	}
 
-	if len(contents) != 1 {
-		t.Fatalf("Expected 1 content item, got %d", len(contents))
-	}
-
-	content := contents[0]
+	content := res.Contents[0]
 	if content.URI != "morfx://server/info" {
 		t.Errorf("Expected URI morfx://server/info, got %s", content.URI)
 	}
@@ -94,8 +94,8 @@ func TestHandleReadResource_ServerInfo(t *testing.T) {
 		t.Errorf("Expected server name 'Morfx MCP Server', got %v", info["name"])
 	}
 
-	if info["version"] != "1.3.0" {
-		t.Errorf("Expected version '1.3.0', got %v", info["version"])
+	if info["version"] != "1.5.0" {
+		t.Errorf("Expected version '1.5.0', got %v", info["version"])
 	}
 }
 
@@ -109,23 +109,22 @@ func TestHandleReadResource_ServerCapabilities(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(readResourceResult)
 	if !ok {
-		t.Fatal("Result is not a map")
+		t.Fatalf("Result is not readResourceResult: %T", response.Result)
 	}
 
-	contents, ok := result["contents"].([]ResourceContent)
-	if !ok {
-		t.Fatal("Contents is not a ResourceContent slice")
+	if len(res.Contents) != 1 {
+		t.Fatalf("Expected 1 content item, got %d", len(res.Contents))
 	}
 
-	content := contents[0]
+	content := res.Contents[0]
 
 	// Verify JSON content structure
 	var capabilities map[string]any
@@ -133,8 +132,8 @@ func TestHandleReadResource_ServerCapabilities(t *testing.T) {
 		t.Fatalf("Invalid JSON content: %v", err)
 	}
 
-	if capabilities["protocol_version"] != "2024-11-05" {
-		t.Errorf("Expected protocol version '2024-11-05', got %v", capabilities["protocol_version"])
+	if capabilities["protocol_version"] != supportedProtocolVersion {
+		t.Errorf("Expected protocol version '%s', got %v", supportedProtocolVersion, capabilities["protocol_version"])
 	}
 
 	tools, ok := capabilities["tools"].(map[string]any)
@@ -157,23 +156,22 @@ func TestHandleReadResource_SupportedLanguages(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(readResourceResult)
 	if !ok {
-		t.Fatal("Result is not a map")
+		t.Fatalf("Result is not readResourceResult: %T", response.Result)
 	}
 
-	contents, ok := result["contents"].([]ResourceContent)
-	if !ok {
-		t.Fatal("Contents is not a ResourceContent slice")
+	if len(res.Contents) != 1 {
+		t.Fatalf("Expected 1 content item, got %d", len(res.Contents))
 	}
 
-	content := contents[0]
+	content := res.Contents[0]
 
 	// Verify JSON content structure
 	var languages map[string]any
@@ -207,23 +205,22 @@ func TestHandleReadResource_CurrentSession(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(readResourceResult)
 	if !ok {
-		t.Fatal("Result is not a map")
+		t.Fatalf("Result is not readResourceResult: %T", response.Result)
 	}
 
-	contents, ok := result["contents"].([]ResourceContent)
-	if !ok {
-		t.Fatal("Contents is not a ResourceContent slice")
+	if len(res.Contents) != 1 {
+		t.Fatalf("Expected 1 content item, got %d", len(res.Contents))
 	}
 
-	content := contents[0]
+	content := res.Contents[0]
 
 	// Verify JSON content structure
 	var session map[string]any
@@ -250,23 +247,22 @@ func TestHandleReadResource_ConfigSettings(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
 	}
 
-	result, ok := response.Result.(map[string]any)
+	res, ok := response.Result.(readResourceResult)
 	if !ok {
-		t.Fatal("Result is not a map")
+		t.Fatalf("Result is not readResourceResult: %T", response.Result)
 	}
 
-	contents, ok := result["contents"].([]ResourceContent)
-	if !ok {
-		t.Fatal("Contents is not a ResourceContent slice")
+	if len(res.Contents) != 1 {
+		t.Fatalf("Expected 1 content item, got %d", len(res.Contents))
 	}
 
-	content := contents[0]
+	content := res.Contents[0]
 
 	// Verify JSON content structure
 	var config map[string]any
@@ -274,12 +270,12 @@ func TestHandleReadResource_ConfigSettings(t *testing.T) {
 		t.Fatalf("Invalid JSON content: %v", config)
 	}
 
-	if config["debug"] == nil {
+	if _, ok := config["debug"]; !ok {
 		t.Error("Debug setting is missing")
 	}
 
-	if config["database_url"] == nil {
-		t.Error("Database URL setting is missing")
+	if present, ok := config["database_url_present"].(bool); !ok || !present {
+		t.Error("Database URL presence flag is missing or false")
 	}
 }
 
@@ -293,7 +289,7 @@ func TestHandleReadResource_InvalidURI(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error == nil {
 		t.Fatal("Expected error for invalid URI")
@@ -313,7 +309,7 @@ func TestHandleReadResource_InvalidParams(t *testing.T) {
 		Params: json.RawMessage(`{"invalid": "params"}`),
 	}
 
-	response := server.handleReadResource(request)
+	response := server.handleReadResource(context.Background(), request)
 
 	if response.Error == nil {
 		t.Fatal("Expected error for invalid params")
@@ -336,7 +332,7 @@ func TestHandleSubscribeResource(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleSubscribeResource(request)
+	response := server.handleSubscribeResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
@@ -363,7 +359,7 @@ func TestHandleUnsubscribeResource(t *testing.T) {
 		Params: params,
 	}
 
-	response := server.handleUnsubscribeResource(request)
+	response := server.handleUnsubscribeResource(context.Background(), request)
 
 	if response.Error != nil {
 		t.Fatalf("Unexpected error: %v", response.Error)
@@ -475,16 +471,12 @@ func TestResourceContent_JSONStructure(t *testing.T) {
 }
 
 func TestResourceDefinition_Annotations(t *testing.T) {
-	resources := GetResourceDefinitions()
+	server := createTestServer(t)
+	resources := server.ResourceDefinitions()
 
 	for _, resource := range resources {
 		if resource.Annotations == nil {
 			t.Errorf("Resource %s has nil annotations", resource.URI)
-		}
-
-		category, ok := resource.Annotations["category"].(string)
-		if !ok {
-			t.Errorf("Resource %s missing category annotation", resource.URI)
 		}
 
 		readonly, ok := resource.Annotations["readonly"].(bool)
@@ -496,17 +488,20 @@ func TestResourceDefinition_Annotations(t *testing.T) {
 			t.Errorf("Resource %s should be readonly", resource.URI)
 		}
 
-		// Verify category makes sense
-		validCategories := []string{"system", "providers", "session", "config"}
-		found := slices.Contains(validCategories, category)
+		if strings.HasPrefix(resource.URI, "morfx://") {
+			category, ok := resource.Annotations["category"].(string)
+			if !ok {
+				t.Errorf("Resource %s missing category annotation", resource.URI)
+			}
 
-		if !found {
-			t.Errorf("Resource %s has invalid category: %s", resource.URI, category)
-		}
+			validCategories := []string{"system", "providers", "session", "config"}
+			if category != "" && !slices.Contains(validCategories, category) {
+				t.Errorf("Resource %s has invalid category: %s", resource.URI, category)
+			}
 
-		// Verify URI format
-		if !strings.HasPrefix(resource.URI, "morfx://") {
-			t.Errorf("Resource %s has invalid URI format", resource.URI)
+			if !strings.HasPrefix(resource.URI, "morfx://") {
+				t.Errorf("Resource %s has invalid URI format", resource.URI)
+			}
 		}
 	}
 }

@@ -67,12 +67,12 @@ func TestNewFileProcessor(t *testing.T) {
 		t.Error("Atomic writer not initialized")
 	}
 
-	if processor.txManager == nil {
-		t.Error("Transaction manager not initialized")
-	}
-
 	if !processor.safetyEnabled {
 		t.Error("Safety should be enabled by default")
+	}
+
+	if processor.txLogDir != ".morfx/transactions" {
+		t.Errorf("Unexpected transaction log directory: %s", processor.txLogDir)
 	}
 }
 
@@ -500,6 +500,12 @@ func TestFileProcessor_TransformFiles_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
+	if err := os.Chmod(testFile, 0o751); err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+	if _, err := os.Stat(testFile); err != nil {
+		t.Fatalf("Failed to stat test file: %v", err)
+	}
 
 	ctx := context.Background()
 	op := FileTransformOp{
@@ -587,7 +593,7 @@ func TestFileProcessor_TransformFiles_NoMatches(t *testing.T) {
 	testFile := filepath.Join(tempDir, "test.go")
 	originalContent := "package main\nfunc main() {}"
 
-	err := os.WriteFile(testFile, []byte(originalContent), 0o644)
+	err := os.WriteFile(testFile, []byte(originalContent), 0o751)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -650,6 +656,12 @@ func TestFileProcessor_TransformFiles_WithBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
+	if err := os.Chmod(testFile, 0o751); err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+	if _, err := os.Stat(testFile); err != nil {
+		t.Fatalf("Failed to stat test file: %v", err)
+	}
 
 	ctx := context.Background()
 	op := FileTransformOp{
@@ -684,7 +696,7 @@ func TestFileProcessor_TransformFiles_WithBackup(t *testing.T) {
 
 	// Verify backup was created
 	backupFile := testFile + ".bak"
-	if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+	if info, err := os.Stat(backupFile); os.IsNotExist(err) {
 		t.Error("Backup file was not created")
 	} else {
 		// Verify backup content
@@ -695,6 +707,11 @@ func TestFileProcessor_TransformFiles_WithBackup(t *testing.T) {
 
 		if string(backupContent) != originalContent {
 			t.Error("Backup file does not contain original content")
+		}
+
+		t.Logf("backup permissions: %v", info.Mode())
+		if perm := info.Mode().Perm(); perm != 0o751 {
+			t.Errorf("Backup permissions = %v, want 0751", perm)
 		}
 	}
 

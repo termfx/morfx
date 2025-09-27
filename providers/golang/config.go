@@ -29,29 +29,211 @@ func (c *Config) GetLanguage() *sitter.Language {
 
 // MapQueryTypeToNodeTypes maps query types to Go AST node types
 func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
-	switch queryType {
-	case "function", "func":
-		return []string{"function_declaration", "method_declaration"}
-	case "struct":
-		return []string{"type_spec"}
-	case "interface":
-		return []string{"type_spec"}
-	case "variable", "var":
-		return []string{"var_declaration", "short_var_declaration"}
-	case "constant", "const":
-		return []string{"const_declaration"}
-	case "import":
-		return []string{"import_declaration"}
-	case "type":
-		return []string{"type_declaration", "type_spec"}
-	case "method":
-		return []string{"method_declaration"}
-	case "field":
-		return []string{"field_declaration"}
-	default:
-		// Try to use the query type directly as node type
-		return []string{queryType}
+	if nodes, ok := c.aliasMap()[queryType]; ok {
+		return nodes
 	}
+	return []string{queryType}
+}
+
+func (c *Config) aliasMap() map[string][]string {
+	return map[string][]string{
+		"function":  {"function_declaration", "method_declaration"},
+		"func":      {"function_declaration", "method_declaration"},
+		"fn":        {"function_declaration", "method_declaration"},
+		"struct":    {"type_spec"},
+		"interface": {"type_spec"},
+		"iface":     {"type_spec"},
+		"variable":  {"var_declaration", "short_var_declaration"},
+		"var":       {"var_declaration", "short_var_declaration"},
+		"constant":  {"const_declaration"},
+		"const":     {"const_declaration"},
+		"import":    {"import_declaration"},
+		"type":      {"type_declaration", "type_spec"},
+		"method":    {"method_declaration"},
+		"field":     {"field_declaration"},
+		"comment":   {"comment"},
+		"comments":  {"comment"},
+	}
+}
+
+// SupportedQueryTypes returns colloquial query types/aliases for Go
+func (c *Config) SupportedQueryTypes() []string {
+	m := c.aliasMap()
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// SmartAppend provides heuristics for inserting Go code snippets in sensible locations.
+func (c *Config) SmartAppend(source string, target *sitter.Node, content string) (string, bool) {
+	if target == nil {
+		return "", false
+	}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "", false
+	}
+
+	switch target.Type() {
+	case "source_file":
+		return c.smartAppendSourceFile(source, target, trimmed), true
+	default:
+		return "", false
+	}
+}
+
+func (c *Config) smartAppendSourceFile(source string, root *sitter.Node, content string) string {
+	hint := classifyGoAppend(content)
+	switch hint {
+	case goAppendImport:
+		if modified, ok := c.insertAfterLastImport(source, root, content); ok {
+			return modified
+		}
+	case goAppendFunction:
+		if modified, ok := c.insertAfterLastOf(source, root, content, []string{"function_declaration", "method_declaration"}, true); ok {
+			return modified
+		}
+	case goAppendType, goAppendConst, goAppendVar:
+		types := []string{"type_declaration"}
+		if hint == goAppendConst {
+			types = append(types, "const_declaration")
+		}
+		if hint == goAppendVar {
+			types = append(types, "var_declaration")
+		}
+		if modified, ok := c.insertAfterLastOf(source, root, content, types, false); ok {
+			return modified
+		}
+	}
+
+	// Fallback: append at end with graceful spacing.
+	end := int(root.EndByte())
+	return insertTopLevelBlock(source, end, content, true)
+}
+
+func (c *Config) insertAfterLastImport(source string, root *sitter.Node, content string) (string, bool) {
+	var lastImport *sitter.Node
+	for i := int(root.NamedChildCount()) - 1; i >= 0; i-- {
+		child := root.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		if child.Type() == "import_declaration" {
+			lastImport = child
+			break
+		}
+	}
+
+	if lastImport == nil {
+		// Place after package clause if present.
+		if pkg := root.NamedChild(0); pkg != nil && pkg.Type() == "package_clause" {
+			offset := int(pkg.EndByte())
+			return insertTopLevelBlock(source, offset, "import "+strings.TrimSpace(content), true), true
+		}
+		return "", false
+	}
+
+	offset := int(lastImport.EndByte())
+	insert := content
+	if !strings.HasPrefix(strings.TrimSpace(insert), "import") {
+		insert = "import " + strings.TrimSpace(insert)
+	}
+	return insertTopLevelBlock(source, offset, insert, false), true
+}
+
+func (c *Config) insertAfterLastOf(source string, root *sitter.Node, content string, types []string, ensureBlank bool) (string, bool) {
+	set := make(map[string]struct{}, len(types))
+	for _, t := range types {
+		set[t] = struct{}{}
+	}
+
+	var last *sitter.Node
+	for i := int(root.NamedChildCount()) - 1; i >= 0; i-- {
+		child := root.NamedChild(i)
+		if child == nil {
+			continue
+		}
+		if _, ok := set[child.Type()]; ok {
+			last = child
+			break
+		}
+	}
+
+	if last != nil {
+		offset := int(last.EndByte())
+		return insertTopLevelBlock(source, offset, content, ensureBlank), true
+	}
+
+	// If no matching declaration, fall back after imports if present.
+	if modified, ok := c.insertAfterLastImport(source, root, content); ok {
+		return modified, true
+	}
+
+	return "", false
+}
+
+const (
+	goAppendImport   = "import"
+	goAppendFunction = "function"
+	goAppendType     = "type"
+	goAppendVar      = "var"
+	goAppendConst    = "const"
+)
+
+func classifyGoAppend(content string) string {
+	lower := strings.ToLower(strings.TrimSpace(content))
+	if strings.HasPrefix(lower, "import ") || (strings.HasPrefix(lower, `"`) && !strings.Contains(lower, "\n")) {
+		return goAppendImport
+	}
+	if strings.HasPrefix(lower, "func ") || strings.HasPrefix(lower, "func(") {
+		return goAppendFunction
+	}
+	if strings.HasPrefix(lower, "type ") {
+		return goAppendType
+	}
+	if strings.HasPrefix(lower, "const ") {
+		return goAppendConst
+	}
+	if strings.HasPrefix(lower, "var ") {
+		return goAppendVar
+	}
+	return "general"
+}
+
+func insertTopLevelBlock(source string, offset int, content string, ensureBlank bool) string {
+	before := source[:offset]
+	after := source[offset:]
+
+	trimmed := strings.TrimRight(content, "\n")
+
+	var leading string
+	trimmedBefore := strings.TrimRight(before, " \t")
+	switch {
+	case strings.HasSuffix(trimmedBefore, "\n\n"):
+		leading = ""
+	case strings.HasSuffix(trimmedBefore, "\n"):
+		if ensureBlank {
+			leading = "\n"
+		} else {
+			leading = ""
+		}
+	default:
+		leading = "\n\n"
+	}
+
+	insertion := leading + trimmed
+	if !strings.HasSuffix(insertion, "\n") {
+		insertion += "\n"
+	}
+
+	if len(after) > 0 && after[0] != '\n' {
+		insertion += "\n"
+	}
+
+	return before + insertion + after
 }
 
 // ExtractNodeName extracts name from Go AST nodes
@@ -86,6 +268,8 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 				return source[child.StartByte():child.EndByte()]
 			}
 		}
+	case "comment":
+		return c.extractCommentContent(source[node.StartByte():node.EndByte()])
 	}
 
 	// Fallback: try to find first identifier child
@@ -97,6 +281,21 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 	}
 
 	return ""
+}
+
+func (c *Config) extractCommentContent(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimPrefix(trimmed, "///")
+	trimmed = strings.TrimPrefix(trimmed, "//")
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	trimmed = strings.TrimPrefix(trimmed, "/*")
+	trimmed = strings.TrimPrefix(trimmed, "/**")
+	trimmed = strings.TrimSuffix(trimmed, "*/")
+	trimmed = strings.TrimSpace(trimmed)
+	if idx := strings.Index(trimmed, "\n"); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
 }
 
 // IsExported checks if identifier is exported (starts with capital letter in Go)
@@ -136,6 +335,8 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 		return c.expandVarDeclaration(node, source, query)
 	case "short_var_declaration":
 		return c.expandShortVarDeclaration(node, source, query)
+	case "import_declaration":
+		return c.expandImportDeclaration(node, source, query)
 	default:
 		// Default single match
 		name := c.ExtractNodeName(node, source)
@@ -158,7 +359,7 @@ func (c *Config) expandVarDeclaration(node *sitter.Node, source string, query co
 	// Find var_spec nodes within var_declaration
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
-		if child.Type() == "var_spec" {
+		if child.Type() == "var_spec" || child.Type() == "const_spec" {
 			matches = append(matches, c.expandVarSpec(child, source, query)...)
 		}
 	}
@@ -219,6 +420,59 @@ func (c *Config) expandShortVarDeclaration(node *sitter.Node, source string, que
 			// Only process first expression_list (left side of :=)
 			break
 		}
+	}
+
+	return matches
+}
+
+func (c *Config) expandImportDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+	var matches []core.CodeMatch
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() != "import_spec" {
+			continue
+		}
+		var name string
+		if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+			name = source[nameNode.StartByte():nameNode.EndByte()]
+		}
+		if name == "" {
+			if pathNode := child.ChildByFieldName("path"); pathNode != nil {
+				// Trim quotes
+				raw := source[pathNode.StartByte():pathNode.EndByte()]
+				if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') {
+					name = strings.Trim(raw, "\"'")
+				} else {
+					name = raw
+				}
+			}
+		}
+		matches = append(matches, core.CodeMatch{
+			Node:      child,
+			Name:      name,
+			Type:      query.Type,
+			NodeType:  child.Type(),
+			StartByte: child.StartByte(),
+			EndByte:   child.EndByte(),
+			Line:      child.StartPoint().Row,
+			Column:    child.StartPoint().Column,
+		})
+	}
+
+	if len(matches) == 0 {
+		// Fallback single match
+		name := c.ExtractNodeName(node, source)
+		return []core.CodeMatch{{
+			Node:      node,
+			Name:      name,
+			Type:      query.Type,
+			NodeType:  node.Type(),
+			StartByte: node.StartByte(),
+			EndByte:   node.EndByte(),
+			Line:      node.StartPoint().Row,
+			Column:    node.StartPoint().Column,
+		}}
 	}
 
 	return matches

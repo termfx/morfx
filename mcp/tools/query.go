@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,7 +47,10 @@ func NewQueryTool(server types.ServerInterface) *QueryTool {
 }
 
 // handle executes the query tool
-func (t *QueryTool) handle(params json.RawMessage) (any, error) {
+func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var args struct {
 		Language string          `json:"language"`
 		Source   *string         `json:"source,omitempty"`
@@ -65,6 +69,10 @@ func (t *QueryTool) handle(params json.RawMessage) (any, error) {
 	if (!sourceProvided && !pathProvided) || (sourceProvided && pathProvided) {
 		return nil, types.NewMCPError(types.InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
 	}
+	notifyProgress(ctx, t.server, 5, 100, "validating")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Get source code
 	var source string
@@ -75,9 +83,13 @@ func (t *QueryTool) handle(params json.RawMessage) (any, error) {
 			return nil, types.WrapError(types.FileSystemError, "Failed to read file", err)
 		}
 		source = string(content)
+		notifyProgress(ctx, t.server, 15, 100, "loaded file")
 	} else {
 		// IN-MEMORY MODE: Use provided source (can be empty string)
 		source = *args.Source
+	}
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Get provider for language
@@ -90,11 +102,15 @@ func (t *QueryTool) handle(params json.RawMessage) (any, error) {
 				"supported": []string{"go", "python", "javascript", "typescript", "php"},
 			})
 	}
+	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse the query
 	var query core.AgentQuery
 	if err := json.Unmarshal(args.Query, &query); err != nil {
 		return nil, types.WrapError(types.InvalidParams, "Invalid query structure", err)
+	}
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Execute query
@@ -107,6 +123,10 @@ func (t *QueryTool) handle(params json.RawMessage) (any, error) {
 				map[string]any{"details": errMsg})
 		}
 		return nil, types.WrapError(types.TransformFailed, "Query execution failed", result.Error)
+	}
+	notifyProgress(ctx, t.server, 70, 100, "evaluated query")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Format matches as human-readable text

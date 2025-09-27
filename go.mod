@@ -1,6 +1,6 @@
 module github.com/termfx/morfx
 
-go 1.24.0
+go 1.25
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
@@ -10,6 +10,7 @@ require (
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.9.0
+	github.com/tursodatabase/libsql-client-go v0.0.0-20240902231107-85af5b9d094d
 	gorm.io/datatypes v1.2.6
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
@@ -17,6 +18,8 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/coder/websocket v1.8.12 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -30,6 +33,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/crypto v0.42.0 // indirect
+	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect

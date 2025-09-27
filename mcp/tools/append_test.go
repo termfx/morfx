@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -114,7 +116,7 @@ func main() {
 			}
 
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -151,6 +153,11 @@ func main() {
 					if modified, ok := resultMap["modified"].(string); ok {
 						if modified == "" && !tt.expectErr {
 							t.Error("Modified content should not be empty")
+						}
+						if content, ok := tt.params["content"].(string); ok && strings.TrimSpace(content) != "" {
+							if !strings.Contains(modified, strings.TrimSpace(content)) {
+								t.Errorf("Modified content should include appended snippet; got %q", modified)
+							}
 						}
 					}
 				}
@@ -220,7 +227,7 @@ func helper() {}`,
 			}
 
 			paramsJSON := createTestParams(params)
-			result, err := tool.handle(paramsJSON)
+			result, err := tool.handle(context.Background(), paramsJSON)
 			assertNoError(t, err)
 
 			if result == nil {
@@ -275,7 +282,7 @@ func additionalFunction() {
 }`,
 	})
 
-	result, err := tool.handle(params)
+	result, err := tool.handle(context.Background(), params)
 	assertNoError(t, err)
 
 	// Verify staging was used
@@ -293,14 +300,11 @@ func additionalFunction() {
 			t.Fatal("Result should have content array")
 		}
 
-		// Note: stageId would be in the main result, not in content
-		if _, hasStageID := resultMap["stageId"]; !hasStageID {
-			staging := server.GetStaging().(*mockStaging)
-			if staging.IsEnabled() {
-				// Since this is the mock, it may not implement staging correctly
-				// Just check that we got a result
-				t.Log("Mock staging may not return stageId")
-			}
+		if _, hasStageID := resultMap["id"]; !hasStageID {
+			t.Error("Result should include stage identifier when staging is enabled")
+		}
+		if res, ok := resultMap["result"].(string); !ok || res != "staged" {
+			t.Errorf("Expected staged result, got %v", resultMap["result"])
 		}
 	}
 }

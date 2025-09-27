@@ -1,10 +1,13 @@
 package db
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	libsql "github.com/tursodatabase/libsql-client-go/libsql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -29,8 +32,41 @@ func Connect(dsn string, debug bool) (*gorm.DB, error) {
 		config.Logger = logger.Default.LogMode(logger.Info)
 	}
 
-	db, err := gorm.Open(sqlite.Open(dsn), config)
+	var (
+		dialector gorm.Dialector
+		conn      *sql.DB
+	)
+	if isURL(dsn) {
+		var (
+			connector driver.Connector
+			err       error
+		)
+
+		token := os.Getenv("MORFX_LIBSQL_AUTH_TOKEN")
+		if token != "" {
+			connector, err = libsql.NewConnector(dsn, libsql.WithAuthToken(token))
+		} else {
+			connector, err = libsql.NewConnector(dsn)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create libsql connector: %w", err)
+		}
+
+		conn = sql.OpenDB(connector)
+		dialector = sqlite.New(sqlite.Config{
+			DriverName: "libsql",
+			Conn:       conn,
+			DSN:        dsn,
+		})
+	} else {
+		dialector = sqlite.Open(dsn)
+	}
+
+	db, err := gorm.Open(dialector, config)
 	if err != nil {
+		if conn != nil {
+			conn.Close()
+		}
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 

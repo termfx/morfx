@@ -1,13 +1,17 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/termfx/morfx/core"
+	"github.com/termfx/morfx/mcp/types"
+	"github.com/termfx/morfx/models"
 	"github.com/termfx/morfx/providers"
 )
 
@@ -38,6 +42,10 @@ type mockServer struct {
 	fileProcessor    *core.FileProcessor
 	staging          any
 	safety           any
+	sessionID        string
+	samplingRequests []map[string]any
+	samplingResults  []map[string]any
+	samplingErr      error
 }
 
 func newMockServer() *mockServer {
@@ -64,6 +72,7 @@ func newMockServer() *mockServer {
 		fileProcessor:    fileProc,
 		staging:          &mockStaging{stages: make(map[string]any)},
 		safety:           &mockSafety{},
+		sessionID:        "mock-session",
 	}
 }
 
@@ -83,6 +92,70 @@ func (m *mockServer) GetSafety() any {
 	return m.safety
 }
 
+func (m *mockServer) GetSessionID() string {
+	return m.sessionID
+}
+
+func (m *mockServer) ReportProgress(ctx context.Context, progress, total float64, message string) {}
+
+func (m *mockServer) ConfirmApply(ctx context.Context, summary string) error {
+	return nil
+}
+
+func (m *mockServer) RequestSampling(ctx context.Context, params map[string]any) (map[string]any, error) {
+	m.samplingRequests = append(m.samplingRequests, params)
+	if m.samplingErr != nil {
+		return nil, m.samplingErr
+	}
+	if len(m.samplingResults) > 0 {
+		result := m.samplingResults[0]
+		m.samplingResults = m.samplingResults[1:]
+		return result, nil
+	}
+	return nil, nil
+}
+
+func (m *mockServer) RequestElicitation(ctx context.Context, params map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m *mockServer) FinalizeTransform(ctx context.Context, req types.TransformRequest) (map[string]any, error) {
+	content := req.ResponseText
+	if content == "" {
+		content = "operation completed"
+	}
+
+	blocks := []map[string]any{{
+		"type": "text",
+		"text": content,
+	}}
+
+	resp := map[string]any{
+		"content":    blocks,
+		"confidence": req.Result.Confidence.Score,
+		"matches":    req.Result.MatchCount,
+	}
+
+	if req.Path != "" {
+		resp["path"] = req.Path
+	}
+
+	if staging, ok := m.staging.(*mockStaging); ok && staging.enabled {
+		id := fmt.Sprintf("stg_%d", len(staging.stages)+1)
+		staging.AddStage(id, req)
+		resp["id"] = id
+		resp["result"] = "staged"
+	} else {
+		resp["result"] = "completed"
+	}
+
+	if req.Result.Modified != "" {
+		resp["modified"] = req.Result.Modified
+	}
+
+	return resp, nil
+}
+
 // mockStaging implements a simple staging manager for tests
 type mockStaging struct {
 	enabled bool
@@ -97,7 +170,7 @@ func (m *mockStaging) AddStage(id string, stage any) {
 	m.stages[id] = stage
 }
 
-func (m *mockStaging) GetStage(id string) (any, bool) {
+func (m *mockStaging) GetStageAny(id string) (any, bool) {
 	stage, exists := m.stages[id]
 	return stage, exists
 }
@@ -114,11 +187,6 @@ func (m *mockStaging) ClearStages() {
 	m.stages = make(map[string]any)
 }
 
-func (m *mockStaging) ApplyStage(id string) error {
-	delete(m.stages, id)
-	return nil
-}
-
 func (m *mockStaging) DeleteAppliedStages(sessionID string) error {
 	// In mock, we already delete stages in ApplyStage, so this is a no-op
 	return nil
@@ -129,12 +197,41 @@ func (m *mockStaging) DeleteStage(stageID string) error {
 	return nil
 }
 
-func (m *mockStaging) ListPendingStages(sessionID string) ([]any, error) {
-	var stages []any
-	for _, stage := range m.stages {
-		stages = append(stages, stage)
+func (m *mockStaging) ListPendingStages(sessionID string) ([]models.Stage, error) {
+	// For testing, we'll create simple stages
+	var stages []models.Stage
+	for id := range m.stages {
+		stages = append(stages, models.Stage{
+			ID:        id,
+			Status:    "pending",
+			SessionID: sessionID,
+		})
 	}
 	return stages, nil
+}
+
+func (m *mockStaging) GetStage(stageID string) (*models.Stage, error) {
+	if _, exists := m.stages[stageID]; exists {
+		return &models.Stage{
+			ID:        stageID,
+			Status:    "pending",
+			SessionID: "mock-session",
+		}, nil
+	}
+	return nil, fmt.Errorf("stage not found")
+}
+
+func (m *mockStaging) ApplyStage(ctx context.Context, stageID string, autoApplied bool) (*models.Apply, error) {
+	if _, exists := m.stages[stageID]; !exists {
+		return nil, fmt.Errorf("stage not found")
+	}
+	delete(m.stages, stageID)
+	return &models.Apply{
+		ID:          "apply-" + stageID,
+		StageID:     stageID,
+		AutoApplied: autoApplied,
+		AppliedBy:   "test",
+	}, nil
 }
 
 // mockSafety implements a simple safety manager for tests
@@ -223,6 +320,14 @@ func (m *mockProvider) Validate(source string) providers.ValidationResult {
 		Valid:  true,
 		Errors: []string{},
 	}
+}
+
+func (m *mockProvider) SupportedQueryTypes() []string {
+	return []string{"function", "variable", "class"}
+}
+
+func (m *mockProvider) Stats() providers.Stats {
+	return providers.Stats{}
 }
 
 // Helper functions for tests

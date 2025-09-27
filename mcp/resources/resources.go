@@ -1,11 +1,14 @@
 package resources
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/termfx/morfx/mcp/types"
+	"github.com/termfx/morfx/providers/catalog"
 )
 
 // BaseResource provides common resource functionality
@@ -15,6 +18,7 @@ type BaseResource struct {
 	uri         string
 	mimeType    string
 	contentFunc func() (string, error)
+	watcherFunc func(context.Context) (<-chan types.ResourceUpdate, error)
 }
 
 // Name returns the resource name
@@ -43,6 +47,14 @@ func (r *BaseResource) Contents() (string, error) {
 		return r.contentFunc()
 	}
 	return "", fmt.Errorf("no content function defined")
+}
+
+// Watch subscribes to resource updates when supported.
+func (r *BaseResource) Watch(ctx context.Context) (<-chan types.ResourceUpdate, error) {
+	if r.watcherFunc == nil {
+		return nil, types.ErrResourceWatchUnsupported
+	}
+	return r.watcherFunc(ctx)
 }
 
 // resourceRegistry manages resources internally
@@ -117,11 +129,18 @@ func GetDefinitions() []types.ResourceDefinition {
 	definitions := make([]types.ResourceDefinition, 0, len(resources))
 
 	for _, resource := range resources {
+		title := resource.Name()
+		annotations := map[string]any{
+			"title":    title,
+			"readonly": true,
+		}
 		definitions = append(definitions, types.ResourceDefinition{
 			URI:         resource.URI(),
-			Name:        resource.Name(),
+			Name:        resource.URI(),
+			Title:       title,
 			Description: resource.Description(),
 			MimeType:    resource.MimeType(),
+			Annotations: annotations,
 		})
 	}
 
@@ -134,16 +153,50 @@ func NewSupportedLanguagesResource() *BaseResource {
 		uri:         "config://supported-languages",
 		mimeType:    "application/json",
 		contentFunc: func() (string, error) {
-			return `{
-  "languages": [
-    {"name": "go", "extensions": [".go"], "features": ["full"]},
-    {"name": "python", "extensions": [".py"], "features": ["full"]},
-    {"name": "javascript", "extensions": [".js", ".jsx"], "features": ["full"]},
-    {"name": "typescript", "extensions": [".ts", ".tsx"], "features": ["full"]},
-    {"name": "php", "extensions": [".php"], "features": ["full"]}
-  ]
-}`, nil
+			type language struct {
+				Name       string   `json:"name"`
+				Extensions []string `json:"extensions"`
+				Features   []string `json:"features"`
+			}
+
+			infos := catalog.Languages()
+			languages := make([]language, 0, len(infos))
+			for _, info := range infos {
+				languages = append(languages, language{
+					Name:       info.ID,
+					Extensions: info.Extensions,
+					Features:   []string{"full"},
+				})
+			}
+
+			if len(languages) == 0 {
+				languages = []language{
+					{Name: "go", Extensions: []string{".go"}, Features: []string{"full"}},
+					{Name: "python", Extensions: []string{".py"}, Features: []string{"full"}},
+					{Name: "javascript", Extensions: []string{".js", ".jsx", ".mjs", ".cjs"}, Features: []string{"full"}},
+					{Name: "typescript", Extensions: []string{".ts", ".tsx"}, Features: []string{"full"}},
+					{Name: "php", Extensions: []string{".php", ".phtml"}, Features: []string{"full"}},
+				}
+			}
+
+			payload := map[string]any{"languages": languages}
+			data, err := json.MarshalIndent(payload, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
 		},
+	}
+}
+
+// NewDynamicResource creates a resource with dynamic content function
+func NewDynamicResource(name, description, uri, mime string, content func() (string, error)) types.Resource {
+	return &BaseResource{
+		name:        name,
+		description: description,
+		uri:         uri,
+		mimeType:    mime,
+		contentFunc: content,
 	}
 }
 

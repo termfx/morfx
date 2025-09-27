@@ -27,11 +27,11 @@ type AsyncStagingManager struct {
 }
 
 // NewAsyncStagingManager creates concurrent staging manager
-func NewAsyncStagingManager(db *gorm.DB, config Config) *AsyncStagingManager {
+func NewAsyncStagingManager(db *gorm.DB, config Config, safety *SafetyManager) *AsyncStagingManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	asm := &AsyncStagingManager{
-		StagingManager: NewStagingManager(db, config),
+		StagingManager: NewStagingManager(db, config, safety),
 		workers:        10, // DB connection pool size
 		stageChan:      make(chan stageRequest, 100),
 		resultChan:     make(chan stageResult, 100),
@@ -52,6 +52,7 @@ func NewAsyncStagingManager(db *gorm.DB, config Config) *AsyncStagingManager {
 }
 
 type stageRequest struct {
+	ctx      context.Context
 	stage    *models.Stage
 	callback chan<- error
 }
@@ -63,15 +64,30 @@ type stageResult struct {
 }
 
 // CreateStageAsync stages transformation without blocking
+
 func (asm *AsyncStagingManager) CreateStageAsync(stage *models.Stage) <-chan error {
+	return asm.CreateStageAsyncWithContext(context.Background(), stage)
+}
+
+// CreateStageAsyncWithContext stages transformation without blocking, honoring cancellation.
+func (asm *AsyncStagingManager) CreateStageAsyncWithContext(ctx context.Context, stage *models.Stage) <-chan error {
 	callback := make(chan error, 1)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	// Check if context is done (manager closed)
 	select {
 	case <-asm.ctx.Done():
 		// Manager is closed, fallback to sync
 		go func() {
-			callback <- asm.CreateStage(stage)
+			callback <- asm.CreateStage(ctx, stage)
+			close(callback)
+		}()
+		return callback
+	case <-ctx.Done():
+		go func() {
+			callback <- ctx.Err()
 			close(callback)
 		}()
 		return callback
@@ -80,18 +96,18 @@ func (asm *AsyncStagingManager) CreateStageAsync(stage *models.Stage) <-chan err
 	}
 
 	select {
-	case asm.stageChan <- stageRequest{stage: stage, callback: callback}:
+	case asm.stageChan <- stageRequest{ctx: ctx, stage: stage, callback: callback}:
 		// Queued successfully
 	case <-time.After(100 * time.Millisecond):
 		// Queue full, fallback to sync
 		go func() {
-			callback <- asm.CreateStage(stage)
+			callback <- asm.CreateStage(ctx, stage)
 			close(callback)
 		}()
 	default:
 		// Channel might be closed, fallback to sync
 		go func() {
-			callback <- asm.CreateStage(stage)
+			callback <- asm.CreateStage(ctx, stage)
 			close(callback)
 		}()
 	}
@@ -123,8 +139,24 @@ func (asm *AsyncStagingManager) stageWorker() {
 				continue
 			}
 
+			reqCtx := req.ctx
+			if reqCtx == nil {
+				reqCtx = context.Background()
+			}
+
+			if err := reqCtx.Err(); err != nil {
+				if req.callback != nil {
+					req.callback <- err
+					close(req.callback)
+				}
+				continue
+			}
+
 			start := time.Now()
-			err := asm.CreateStage(req.stage)
+			err := asm.CreateStage(reqCtx, req.stage)
+			if err == nil {
+				err = reqCtx.Err()
+			}
 
 			// Send result
 			req.callback <- err
@@ -157,7 +189,10 @@ func (asm *AsyncStagingManager) resultCollector() {
 		case <-asm.ctx.Done():
 			return
 
-		case result := <-asm.resultChan:
+		case result, ok := <-asm.resultChan:
+			if !ok {
+				return
+			}
 			totalStages++
 			totalLatency += result.latency
 

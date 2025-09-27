@@ -69,7 +69,10 @@ func NewFileQueryTool(server types.ServerInterface) *FileQueryTool {
 }
 
 // handle executes the file query tool
-func (t *FileQueryTool) handle(params json.RawMessage) (any, error) {
+func (t *FileQueryTool) handle(ctx context.Context, params json.RawMessage) (any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var args struct {
 		Scope *core.FileScope `json:"scope"`
 		Query json.RawMessage `json:"query"`
@@ -77,6 +80,10 @@ func (t *FileQueryTool) handle(params json.RawMessage) (any, error) {
 
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, types.WrapError(types.InvalidParams, "Invalid file query parameters", err)
+	}
+	notifyProgress(ctx, t.server, 5, 100, "validating")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Validate scope is provided
@@ -93,21 +100,32 @@ func (t *FileQueryTool) handle(params json.RawMessage) (any, error) {
 	if _, err := os.Stat(args.Scope.Path); os.IsNotExist(err) {
 		return nil, types.NewMCPError(types.InvalidParams, "path does not exist: "+args.Scope.Path, nil)
 	}
+	notifyProgress(ctx, t.server, 20, 100, "prepared scope")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Parse the query
 	var query core.AgentQuery
 	if err := json.Unmarshal(args.Query, &query); err != nil {
 		return nil, types.WrapError(types.InvalidParams, "Invalid query structure", err)
 	}
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
 
 	// Execute file query with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	fileProcessor := t.server.GetFileProcessor()
-	matches, err := fileProcessor.QueryFiles(ctx, *args.Scope, query)
+	matches, err := fileProcessor.QueryFiles(opCtx, *args.Scope, query)
 	if err != nil {
 		return nil, types.WrapError(types.TransformFailed, "File query failed", err)
+	}
+	notifyProgress(ctx, t.server, 80, 100, "processed files")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Format response
@@ -129,12 +147,16 @@ func (t *FileQueryTool) handle(params json.RawMessage) (any, error) {
 		}
 	}
 
+	contentBlock := map[string]any{
+		"type": "text",
+		"text": responseText,
+	}
+	if len(fileList) > 0 {
+		contentBlock["files"] = fileList
+	}
+
 	return map[string]any{
-		"content": map[string]any{
-			"type":  "text",
-			"text":  responseText,
-			"files": fileList,
-		},
+		"content": []map[string]any{contentBlock},
 		"matches": len(matches),
 		"files":   t.countUniqueFiles(matches),
 	}, nil

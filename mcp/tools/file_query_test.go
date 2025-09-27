@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -163,7 +164,7 @@ func nested() {}`)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			params := createTestParams(tt.params)
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
@@ -175,12 +176,9 @@ func nested() {}`)
 
 				// Verify result structure
 				if resultMap, ok := result.(map[string]any); ok {
-					content := resultMap["content"].(map[string]any)
-
-					// Should have files array
-					if files, ok := content["files"]; ok {
-						if filesArray, ok := files.([]any); ok {
-							t.Logf("Found %d files matching query", len(filesArray))
+					if content, ok := convertContentToMap(resultMap); ok {
+						if files, ok := content["files"].([]any); ok {
+							t.Logf("Found %d files matching query", len(files))
 						}
 					}
 				}
@@ -251,15 +249,16 @@ func TestFileQueryTool_PatternMatching(t *testing.T) {
 				},
 			})
 
-			result, err := tool.handle(params)
+			result, err := tool.handle(context.Background(), params)
 			assertNoError(t, err)
 
 			// Count matched files
 			if resultMap, ok := result.(map[string]any); ok {
-				content := resultMap["content"].(map[string]any)
-				if files, ok := content["files"].([]any); ok {
-					if len(files) != tt.expectedCount {
-						t.Errorf("Expected %d files, got %d", tt.expectedCount, len(files))
+				if content, ok := convertContentToMap(resultMap); ok {
+					if files, ok := content["files"].([]any); ok {
+						if len(files) != tt.expectedCount {
+							t.Errorf("Expected %d files, got %d", tt.expectedCount, len(files))
+						}
 					}
 				}
 			}

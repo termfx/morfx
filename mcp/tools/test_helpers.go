@@ -71,3 +71,20 @@ func convertContentToMap(result any) (map[string]any, bool) {
 	resultMap["content"] = contentMap
 	return contentMap, true
 }
+
+func toStringSlice(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -47,7 +48,11 @@ func NewReplaceTool(server types.ServerInterface) *ReplaceTool {
 }
 
 // handle executes the replace tool
-func (t *ReplaceTool) handle(params json.RawMessage) (any, error) {
+
+func (t *ReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var args struct {
 		Language    string          `json:"language"`
 		Source      string          `json:"source"`
@@ -65,6 +70,11 @@ func (t *ReplaceTool) handle(params json.RawMessage) (any, error) {
 		return nil, types.NewMCPError(types.InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
 	}
 
+	notifyProgress(ctx, t.server, 5, 100, "validating")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
+	}
+
 	// Get source code
 	var source string
 	if args.Path != "" {
@@ -73,8 +83,13 @@ func (t *ReplaceTool) handle(params json.RawMessage) (any, error) {
 			return nil, types.WrapError(types.FileSystemError, "Failed to read file", err)
 		}
 		source = string(content)
+		notifyProgress(ctx, t.server, 15, 100, "loaded file")
 	} else {
 		source = args.Source
+	}
+
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
 	// Get provider
@@ -82,6 +97,8 @@ func (t *ReplaceTool) handle(params json.RawMessage) (any, error) {
 	if !exists {
 		return nil, types.NewMCPError(types.LanguageNotFound, "Language not supported", nil)
 	}
+
+	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse target
 	var target core.AgentQuery
@@ -101,24 +118,23 @@ func (t *ReplaceTool) handle(params json.RawMessage) (any, error) {
 		return nil, types.WrapError(types.TransformFailed, "Replace operation failed", result.Error)
 	}
 
-	// Write back if file mode
-	if args.Path != "" && result.Modified != "" {
-		if err := os.WriteFile(args.Path, []byte(result.Modified), 0o644); err != nil {
-			return nil, types.WrapError(types.FileSystemError, "Failed to write file", err)
-		}
+	notifyProgress(ctx, t.server, 70, 100, "transformed source")
+	if err := isCancelled(ctx); err != nil {
+		return nil, err
 	}
 
-	// Return response
-	return map[string]any{
-		"content": []map[string]any{
-			{
-				"type": "text",
-				"text": t.formatResponse(result, args.Path),
-			},
-		},
-		"confidence": result.Confidence.Score,
-		"matches":    result.MatchCount,
-	}, nil
+	notifyProgress(ctx, t.server, 90, 100, "finalizing")
+
+	return t.server.FinalizeTransform(ctx, types.TransformRequest{
+		Language:       args.Language,
+		Operation:      "replace",
+		Target:         target,
+		TargetJSON:     args.Target,
+		Path:           args.Path,
+		OriginalSource: source,
+		Result:         result,
+		ResponseText:   t.formatResponse(result, args.Path),
+	})
 }
 
 // formatResponse formats the transformation result

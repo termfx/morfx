@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"slices"
 	"testing"
 	"time"
@@ -61,9 +62,7 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("ValidateFileHashes should be true by default")
 	}
 
-	if !safety.AtomicWrites {
-		t.Error("AtomicWrites should be true by default")
-	}
+	// AtomicWrites is always enabled for safety (removed from config)
 
 	if safety.UseFsync {
 		t.Error("UseFsync should be false by default for performance")
@@ -91,6 +90,10 @@ func TestDefaultConfig(t *testing.T) {
 
 	if config.Debug {
 		t.Error("Debug should be false by default")
+	}
+
+	if config.LogWriter == nil {
+		t.Error("LogWriter should default to stderr")
 	}
 }
 
@@ -145,7 +148,7 @@ func TestSafetyConfigValidation(t *testing.T) {
 				ConfidenceMode:   "per_file",
 				PerFileThreshold: 0.7,
 				GlobalThreshold:  0.8,
-				AtomicWrites:     true,
+				// AtomicWrites always enabled
 				FileLocking:      true,
 				LockTimeout:      30 * time.Second,
 			},
@@ -179,6 +182,7 @@ func TestSafetyConfigValidation(t *testing.T) {
 			config := DefaultConfig()
 			config.Safety = tt.config
 			config.DatabaseURL = "skip"
+			config.LogWriter = io.Discard
 
 			server, err := NewStdioServer(config)
 			if tt.valid && err != nil {
@@ -267,6 +271,7 @@ func TestConfigWithDifferentValues(t *testing.T) {
 			config := DefaultConfig()
 			config.DatabaseURL = "skip"
 			tt.modifier(&config)
+			config.LogWriter = io.Discard
 
 			server, err := NewStdioServer(config)
 
@@ -292,6 +297,7 @@ func TestSafetyConfigModes(t *testing.T) {
 			config := DefaultConfig()
 			config.DatabaseURL = "skip"
 			config.Safety.ConfidenceMode = mode
+			config.LogWriter = io.Discard
 
 			server, err := NewStdioServer(config)
 			if err != nil {
@@ -310,6 +316,7 @@ func TestConfigEdgeCases(t *testing.T) {
 		config := DefaultConfig()
 		config.DatabaseURL = "skip"
 		config.Safety.BackupSuffix = ""
+		config.LogWriter = io.Discard
 
 		server, err := NewStdioServer(config)
 		if err != nil {
@@ -323,6 +330,7 @@ func TestConfigEdgeCases(t *testing.T) {
 		config := DefaultConfig()
 		config.DatabaseURL = "skip"
 		config.Safety.BackupSuffix = ".very.long.backup.suffix.that.might.cause.issues"
+		config.LogWriter = io.Discard
 
 		server, err := NewStdioServer(config)
 		if err != nil {
@@ -338,6 +346,7 @@ func TestConfigEdgeCases(t *testing.T) {
 		config.Safety.MaxFiles = 1000000
 		config.Safety.MaxFileSize = 1024 * 1024 * 1024       // 1GB
 		config.Safety.MaxTotalSize = 10 * 1024 * 1024 * 1024 // 10GB
+		config.LogWriter = io.Discard
 
 		server, err := NewStdioServer(config)
 		if err != nil {

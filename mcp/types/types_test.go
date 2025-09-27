@@ -19,6 +19,7 @@ type JSONRPCResponse struct {
 }
 
 func TestJSONRPCRequest(t *testing.T) {
+	t.Parallel()
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      1,
@@ -41,6 +42,7 @@ func TestJSONRPCRequest(t *testing.T) {
 }
 
 func TestJSONRPCResponse(t *testing.T) {
+	t.Parallel()
 	resp := JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      1,
@@ -53,6 +55,7 @@ func TestJSONRPCResponse(t *testing.T) {
 }
 
 func TestMCPError(t *testing.T) {
+	t.Parallel()
 	err := MCPError{
 		Code:    -1,
 		Message: "test error",
@@ -64,6 +67,7 @@ func TestMCPError(t *testing.T) {
 }
 
 func TestNewMCPError(t *testing.T) {
+	t.Parallel()
 	err := NewMCPError(-1, "test", nil)
 	if err.Code != -1 {
 		t.Error("Code should be -1")
@@ -71,6 +75,7 @@ func TestNewMCPError(t *testing.T) {
 }
 
 func TestWrapError(t *testing.T) {
+	t.Parallel()
 	origErr := &MCPError{Code: -2, Message: "original"}
 	wrappedErr := WrapError(-1, "wrapped", origErr)
 

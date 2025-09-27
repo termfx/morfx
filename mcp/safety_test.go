@@ -13,6 +13,7 @@ import (
 
 // TestNewSafetyManager verifies safety manager creation
 func TestNewSafetyManager(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		config      SafetyConfig
@@ -75,6 +76,7 @@ func TestNewSafetyManager(t *testing.T) {
 	}
 } // TestValidateOperation verifies operation validation logic
 func TestValidateOperation(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	// Create test files of various sizes
@@ -208,6 +210,7 @@ func TestValidateOperation(t *testing.T) {
 
 // TestValidateFileIntegrity verifies file integrity validation
 func TestValidateFileIntegrity(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	originalContent := "This is test content for integrity validation"
@@ -323,6 +326,7 @@ func calculateTestHash(content string) string {
 
 // TestAtomicWrite verifies atomic write operations
 func TestAtomicWrite(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "atomic_test.txt")
 	originalContent := "original content"
@@ -344,7 +348,7 @@ func TestAtomicWrite(t *testing.T) {
 		{
 			name: "successful_atomic_write",
 			config: SafetyConfig{
-				AtomicWrites:       true,
+				// AtomicWrites always enabled
 				CreateBackups:      true,
 				ValidateFileHashes: true,
 				BackupSuffix:       ".bak",
@@ -357,7 +361,7 @@ func TestAtomicWrite(t *testing.T) {
 		{
 			name: "atomic_write_without_backup",
 			config: SafetyConfig{
-				AtomicWrites:       true,
+				// AtomicWrites always enabled
 				CreateBackups:      false,
 				ValidateFileHashes: false,
 			},
@@ -369,7 +373,7 @@ func TestAtomicWrite(t *testing.T) {
 		{
 			name: "non_atomic_write",
 			config: SafetyConfig{
-				AtomicWrites:       false,
+				// AtomicWrites always enabled (cannot disable)
 				CreateBackups:      false,
 				ValidateFileHashes: false,
 			},
@@ -381,7 +385,7 @@ func TestAtomicWrite(t *testing.T) {
 		{
 			name: "atomic_write_readonly_dir",
 			config: SafetyConfig{
-				AtomicWrites:       true,
+				// AtomicWrites always enabled
 				CreateBackups:      true,
 				ValidateFileHashes: true,
 			},
@@ -395,18 +399,27 @@ func TestAtomicWrite(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sm := NewSafetyManager(tt.config)
-			err := sm.AtomicWrite(tt.filePath, tt.content)
+			handle, err := sm.AtomicWrite(tt.filePath, tt.content)
 
-			if tt.expectError && err == nil {
-				t.Fatalf("Expected error for %s, but got none", tt.description)
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error for %s, but got none", tt.description)
+				}
+				if handle != nil {
+					_ = handle.Rollback()
+				}
+				return
 			}
 
-			if !tt.expectError && err != nil {
+			if err != nil {
 				t.Fatalf("Unexpected error for %s: %v", tt.description, err)
+			}
+			if handle != nil {
+				handle.Commit()
 			}
 
 			// Verify file content if write should succeed
-			if !tt.expectError && err == nil {
+			if err == nil {
 				actualContent, readErr := os.ReadFile(tt.filePath)
 				if readErr != nil {
 					t.Fatalf("Failed to read written file: %v", readErr)
@@ -423,6 +436,7 @@ func TestAtomicWrite(t *testing.T) {
 
 // TestLockFile and TestReleaseLock verify file locking mechanism
 func TestLockFile(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "lock_test.txt")
 
@@ -496,6 +510,7 @@ func TestLockFile(t *testing.T) {
 
 // TestConcurrentLocking verifies concurrent locking behavior
 func TestConcurrentLocking(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "concurrent_test.txt")
 
@@ -506,7 +521,8 @@ func TestConcurrentLocking(t *testing.T) {
 
 	config := SafetyConfig{
 		FileLocking: true,
-		LockTimeout: 1 * time.Second, // Short timeout for testing
+		// Keep the timeout short so the second lock attempt fails promptly.
+		LockTimeout: 200 * time.Millisecond,
 	}
 
 	sm1 := NewSafetyManager(config)
@@ -534,6 +550,7 @@ func TestConcurrentLocking(t *testing.T) {
 
 // TestReleaseMethod tests file lock cleanup
 func TestReleaseMethod(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "release_test.txt")
 
@@ -599,6 +616,7 @@ func createFileWithSize(t *testing.T, filePath string, size int) {
 
 // TestEdgeCases tests various edge cases
 func TestSafetyEdgeCases(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	t.Run("empty_operation", func(t *testing.T) {
@@ -677,7 +695,7 @@ func BenchmarkValidateOperation(b *testing.B) {
 func BenchmarkAtomicWrite(b *testing.B) {
 	tempDir := b.TempDir()
 	config := SafetyConfig{
-		AtomicWrites:       true,
+		// AtomicWrites always enabled
 		CreateBackups:      false, // Disable backup for speed
 		ValidateFileHashes: false,
 	}
@@ -687,12 +705,19 @@ func BenchmarkAtomicWrite(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		testFile := filepath.Join(tempDir, fmt.Sprintf("bench_%d.txt", i))
-		sm.AtomicWrite(testFile, content)
+		handle, err := sm.AtomicWrite(testFile, content)
+		if err != nil {
+			b.Fatalf("AtomicWrite failed: %v", err)
+		}
+		if handle != nil {
+			handle.Commit()
+		}
 	}
 }
 
 // TestSyncFile tests the syncFile function
 func TestSyncFile(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "sync_test.txt")
 
@@ -719,6 +744,7 @@ func TestSyncFile(t *testing.T) {
 
 // TestSyncDir tests the syncDir function
 func TestSyncDir(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	config := SafetyConfig{}
@@ -739,6 +765,7 @@ func TestSyncDir(t *testing.T) {
 
 // TestCalculateFileHash tests the calculateFileHash function
 func TestCalculateFileHash(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "hash_test.txt")
 	testContent := "test content for hashing"
@@ -746,6 +773,17 @@ func TestCalculateFileHash(t *testing.T) {
 	// Create test file
 	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.Chmod(testFile, 0o744); err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+
+	srcInfo, err := os.Stat(testFile)
+	if err != nil {
+		t.Fatalf("Failed to stat test file: %v", err)
+	}
+	if perm := srcInfo.Mode().Perm(); perm != 0o744 {
+		t.Fatalf("unexpected source permissions: %v", srcInfo.Mode())
 	}
 
 	// Test calculateFileHash with existing file
@@ -781,6 +819,7 @@ func TestCalculateFileHash(t *testing.T) {
 
 // TestGenerateRandomSuffix tests the generateRandomSuffix function
 func TestGenerateRandomSuffix(t *testing.T) {
+	t.Parallel()
 	// Test normal generation
 	suffix, err := generateRandomSuffix()
 	if err != nil {
@@ -804,6 +843,7 @@ func TestGenerateRandomSuffix(t *testing.T) {
 
 // TestIsLockStale tests the isLockStale function
 func TestIsLockStale(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	lockFile := filepath.Join(tempDir, "test.lock")
 
@@ -850,6 +890,7 @@ func TestIsLockStale(t *testing.T) {
 
 // TestCreateBackup tests the createBackup function
 func TestCreateBackup(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "backup_test.txt")
 	testContent := "content to backup"
@@ -857,6 +898,22 @@ func TestCreateBackup(t *testing.T) {
 	// Create test file
 	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
+	}
+	if err := os.Chmod(testFile, 0o744); err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+
+	var (
+		srcInfo os.FileInfo
+		statErr error
+	)
+
+	srcInfo, statErr = os.Stat(testFile)
+	if statErr != nil {
+		t.Fatalf("Failed to stat test file: %v", statErr)
+	}
+	if perm := srcInfo.Mode().Perm(); perm != 0o744 {
+		t.Fatalf("unexpected source permissions: %v", srcInfo.Mode())
 	}
 
 	config := SafetyConfig{
@@ -881,6 +938,14 @@ func TestCreateBackup(t *testing.T) {
 		t.Errorf("Backup content mismatch: got %s, want %s", string(backupContent), testContent)
 	}
 
+	if info, err := os.Stat(backupPath); err == nil {
+		if perm := info.Mode().Perm(); perm != 0o744 {
+			t.Errorf("Backup permissions = %v, want 0744", perm)
+		}
+	} else {
+		t.Fatalf("Failed to stat backup file: %v", err)
+	}
+
 	// Test backup of nonexistent file - should succeed (no-op)
 	nonexistentFile := filepath.Join(tempDir, "does_not_exist.txt")
 	backupDir := tempDir // Use same temp dir for backup destination
@@ -899,6 +964,7 @@ func TestCreateBackup(t *testing.T) {
 
 // TestCleanupFailedWrite tests the cleanupFailedWrite function
 func TestCleanupFailedWrite(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	tmpFile := filepath.Join(tempDir, "temp_file.tmp")
 	backupFile := filepath.Join(tempDir, "backup_file.bak")
@@ -933,11 +999,13 @@ func TestCleanupFailedWrite(t *testing.T) {
 
 // TestAcquireOSLock tests the acquireOSLock function
 func TestAcquireOSLock(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	lockFile := filepath.Join(tempDir, "os_lock_test.lock")
 
 	config := SafetyConfig{
-		LockTimeout: 5 * time.Second, // Set reasonable timeout
+		// Use a tight timeout so failure scenarios finish quickly in tests.
+		LockTimeout: 200 * time.Millisecond,
 	}
 	sm := NewSafetyManager(config)
 
@@ -965,10 +1033,11 @@ func TestAcquireOSLock(t *testing.T) {
 
 // TestAtomicWriteEdgeCases tests edge cases for AtomicWrite
 func TestAtomicWriteEdgeCases(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	config := SafetyConfig{
-		AtomicWrites:       true,
+		// AtomicWrites always enabled
 		CreateBackups:      true,
 		ValidateFileHashes: true,
 		BackupSuffix:       ".bak",
@@ -978,9 +1047,12 @@ func TestAtomicWriteEdgeCases(t *testing.T) {
 
 	t.Run("empty_content", func(t *testing.T) {
 		testFile := filepath.Join(tempDir, "empty.txt")
-		err := sm.AtomicWrite(testFile, "")
+		handle, err := sm.AtomicWrite(testFile, "")
 		if err != nil {
 			t.Errorf("AtomicWrite should handle empty content: %v", err)
+		}
+		if handle != nil {
+			handle.Commit()
 		}
 
 		// Verify file exists and is empty
@@ -997,9 +1069,12 @@ func TestAtomicWriteEdgeCases(t *testing.T) {
 		testFile := filepath.Join(tempDir, "large.txt")
 		largeContent := strings.Repeat("A", 10*1024*1024) // 10MB
 
-		err := sm.AtomicWrite(testFile, largeContent)
+		handle, err := sm.AtomicWrite(testFile, largeContent)
 		if err != nil {
 			t.Errorf("AtomicWrite should handle large content: %v", err)
+		}
+		if handle != nil {
+			handle.Commit()
 		}
 
 		// Verify content
@@ -1016,9 +1091,12 @@ func TestAtomicWriteEdgeCases(t *testing.T) {
 		testFile := filepath.Join(tempDir, "unicode.txt")
 		unicodeContent := "Hello, 世界! 🌍 测试 αβγ"
 
-		err := sm.AtomicWrite(testFile, unicodeContent)
+		handle, err := sm.AtomicWrite(testFile, unicodeContent)
 		if err != nil {
 			t.Errorf("AtomicWrite should handle unicode content: %v", err)
+		}
+		if handle != nil {
+			handle.Commit()
 		}
 
 		// Verify content
@@ -1034,6 +1112,7 @@ func TestAtomicWriteEdgeCases(t *testing.T) {
 
 // TestFileLockEdgeCases tests edge cases for file locking
 func TestFileLockEdgeCases(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	config := SafetyConfig{
@@ -1086,11 +1165,12 @@ func TestFileLockEdgeCases(t *testing.T) {
 
 // TestTransactionLogIntegration tests transaction log integration
 func TestTransactionLogIntegration(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "tx_test.txt")
 
 	config := SafetyConfig{
-		AtomicWrites:   true,
+		// AtomicWrites always enabled
 		CreateBackups:  true,
 		TransactionLog: true,
 		BackupSuffix:   ".bak",
@@ -1102,9 +1182,12 @@ func TestTransactionLogIntegration(t *testing.T) {
 	}
 
 	// Write content
-	err := sm.AtomicWrite(testFile, "transaction test content")
+	handle, err := sm.AtomicWrite(testFile, "transaction test content")
 	if err != nil {
 		t.Fatalf("AtomicWrite should succeed: %v", err)
+	}
+	if handle != nil {
+		handle.Commit()
 	}
 
 	// Verify file exists
@@ -1119,8 +1202,9 @@ func TestTransactionLogIntegration(t *testing.T) {
 	}
 }
 
-// TestValidateOperationWithZeroLimits tests validation with zero limits
+// TestValidateOperationWithZeroLimits ensures zero limits disable enforcement
 func TestValidateOperationWithZeroLimits(t *testing.T) {
+	t.Parallel()
 	config := SafetyConfig{
 		MaxFiles:     0, // Zero limit
 		MaxFileSize:  0, // Zero limit
@@ -1135,13 +1219,14 @@ func TestValidateOperationWithZeroLimits(t *testing.T) {
 	}
 
 	err := sm.ValidateOperation(operation)
-	if err == nil {
-		t.Error("Validation should fail with zero limits")
+	if err != nil {
+		t.Fatalf("Validation should be allowed with zero limits: %v", err)
 	}
 }
 
 // TestSafetyManagerConcurrency tests concurrent access to safety manager
 func TestSafetyManagerConcurrency(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	config := SafetyConfig{
@@ -1160,7 +1245,10 @@ func TestSafetyManagerConcurrency(t *testing.T) {
 			testFile := filepath.Join(tempDir, fmt.Sprintf("concurrent_%d.txt", id))
 			content := fmt.Sprintf("content from goroutine %d", id)
 
-			err := sm.AtomicWrite(testFile, content)
+			handle, err := sm.AtomicWrite(testFile, content)
+			if err == nil && handle != nil {
+				handle.Commit()
+			}
 			errors <- err
 		}(i)
 	}

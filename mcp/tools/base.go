@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/termfx/morfx/mcp/types"
@@ -132,4 +133,21 @@ func ParseParams[T any](params json.RawMessage) (*T, error) {
 		return nil, err
 	}
 	return &result, nil
+}
+
+func notifyProgress(ctx context.Context, server types.ServerInterface, progress, total float64, message string) {
+	if server == nil {
+		return
+	}
+	server.ReportProgress(ctx, progress, total, message)
+}
+
+func isCancelled(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
 }
