@@ -24,7 +24,7 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 ### From source
 
 ```bash
-git clone https://github.com/termfx/morfx.git
+git clone https://github.com/oxhq/morfx.git
 cd morfx
 go build -o morfx cmd/morfx/main.go
 ```
@@ -32,7 +32,7 @@ go build -o morfx cmd/morfx/main.go
 ### Quick install
 
 ```bash
-go install github.com/termfx/morfx/cmd/morfx@latest
+go install github.com/oxhq/morfx/cmd/morfx@latest
 ```
 
 ## Setup

@@ -6,7 +6,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/models"
 )
 
 // setupAsyncStagingDB creates a temporary SQLite database suitable for both unit and integration tests.

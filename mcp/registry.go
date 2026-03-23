@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // ErrToolNotFound indicates that a requested tool is not registered.

@@ -1,8 +1,8 @@
 package providers
 
 import (
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/providers/catalog"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/providers/catalog"
 )
 
 // Provider interface for language-specific implementations

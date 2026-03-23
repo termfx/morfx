@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/providers"
-	"github.com/termfx/morfx/providers/golang"
-	"github.com/termfx/morfx/providers/javascript"
-	"github.com/termfx/morfx/providers/php"
-	"github.com/termfx/morfx/providers/python"
-	"github.com/termfx/morfx/providers/typescript"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/providers"
+	"github.com/oxhq/morfx/providers/golang"
+	"github.com/oxhq/morfx/providers/javascript"
+	"github.com/oxhq/morfx/providers/php"
+	"github.com/oxhq/morfx/providers/python"
+	"github.com/oxhq/morfx/providers/typescript"
 )
 
 // Environment wires together providers and the file processor for standalone tools.

@@ -8,10 +8,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/termfx/morfx/db"
-	"github.com/termfx/morfx/internal/toolenv"
-	"github.com/termfx/morfx/mcp"
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/db"
+	"github.com/oxhq/morfx/internal/toolenv"
+	"github.com/oxhq/morfx/mcp"
+	"github.com/oxhq/morfx/models"
 	"gorm.io/gorm"
 )
 

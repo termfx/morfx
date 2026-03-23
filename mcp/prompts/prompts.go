@@ -1,6 +1,6 @@
 package prompts
 
-import "github.com/termfx/morfx/mcp/types"
+import "github.com/oxhq/morfx/mcp/types"
 
 // NewCodeReviewPrompt creates a code review prompt
 func NewCodeReviewPrompt() *BasePrompt {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // FileDeleteTool handles deletion across multiple files

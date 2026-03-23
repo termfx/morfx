@@ -16,7 +16,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/models"
 )
 
 // TestNewStagingManager verifies staging manager creation

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // TestGetToolDefinitions tests tool definition structure

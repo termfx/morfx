@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/termfx/morfx/providers/catalog"
+	"github.com/oxhq/morfx/providers/catalog"
 )
 
 // FileWalker provides high-performance parallel file system traversal

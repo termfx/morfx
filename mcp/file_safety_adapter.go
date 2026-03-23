@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/termfx/morfx/core"
+import "github.com/oxhq/morfx/core"
 
 // fileSafetyAdapter bridges the core file processor with the SafetyManager.
 type fileSafetyAdapter struct {

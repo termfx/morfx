@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // toolRegistry manages tools internally

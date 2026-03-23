@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/termfx/morfx/core"
+	"github.com/oxhq/morfx/core"
 )
 
 func TestPHPProvider_New(t *testing.T) {

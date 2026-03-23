@@ -3,7 +3,7 @@ package prompts
 import (
 	"sync"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // BasePrompt provides common prompt functionality

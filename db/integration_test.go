@@ -12,7 +12,7 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/models"
 )
 
 // TestDatabaseIntegration tests the full database workflow

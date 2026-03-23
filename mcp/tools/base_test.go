@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/mcp/types"
-	"github.com/termfx/morfx/models"
-	"github.com/termfx/morfx/providers"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/mcp/types"
+	"github.com/oxhq/morfx/models"
+	"github.com/oxhq/morfx/providers"
 )
 
 // mockRegistry adapts providers.Registry to core.ProviderRegistry

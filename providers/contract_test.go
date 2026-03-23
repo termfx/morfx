@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/termfx/morfx/core"
+	"github.com/oxhq/morfx/core"
 )
 
 // MockProvider for testing

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 const supportedProtocolVersion = "2025-11-25"

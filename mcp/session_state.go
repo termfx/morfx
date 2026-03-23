@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // SessionState captures negotiated protocol details and client preferences for

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // TestHandleInitialize verifies MCP initialization protocol compliance

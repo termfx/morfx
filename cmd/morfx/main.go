@@ -8,7 +8,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
-	"github.com/termfx/morfx/mcp"
+	"github.com/oxhq/morfx/mcp"
 )
 
 var (

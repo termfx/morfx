@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 	"gorm.io/gorm"
 )
 

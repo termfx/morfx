@@ -1,4 +1,4 @@
-module github.com/termfx/morfx
+module github.com/oxhq/morfx
 
 go 1.25
 

@@ -1,8 +1,8 @@
 package typescript
 
 import (
-	"github.com/termfx/morfx/providers/base"
-	"github.com/termfx/morfx/providers/catalog"
+	"github.com/oxhq/morfx/providers/base"
+	"github.com/oxhq/morfx/providers/catalog"
 )
 
 // This package provides TypeScript language support for morfx using the base provider.

@@ -12,8 +12,8 @@ import (
 	"github.com/pmezard/go-difflib/difflib"
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/providers"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/providers"
 )
 
 // LanguageConfig defines language-specific behavior that must be implemented

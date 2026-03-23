@@ -5,7 +5,7 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
-	"github.com/termfx/morfx/core"
+	"github.com/oxhq/morfx/core"
 )
 
 func TestValidateAssignment(t *testing.T) {

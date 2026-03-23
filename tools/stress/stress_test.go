@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/providers"
-	golang "github.com/termfx/morfx/providers/golang"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/providers"
+	golang "github.com/oxhq/morfx/providers/golang"
 )
 
 func TestStressTransform(t *testing.T) {

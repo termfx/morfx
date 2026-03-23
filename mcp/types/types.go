@@ -8,9 +8,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/models"
-	"github.com/termfx/morfx/providers"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/models"
+	"github.com/oxhq/morfx/providers"
 )
 
 // ServerInterface defines what tools need from the server

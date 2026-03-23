@@ -8,7 +8,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
 
-	"github.com/termfx/morfx/core"
+	"github.com/oxhq/morfx/core"
 )
 
 // mockConfig implements LanguageConfig for testing

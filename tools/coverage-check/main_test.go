@@ -10,20 +10,20 @@ import (
 
 // Test data for coverage files
 const validCoverageData = `mode: set
-github.com/termfx/morfx/core/fileprocessor.go:10.1,15.2 5 1
-github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2 5 0
-github.com/termfx/morfx/mcp/server.go:25.1,30.2 5 1
-github.com/termfx/morfx/mcp/server.go:32.1,37.2 5 1
-github.com/termfx/morfx/providers/golang/provider.go:40.1,45.2 5 1
-github.com/termfx/morfx/providers/golang/provider.go:47.1,52.2 5 0
-github.com/termfx/morfx/db/client.go:55.1,60.2 5 1
-github.com/termfx/morfx/cmd/morfx/main.go:65.1,70.2 5 0
+github.com/oxhq/morfx/core/fileprocessor.go:10.1,15.2 5 1
+github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2 5 0
+github.com/oxhq/morfx/mcp/server.go:25.1,30.2 5 1
+github.com/oxhq/morfx/mcp/server.go:32.1,37.2 5 1
+github.com/oxhq/morfx/providers/golang/provider.go:40.1,45.2 5 1
+github.com/oxhq/morfx/providers/golang/provider.go:47.1,52.2 5 0
+github.com/oxhq/morfx/db/client.go:55.1,60.2 5 1
+github.com/oxhq/morfx/cmd/morfx/main.go:65.1,70.2 5 0
 `
 
 const invalidCoverageData = `mode: set
 invalid-line-format
-github.com/termfx/morfx/core/fileprocessor.go:10.1,15.2 5 invalid-count
-github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2
+github.com/oxhq/morfx/core/fileprocessor.go:10.1,15.2 5 invalid-count
+github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2
 `
 
 const emptyCoverageData = `mode: set
@@ -458,30 +458,30 @@ func abs(x float64) float64 {
 
 func createExcellentCoverageData() string {
 	return `mode: set
-github.com/termfx/morfx/core/fileprocessor.go:10.1,15.2 10 10
-github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2 10 10
-github.com/termfx/morfx/mcp/server.go:25.1,30.2 10 9
-github.com/termfx/morfx/mcp/server.go:32.1,37.2 10 9
-github.com/termfx/morfx/providers/golang/provider.go:40.1,45.2 10 9
-github.com/termfx/morfx/providers/golang/provider.go:47.1,52.2 10 9
-github.com/termfx/morfx/db/client.go:55.1,60.2 10 8
-github.com/termfx/morfx/db/client.go:62.1,67.2 10 8
-github.com/termfx/morfx/models/model.go:65.1,70.2 10 8
-github.com/termfx/morfx/cmd/morfx/main.go:72.1,77.2 10 7
-github.com/termfx/morfx/cmd/morfx/main.go:79.1,84.2 10 7
+github.com/oxhq/morfx/core/fileprocessor.go:10.1,15.2 10 10
+github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2 10 10
+github.com/oxhq/morfx/mcp/server.go:25.1,30.2 10 9
+github.com/oxhq/morfx/mcp/server.go:32.1,37.2 10 9
+github.com/oxhq/morfx/providers/golang/provider.go:40.1,45.2 10 9
+github.com/oxhq/morfx/providers/golang/provider.go:47.1,52.2 10 9
+github.com/oxhq/morfx/db/client.go:55.1,60.2 10 8
+github.com/oxhq/morfx/db/client.go:62.1,67.2 10 8
+github.com/oxhq/morfx/models/model.go:65.1,70.2 10 8
+github.com/oxhq/morfx/cmd/morfx/main.go:72.1,77.2 10 7
+github.com/oxhq/morfx/cmd/morfx/main.go:79.1,84.2 10 7
 `
 }
 
 func createPoorCoverageData() string {
 	return `mode: set
-github.com/termfx/morfx/core/fileprocessor.go:10.1,15.2 10 3
-github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2 10 3
-github.com/termfx/morfx/mcp/server.go:25.1,30.2 10 3
-github.com/termfx/morfx/mcp/server.go:32.1,37.2 10 3
-github.com/termfx/morfx/providers/golang/provider.go:40.1,45.2 10 3
-github.com/termfx/morfx/providers/golang/provider.go:47.1,52.2 10 3
-github.com/termfx/morfx/db/client.go:55.1,60.2 10 3
-github.com/termfx/morfx/cmd/morfx/main.go:65.1,70.2 10 2
+github.com/oxhq/morfx/core/fileprocessor.go:10.1,15.2 10 3
+github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2 10 3
+github.com/oxhq/morfx/mcp/server.go:25.1,30.2 10 3
+github.com/oxhq/morfx/mcp/server.go:32.1,37.2 10 3
+github.com/oxhq/morfx/providers/golang/provider.go:40.1,45.2 10 3
+github.com/oxhq/morfx/providers/golang/provider.go:47.1,52.2 10 3
+github.com/oxhq/morfx/db/client.go:55.1,60.2 10 3
+github.com/oxhq/morfx/cmd/morfx/main.go:65.1,70.2 10 2
 `
 }
 
@@ -534,10 +534,10 @@ func BenchmarkCalculateOverallCoverage(b *testing.B) {
 func TestEdgeCases(t *testing.T) {
 	t.Run("malformed coverage lines", func(t *testing.T) {
 		data := `mode: set
-github.com/termfx/morfx/core/fileprocessor.go:invalid-format
-github.com/termfx/morfx/core/fileprocessor.go:10.1,15.2 5 notanumber
+github.com/oxhq/morfx/core/fileprocessor.go:invalid-format
+github.com/oxhq/morfx/core/fileprocessor.go:10.1,15.2 5 notanumber
 :empty-package:10.1,15.2 5 1
-github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2 5 1
+github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2 5 1
 `
 		coverageFile := setupTempCoverageFile(t, data)
 		packages, err := parseCoverageFile(coverageFile)
@@ -550,8 +550,8 @@ github.com/termfx/morfx/core/fileprocessor.go:17.1,22.2 5 1
 			t.Errorf("Expected 1 package, got %d", len(packages))
 		}
 
-		if len(packages) > 0 && packages[0].Package != "github.com/termfx/morfx/core" {
-			t.Errorf("Expected 'github.com/termfx/morfx/core' package, got '%s'", packages[0].Package)
+		if len(packages) > 0 && packages[0].Package != "github.com/oxhq/morfx/core" {
+			t.Errorf("Expected 'github.com/oxhq/morfx/core' package, got '%s'", packages[0].Package)
 		}
 	})
 

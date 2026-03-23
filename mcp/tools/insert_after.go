@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // InsertAfterTool handles inserting code after elements

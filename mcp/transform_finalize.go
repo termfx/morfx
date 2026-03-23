@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/termfx/morfx/mcp/types"
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/mcp/types"
+	"github.com/oxhq/morfx/models"
 	"gorm.io/datatypes"
 )
 

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 func TestInsertBeforeTool_Execute(t *testing.T) {

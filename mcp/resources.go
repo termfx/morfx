@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/termfx/morfx/mcp/resources"
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/resources"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // ResourceContent represents the content of a resource

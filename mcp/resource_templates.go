@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/termfx/morfx/mcp/types"
+import "github.com/oxhq/morfx/mcp/types"
 
 func registerDefaultResourceTemplates(reg *ResourceTemplateRegistry) {
 	if reg == nil {

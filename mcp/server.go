@@ -12,19 +12,19 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/db"
-	"github.com/termfx/morfx/mcp/prompts"
-	"github.com/termfx/morfx/mcp/resources"
-	"github.com/termfx/morfx/mcp/tools"
-	"github.com/termfx/morfx/mcp/types"
-	"github.com/termfx/morfx/models"
-	"github.com/termfx/morfx/providers"
-	"github.com/termfx/morfx/providers/golang"
-	"github.com/termfx/morfx/providers/javascript"
-	"github.com/termfx/morfx/providers/php"
-	"github.com/termfx/morfx/providers/python"
-	"github.com/termfx/morfx/providers/typescript"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/db"
+	"github.com/oxhq/morfx/mcp/prompts"
+	"github.com/oxhq/morfx/mcp/resources"
+	"github.com/oxhq/morfx/mcp/tools"
+	"github.com/oxhq/morfx/mcp/types"
+	"github.com/oxhq/morfx/models"
+	"github.com/oxhq/morfx/providers"
+	"github.com/oxhq/morfx/providers/golang"
+	"github.com/oxhq/morfx/providers/javascript"
+	"github.com/oxhq/morfx/providers/php"
+	"github.com/oxhq/morfx/providers/python"
+	"github.com/oxhq/morfx/providers/typescript"
 )
 
 // StdioServer handles MCP communication over stdio

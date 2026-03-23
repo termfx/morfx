@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	prompts "github.com/termfx/morfx/mcp/prompts"
-	"github.com/termfx/morfx/mcp/types"
+	prompts "github.com/oxhq/morfx/mcp/prompts"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 // PromptContent represents the content of a prompt response

@@ -3,9 +3,9 @@ package mcp
 import (
 	"context"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/mcp/types"
-	"github.com/termfx/morfx/providers"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/mcp/types"
+	"github.com/oxhq/morfx/providers"
 )
 
 // ServerInterface is now an alias to types.ServerInterface

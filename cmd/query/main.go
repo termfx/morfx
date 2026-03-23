@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/termfx/morfx/core"
-	"github.com/termfx/morfx/internal/toolenv"
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/internal/toolenv"
 )
 
 const queryHelp = `Usage: query [-h]

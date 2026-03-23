@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/termfx/morfx/core"
+	"github.com/oxhq/morfx/core"
 )
 
 func TestJavaScriptProvider_New(t *testing.T) {

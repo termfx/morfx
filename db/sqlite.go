@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/termfx/morfx/models"
+	"github.com/oxhq/morfx/models"
 )
 
 // Connect establishes a database connection and runs migrations

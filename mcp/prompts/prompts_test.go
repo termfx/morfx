@@ -3,7 +3,7 @@ package prompts
 import (
 	"testing"
 
-	"github.com/termfx/morfx/mcp/types"
+	"github.com/oxhq/morfx/mcp/types"
 )
 
 func TestNewCodeReviewPrompt(t *testing.T) {

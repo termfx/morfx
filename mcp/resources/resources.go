@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/termfx/morfx/mcp/types"
-	"github.com/termfx/morfx/providers/catalog"
+	"github.com/oxhq/morfx/mcp/types"
+	"github.com/oxhq/morfx/providers/catalog"
 )
 
 // BaseResource provides common resource functionality
