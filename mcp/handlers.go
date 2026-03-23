@@ -416,6 +416,25 @@ func normalizeToolResult(result any) types.CallToolResult {
 		if rawContent, exists := asMap["content"]; exists {
 			blocks = toContentBlocks(rawContent)
 		}
+		// Preserve extra fields (confidence, matches, modified, etc.) as metadata
+		callResult := types.CallToolResult{
+			Content: blocks,
+		}
+		if len(blocks) > 0 {
+			meta := make(map[string]any)
+			for k, v := range asMap {
+				if k != "content" && k != "isError" {
+					meta[k] = v
+				}
+			}
+			if len(meta) > 0 {
+				callResult.Meta = meta
+			}
+		}
+		if isErr, ok := asMap["isError"].(bool); ok {
+			callResult.IsError = isErr
+		}
+		return callResult
 	}
 
 	if len(blocks) == 0 {

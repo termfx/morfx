@@ -193,6 +193,9 @@ func (s *StdioServer) FinalizeTransform(ctx context.Context, req types.Transform
 	if req.Result.Modified != "" {
 		resp["modified"] = req.Result.Modified
 	}
+	if req.Result.Diff != "" {
+		resp["diff"] = req.Result.Diff
+	}
 
 	return resp, nil
 }

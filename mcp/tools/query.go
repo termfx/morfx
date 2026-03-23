@@ -156,7 +156,20 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 		responseText = fmt.Sprintf("File: %s\n\n%s", *args.Path, responseText)
 	}
 
-	// Return as MCP content blocks
+	// Build structured match data for API consumers
+	matchData := make([]map[string]any, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		m := map[string]any{
+			"type":    match.Type,
+			"name":    match.Name,
+			"line":    match.Location.Line,
+			"column":  match.Location.Column,
+			"content": match.Content,
+		}
+		matchData = append(matchData, m)
+	}
+
+	// Return as MCP content blocks with metadata
 	return map[string]any{
 		"content": []map[string]any{
 			{
@@ -164,5 +177,7 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 				"text": responseText,
 			},
 		},
+		"matches":    len(result.Matches),
+		"match_data": matchData,
 	}, nil
 }

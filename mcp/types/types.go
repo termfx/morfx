@@ -256,6 +256,7 @@ type ContentBlock struct {
 type CallToolResult struct {
 	Content []ContentBlock `json:"content"`
 	IsError bool           `json:"isError,omitempty"`
+	Meta    map[string]any `json:"_meta,omitempty"`
 }
 
 // Error implements the error interface
