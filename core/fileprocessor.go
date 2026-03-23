@@ -223,6 +223,7 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 		}
 		if detail.Error != "" {
 			hasErrors = true
+			walkErrors = append(walkErrors, fmt.Sprintf("%s: %s", detail.FilePath, detail.Error))
 		}
 	}
 	if len(walkErrors) > 0 {
@@ -378,6 +379,7 @@ func (fp *FileProcessor) transformFile(
 	if fp.safety != nil && detail.MatchCount > 0 {
 		if err := fp.safety.ValidateFileChange(walkResult, result.Confidence); err != nil {
 			detail.Error = err.Error()
+			detail.MatchCount = 0 // Reset to avoid false positive in reporting
 			return detail
 		}
 	}

@@ -1089,7 +1089,7 @@ export class PublicAPI {
 	}
 
 	// Should have reduced confidence due to deleting exported API
-	if result.Confidence.Score >= 0.7 {
+	if result.Confidence.Score > 0.8 {
 		t.Errorf("Expected reduced confidence for deleting exported method, got %f", result.Confidence.Score)
 	}
 

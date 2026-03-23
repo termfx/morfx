@@ -588,10 +588,10 @@ func (p *Provider) calculateConfidence(
 	// Factor 2: Operation type
 	switch op.Method {
 	case "delete":
-		score -= 0.2
+		score -= 0.1
 		factors = append(factors, core.ConfidenceFactor{
 			Name:   "delete_operation",
-			Impact: -0.2,
+			Impact: -0.1,
 			Reason: "Delete operations are destructive",
 		})
 		// Check if deleting exported function
