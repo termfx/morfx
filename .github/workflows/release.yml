@@ -17,12 +17,9 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install TFX
-        run: go install github.com/oxhq/tfx/cmd/tfx@v0.1.1
-
-      - name: Run TFX release flow
+      - name: Run repository verification
         run: |
-          "$(go env GOPATH)/bin/tfx" --flow release --lane canary --run --quiet
+          make verify
 
   build:
     needs: verify
