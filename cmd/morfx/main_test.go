@@ -20,16 +20,16 @@ var (
 func TestRootCommand(t *testing.T) {
 	cmd := &cobra.Command{
 		Use:     "morfx",
-		Short:   "Code transformation engine with MCP protocol support",
-		Version: "1.5.0",
+		Short:   "Deterministic AST transformations with MCP and standalone tools",
+		Version: "dev",
 	}
 
 	if cmd.Use != "morfx" {
 		t.Errorf("Expected Use='morfx', got '%s'", cmd.Use)
 	}
 
-	if cmd.Version != "1.5.0" {
-		t.Errorf("Expected Version='1.5.0', got '%s'", cmd.Version)
+	if cmd.Version != "dev" {
+		t.Errorf("Expected Version='dev', got '%s'", cmd.Version)
 	}
 
 	_ = cmd.Short // Suppress unused warning
@@ -114,9 +114,9 @@ func TestHelpOutput(t *testing.T) {
 	// Test help output contains expected content
 	cmd := &cobra.Command{
 		Use:   "morfx",
-		Short: "Code transformation engine with MCP protocol support",
-		Long: `Morfx MCP Server provides deterministic AST-based code transformations
-through the Model Context Protocol (MCP) for AI agents.`,
+		Short: "Deterministic AST transformations with MCP and standalone tools",
+		Long: `Morfx provides deterministic AST-based code transformations
+through the Model Context Protocol (MCP) and standalone JSON tools.`,
 	}
 
 	buf := new(bytes.Buffer)
@@ -132,10 +132,10 @@ through the Model Context Protocol (MCP) for AI agents.`,
 
 	output := buf.String()
 	// When Long is present, cobra shows Long description instead of Short
-	if !strings.Contains(output, "Morfx MCP Server") {
+	if !strings.Contains(output, "Morfx provides deterministic AST-based") {
 		t.Errorf("Help should contain long description, got: %s", output)
 	}
-	if !strings.Contains(output, "deterministic AST-based") {
+	if !strings.Contains(output, "standalone JSON tools") {
 		t.Errorf("Help should contain detailed description, got: %s", output)
 	}
 }
@@ -143,7 +143,7 @@ through the Model Context Protocol (MCP) for AI agents.`,
 func TestVersionOutput(t *testing.T) {
 	cmd := &cobra.Command{
 		Use:     "morfx",
-		Version: "1.5.0",
+		Version: "dev",
 	}
 
 	buf := new(bytes.Buffer)
@@ -157,7 +157,7 @@ func TestVersionOutput(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "1.5.0") {
+	if !strings.Contains(output, "dev") {
 		t.Error("Version output should contain version number")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oxhq/morfx/internal/buildinfo"
 	"github.com/oxhq/morfx/mcp/resources"
 	"github.com/oxhq/morfx/mcp/types"
 )
@@ -302,7 +303,7 @@ func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 
 	info := map[string]any{
 		"name":    "Morfx MCP Server",
-		"version": "1.5.0",
+		"version": buildinfo.Version,
 		"runtime": map[string]any{
 			"go_version": runtime.Version(),
 			"platform":   fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),

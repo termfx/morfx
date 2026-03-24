@@ -465,14 +465,14 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/termfx/morfx)
+        - prefix(github.com/oxhq/morfx)
       custom-order: true
     gofumpt:
-      module-path: github.com/termfx/morfx
+      module-path: github.com/oxhq/morfx
       extra-rules: true
     goimports:
       local-prefixes:
-        - github.com/termfx/morfx
+        - github.com/oxhq/morfx
   exclusions:
     generated: lax
     paths:

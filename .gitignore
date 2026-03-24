@@ -12,6 +12,8 @@ go.work
 go.work.sum
 *.coverprofile
 coverage/
+dist/
+artifacts/
 
 # IDE / editor
 *.swp

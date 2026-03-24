@@ -8,45 +8,79 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install TFX
+        run: go install github.com/oxhq/tfx/cmd/tfx@v0.1.1
+
+      - name: Run TFX release flow
+        run: "$(go env GOPATH)/bin/tfx" --flow release --lane canary --run --quiet
+
   build:
+    needs: verify
+    name: Build release archives
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            binary: morfx-linux-amd64
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-            binary: morfx-linux-arm64
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            binary: morfx-darwin-arm64
           - os: macos-latest
             goos: darwin
             goarch: amd64
-            binary: morfx-darwin-amd64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
 
-      - name: Build
+      - name: Build archive
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
-        run: go build -o ${{ matrix.binary }} cmd/morfx/main.go
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          COMMIT="${GITHUB_SHA::7}"
+          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ARCHIVE_DIR="release/morfx_${VERSION#v}_${GOOS}_${GOARCH}"
+          mkdir -p "$ARCHIVE_DIR"
+
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then
+            EXT=".exe"
+          fi
+
+          go build -ldflags "-X github.com/oxhq/morfx/internal/buildinfo.Version=${VERSION} -X github.com/oxhq/morfx/internal/buildinfo.Commit=${COMMIT} -X github.com/oxhq/morfx/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+            -o "$ARCHIVE_DIR/morfx${EXT}" ./cmd/morfx
+
+          for tool in query replace delete insert_before insert_after append file_query file_replace file_delete apply; do
+            go build -o "$ARCHIVE_DIR/${tool}${EXT}" "./cmd/${tool}"
+          done
+
+          cp README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE tfx.yaml "$ARCHIVE_DIR"/
+          tar -C release -czf "${ARCHIVE_DIR}.tar.gz" "$(basename "$ARCHIVE_DIR")"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.binary }}
-          path: ${{ matrix.binary }}
+          name: morfx-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release/*.tar.gz
 
   release:
     needs: build
@@ -55,13 +89,34 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+          path: release
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            morfx-linux-amd64
-            morfx-linux-arm64
-            morfx-darwin-arm64
-            morfx-darwin-amd64
+      - name: Prepare checksums and release notes
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum *.tar.gz > SHA256SUMS)
+          cat > release/RELEASE_NOTES.md <<EOF
+          # Morfx ${GITHUB_REF_NAME}
+
+          This release bundles the MCP server plus the standalone JSON tools:
+          `query`, `replace`, `delete`, `insert_before`, `insert_after`,
+          `append`, `file_query`, `file_replace`, `file_delete`, and `apply`.
+
+          It is also verified through the repository's root `tfx.yaml` before
+          publication.
+          EOF
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Morfx ${GITHUB_REF_NAME}"
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" --title "$title" --notes-file release/RELEASE_NOTES.md
+            gh release upload "${GITHUB_REF_NAME}" release/*.tar.gz release/SHA256SUMS --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/SHA256SUMS \
+              --title "$title" \
+              --notes-file release/RELEASE_NOTES.md
+          fi

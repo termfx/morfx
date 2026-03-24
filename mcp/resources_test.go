@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/oxhq/morfx/internal/buildinfo"
 )
 
 func TestGetResourceDefinitions(t *testing.T) {
@@ -94,8 +96,8 @@ func TestHandleReadResource_ServerInfo(t *testing.T) {
 		t.Errorf("Expected server name 'Morfx MCP Server', got %v", info["name"])
 	}
 
-	if info["version"] != "1.5.0" {
-		t.Errorf("Expected version '1.5.0', got %v", info["version"])
+	if info["version"] != buildinfo.Version {
+		t.Errorf("Expected version '%s', got %v", buildinfo.Version, info["version"])
 	}
 }
 

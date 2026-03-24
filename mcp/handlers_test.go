@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oxhq/morfx/internal/buildinfo"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -50,7 +51,7 @@ func TestHandleInitialize(t *testing.T) {
 				},
 				"serverInfo": map[string]any{
 					"name":    "morfx",
-					"version": "1.5.0",
+					"version": buildinfo.Version,
 				},
 			},
 			expectError: false,
@@ -79,7 +80,7 @@ func TestHandleInitialize(t *testing.T) {
 				},
 				"serverInfo": map[string]any{
 					"name":    "morfx",
-					"version": "1.5.0",
+					"version": buildinfo.Version,
 				},
 			},
 			expectError: false, // Should handle gracefully

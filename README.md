@@ -1,8 +1,11 @@
 # Morfx
 
-> Deterministic AST-based code transformations for AI agents.
+> Deterministic AST-based code transformations for AI agents, via MCP and standalone tools.
 
-Morfx is an MCP server that gives AI coding agents (Claude Desktop, OpenAI Codex, Cursor, etc.) the ability to query, transform, and safely modify code using tree-sitter AST analysis — not regex, not string matching.
+Morfx is a deterministic AST transformation engine that ships both an MCP server
+and standalone JSON tools. It gives AI coding agents and local automation the
+ability to query, transform, and safely modify code using tree-sitter AST
+analysis — not regex, not string matching.
 
 ## Why
 
@@ -19,6 +22,19 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 - **Confidence scoring** — Every transform gets a score with explainable factors
 - **Multi-language** — Go, JavaScript, TypeScript, PHP, Python via tree-sitter
 
+## Modes
+
+Morfx ships in two complementary forms:
+
+- **`morfx mcp`** for MCP-compatible AI clients such as Claude Desktop or Codex
+- **Standalone binaries** such as `query`, `replace`, `file_query`, and `apply`
+  for direct local automation
+
+For the standalone stdin/stdout contracts, see
+[docs/standalone-tools.md](./docs/standalone-tools.md). For shell-level usage
+patterns and TFX recipes, see
+[docs/standalone-recipes.md](./docs/standalone-recipes.md).
+
 ## Install
 
 ### From source
@@ -26,7 +42,8 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 ```bash
 git clone https://github.com/oxhq/morfx.git
 cd morfx
-go build -o morfx cmd/morfx/main.go
+go build -o bin/morfx ./cmd/morfx
+make build-standalone
 ```
 
 ### Quick install
@@ -74,7 +91,7 @@ NO_COLOR = "1"
 
 Morfx speaks MCP 2025-11-25 over stdio. Point any MCP-compatible client at the binary with `mcp` as the subcommand.
 
-## Tools
+## Standalone Tools
 
 | Tool | Description |
 |---|---|
@@ -88,6 +105,12 @@ Morfx speaks MCP 2025-11-25 over stdio. Point any MCP-compatible client at the b
 | `insert_after` | Insert code after a matched element |
 | `append` | Smart-place code at end of file or scope |
 | `apply` | Apply a staged transformation |
+
+Build them locally with:
+
+```bash
+make build-standalone
+```
 
 ## Usage examples
 
@@ -144,6 +167,31 @@ morfx mcp --db ./my.db              # Custom SQLite path
 morfx mcp --auto-threshold 0.9      # Stricter auto-apply
 ```
 
+## TFX Dogfooding
+
+This repository now ships a root [`tfx.yaml`](./tfx.yaml) so Morfx can be
+orchestrated through TFX as a standalone product, not only as an MCP backend.
+
+Typical flows:
+
+```bash
+tfx --flow ci --run
+tfx --flow standalone --run
+tfx --flow dogfood-tfx --run
+tfx --flow quality --run
+tfx --flow release --lane canary --run
+```
+
+The `standalone` flow builds the local binaries and exercises `query`,
+`replace`, and `file_query` against a temporary fixture through
+[`tools/scripts/smoke-standalone.sh`](./tools/scripts/smoke-standalone.sh).
+
+The `dogfood-tfx` flow targets a local checkout of `oxhq/tfx` through
+[`tools/scripts/dogfood-tfx.sh`](./tools/scripts/dogfood-tfx.sh), running
+read-only queries on the real repo and a safe replacement against a temporary
+copy of a TFX source file. Override the target checkout with
+`MORFX_DOGFOOD_TFX_DIR=/path/to/tfx`.
+
 ## Supported languages
 
 | Language | Provider | Query types |
@@ -182,6 +230,9 @@ go build ./...              # Build everything
 go test ./...               # Run all tests
 go test -race ./...         # Race detector
 go test -cover ./...        # Coverage
+make build-standalone       # Build standalone JSON tools
+make smoke-standalone       # Run standalone fixture smoke tests
+make verify                 # Strict local verification
 ```
 
 ## License

@@ -8,6 +8,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
+	"github.com/oxhq/morfx/internal/buildinfo"
 	"github.com/oxhq/morfx/mcp"
 )
 
@@ -15,13 +16,13 @@ var (
 	// Root command
 	rootCmd = &cobra.Command{
 		Use:   "morfx",
-		Short: "Code transformation engine with MCP protocol support",
-		Long: `Morfx MCP Server provides deterministic AST-based code transformations
-through the Model Context Protocol (MCP) for AI agents.
+		Short: "Deterministic AST transformations with MCP and standalone tools",
+		Long: `Morfx provides deterministic AST-based code transformations
+through the Model Context Protocol (MCP) and standalone JSON tools.
 
-The server communicates via JSON-RPC 2.0 over stdio and supports language-agnostic
+The server communicates via JSON-RPC 2.0 over stdio and also ships standalone
+stdin/stdout binaries for direct local automation. It supports language-agnostic
 code querying, replacement, deletion, and insertion operations with confidence scoring.`,
-		Version: "1.5.0",
 	}
 
 	// MCP server command
@@ -43,6 +44,8 @@ providing code transformation capabilities with confidence scoring and staged op
 )
 
 func init() {
+	refreshRootVersion()
+
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug logging to stderr")
 
@@ -54,6 +57,10 @@ func init() {
 
 	// Add commands to root
 	rootCmd.AddCommand(mcpCmd)
+}
+
+func refreshRootVersion() {
+	rootCmd.Version = buildinfo.FormattedVersion()
 }
 
 func main() {

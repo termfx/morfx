@@ -4,8 +4,11 @@
 # Variables
 BINARY_NAME = morfx
 BUILD_DIR = bin
+DIST_DIR = dist
 CMD_DIR = cmd/morfx
 COVERAGE_DIR = coverage
+STANDALONE_TOOLS = query replace delete insert_before insert_after append file_query file_replace file_delete apply
+RELEASE_PLATFORMS = darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64
 GO_FILES = $(shell find . -name '*.go' -type f -not -path "./vendor/*" -not -path "./.git/*")
 PACKAGES = $(shell go list ./... | grep -v /vendor/)
 
@@ -19,13 +22,14 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Build flags
-LDFLAGS = -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)"
+LDFLAGS = -ldflags "-X github.com/oxhq/morfx/internal/buildinfo.Version=$(VERSION) -X github.com/oxhq/morfx/internal/buildinfo.Commit=$(COMMIT) -X github.com/oxhq/morfx/internal/buildinfo.BuildTime=$(BUILD_TIME)"
 
 # Tools versions
-GOLANGCI_VERSION = v1.62.2
+GOLANGCI_VERSION = v2.11.4
 GOFUMPT_VERSION = latest
 GOLINES_VERSION = latest
 GOTESTSUM_VERSION = latest
+GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
 # Colors for output
 RED = \033[0;31m
@@ -33,7 +37,7 @@ GREEN = \033[0;32m
 YELLOW = \033[1;33m
 NC = \033[0m # No Color
 
-.PHONY: all help clean
+.PHONY: all help clean build-standalone smoke-standalone dogfood-tfx verify release-artifacts
 
 ## help: Show this help message
 help:
@@ -41,27 +45,27 @@ help:
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
 
 ## all: Run lint, test and build
-all: lint test build
+all: lint test build-standalone
 
 # ==================================================================================== #
 # QUALITY CONTROL
 # ==================================================================================== #
 
-## audit: Run quality checks (lint, vet, test)
+## audit: Run quality checks (lint, vet, test, standalone smoke)
 .PHONY: audit
-audit: lint vet test
+audit: lint vet test smoke-standalone
 
 ## lint: Run golangci-lint with auto-fix
 .PHONY: lint
-lint: tools/golangci-lint
+lint:
 	@echo "$(GREEN)Running linters...$(NC)"
-	@$(GOBIN)/golangci-lint run --fix --config .golangci.yml ./...
+	@$(GOLANGCI_LINT) run --fix --config .golangci.yml ./...
 
 ## lint-strict: Run lint without auto-fix (CI mode)
 .PHONY: lint-strict
-lint-strict: tools/golangci-lint
+lint-strict:
 	@echo "$(YELLOW)Running strict lint (no auto-fix)...$(NC)"
-	@$(GOBIN)/golangci-lint run --config .golangci.yml ./...
+	@$(GOLANGCI_LINT) run --config .golangci.yml ./...
 
 ## modernize: Auto-fix and modernize entire codebase
 .PHONY: modernize
@@ -79,7 +83,7 @@ modernize: tools/gofumpt tools/golines tools/gopls
 	@echo "  → Running go fix..."
 	@go fix ./...
 	@echo "  → Organizing imports..."
-	@$(GOBIN)/goimports -w -local github.com/termfx/morfx .
+	@$(GOBIN)/goimports -w -local github.com/oxhq/morfx .
 	@echo "  → Running go vet..."
 	@go vet ./...
 	@echo "$(GREEN)✓ Modernization complete!$(NC)"
@@ -186,22 +190,79 @@ build:
 	@go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/main.go
 	@echo "$(GREEN)✓ Binary: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
+## build-standalone: Build standalone JSON tools
+.PHONY: build-standalone
+build-standalone: build
+	@echo "$(GREEN)Building standalone tools...$(NC)"
+	@for tool in $(STANDALONE_TOOLS); do \
+		echo "  → $$tool"; \
+		go build -o $(BUILD_DIR)/$$tool ./cmd/$$tool; \
+	done
+	@echo "$(GREEN)✓ Standalone tools built in $(BUILD_DIR)/$(NC)"
+
+## smoke-standalone: Run fixture-based smoke checks for standalone tools
+.PHONY: smoke-standalone
+smoke-standalone: build-standalone
+	@echo "$(GREEN)Running standalone smoke checks...$(NC)"
+	@bash tools/scripts/smoke-standalone.sh
+
+## dogfood-tfx: Run standalone Morfx against the local TFX repo without mutating it
+.PHONY: dogfood-tfx
+dogfood-tfx: build-standalone
+	@echo "$(GREEN)Running external dogfood against TFX...$(NC)"
+	@bash tools/scripts/dogfood-tfx.sh
+
 ## build-all: Build for multiple platforms
 .PHONY: build-all
 build-all:
 	@echo "$(GREEN)Building for all platforms...$(NC)"
-	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 $(CMD_DIR)/main.go
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 $(CMD_DIR)/main.go
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 $(CMD_DIR)/main.go
-	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 $(CMD_DIR)/main.go
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(CMD_DIR)/main.go
+	@rm -rf $(BUILD_DIR)/release
+	@mkdir -p $(BUILD_DIR)/release
+	@for platform in $(RELEASE_PLATFORMS); do \
+		goos=$${platform%/*}; \
+		goarch=$${platform#*/}; \
+		ext=""; \
+		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
+		bundle="$(BUILD_DIR)/release/$(BINARY_NAME)-$$goos-$$goarch"; \
+		echo "  → $$bundle"; \
+		mkdir -p "$$bundle"; \
+		GOOS=$$goos GOARCH=$$goarch go build $(LDFLAGS) -o "$$bundle/$(BINARY_NAME)$$ext" $(CMD_DIR)/main.go; \
+		for tool in $(STANDALONE_TOOLS); do \
+			GOOS=$$goos GOARCH=$$goarch go build -o "$$bundle/$$tool$$ext" ./cmd/$$tool; \
+		done; \
+			cp README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE "$$bundle"/; \
+		done
+	@echo "$(GREEN)✓ Release bundles ready in $(BUILD_DIR)/release/$(NC)"
 
 ## install: Install the binary to GOPATH/bin
 .PHONY: install
 install:
 	@echo "$(GREEN)Installing $(BINARY_NAME)...$(NC)"
 	@go install $(LDFLAGS) $(CMD_DIR)/main.go
+
+## verify: Run strict local verification
+.PHONY: verify
+verify: deps test build-standalone smoke-standalone vet
+	@echo "$(GREEN)✓ Verification complete!$(NC)"
+
+## release-artifacts: Build host release artifacts into dist/
+.PHONY: release-artifacts
+release-artifacts: build-standalone
+	@echo "$(GREEN)Packaging release artifacts...$(NC)"
+	@rm -rf $(DIST_DIR)
+	@mkdir -p $(DIST_DIR)
+	@printf "%s\n" "$(VERSION)" > $(DIST_DIR)/VERSION
+	@go build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME) $(CMD_DIR)/main.go
+	@for tool in $(STANDALONE_TOOLS); do \
+		go build -o $(DIST_DIR)/$$tool ./cmd/$$tool; \
+	done
+		@cp README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE tfx.yaml $(DIST_DIR)/
+	@if command -v shasum >/dev/null 2>&1; then \
+		shasum -a 256 $(DIST_DIR)/* > $(DIST_DIR)/SHA256SUMS; \
+	else \
+		sha256sum $(DIST_DIR)/* > $(DIST_DIR)/SHA256SUMS; \
+	fi
+	@echo "$(GREEN)✓ Release artifacts ready in $(DIST_DIR)/$(NC)"
 
 # ==================================================================================== #
 # DATABASE
@@ -254,7 +315,7 @@ tools: tools/golangci-lint tools/gofumpt tools/golines tools/gosec tools/gotests
 tools/golangci-lint:
 	@if ! [ -f $(GOBIN)/golangci-lint ]; then \
 		echo "$(YELLOW)Installing golangci-lint $(GOLANGCI_VERSION)...$(NC)"; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOBIN) $(GOLANGCI_VERSION); \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION); \
 	fi
 
 .PHONY: tools/gofumpt
@@ -310,6 +371,8 @@ clean:
 	@echo "$(YELLOW)Cleaning...$(NC)"
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(COVERAGE_DIR)
+	@rm -rf $(DIST_DIR)
+	@rm -rf artifacts
 	@rm -f coverage.out security-report.json
 	@go clean -testcache
 	@echo "$(GREEN)✓ Clean complete!$(NC)"
@@ -342,12 +405,12 @@ version:
 
 ## ci: Run CI pipeline
 .PHONY: ci
-ci: deps lint-strict test build
+ci: deps test build-standalone smoke-standalone vet
 	@echo "$(GREEN)✓ CI pipeline complete!$(NC)"
 
 ## release: Create a new release
 .PHONY: release
-release: audit build-all
-	@echo "$(GREEN)Release artifacts ready in $(BUILD_DIR)/$(NC)"
+release: verify build-all release-artifacts
+	@echo "$(GREEN)Release artifacts ready in $(DIST_DIR)/ and $(BUILD_DIR)/release/$(NC)"
 
 .DEFAULT_GOAL := help

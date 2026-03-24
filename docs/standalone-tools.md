@@ -4,6 +4,27 @@ Each command-line tool reads a single JSON document from stdin and emits a JSON
 response to stdout. All tools support `-h`/`--help` to print the same
 information summarised below.
 
+Build all standalone binaries locally with:
+
+```bash
+make build-standalone
+```
+
+This repository also ships a root [`tfx.yaml`](../tfx.yaml) so you can dogfood
+Morfx through TFX:
+
+```bash
+tfx --flow standalone --run
+tfx --flow dogfood-tfx --run
+```
+
+That flow builds the local binaries and runs
+[`tools/scripts/smoke-standalone.sh`](../tools/scripts/smoke-standalone.sh)
+against a temporary fixture.
+
+For more practical shell recipes and the external TFX dogfood path, see
+[`standalone-recipes.md`](./standalone-recipes.md).
+
 ## `query`
 - **Purpose:** Locate code elements that match a `core.AgentQuery`.
 - **Input:**

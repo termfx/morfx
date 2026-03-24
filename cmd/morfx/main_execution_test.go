@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/oxhq/morfx/internal/buildinfo"
 )
 
 // TestMainExecution tests the actual main function behavior
@@ -132,7 +134,7 @@ func TestInitFunctionExecution(t *testing.T) {
 
 	// Test that rootCmd has the right structure
 	assert.Equal(t, "morfx", rootCmd.Use)
-	assert.Equal(t, "1.5.0", rootCmd.Version)
+	assert.Equal(t, buildinfo.FormattedVersion(), rootCmd.Version)
 
 	// Test that mcpCmd is added to rootCmd
 	subCommands := rootCmd.Commands()
@@ -270,9 +272,9 @@ func TestCommandStructure(t *testing.T) {
 
 	t.Run("root command properties", func(t *testing.T) {
 		assert.Equal(t, "morfx", rootCmd.Use)
-		assert.Contains(t, rootCmd.Short, "Code transformation engine")
-		assert.Contains(t, rootCmd.Long, "Morfx MCP Server")
-		assert.Equal(t, "1.5.0", rootCmd.Version)
+		assert.Contains(t, rootCmd.Short, "Deterministic AST transformations")
+		assert.Contains(t, rootCmd.Long, "standalone JSON tools")
+		assert.Equal(t, buildinfo.FormattedVersion(), rootCmd.Version)
 	})
 
 	t.Run("mcp command properties", func(t *testing.T) {
@@ -375,4 +377,32 @@ func TestActualFlagParsing(t *testing.T) {
 			tt.validate(t)
 		})
 	}
+}
+
+func TestFormattedVersion(t *testing.T) {
+	originalVersion := buildinfo.Version
+	originalCommit := buildinfo.Commit
+	originalBuildTime := buildinfo.BuildTime
+	defer func() {
+		buildinfo.Version = originalVersion
+		buildinfo.Commit = originalCommit
+		buildinfo.BuildTime = originalBuildTime
+		refreshRootVersion()
+	}()
+
+	t.Run("defaults to dev", func(t *testing.T) {
+		buildinfo.Version = ""
+		buildinfo.Commit = "unknown"
+		buildinfo.BuildTime = "unknown"
+		assert.Equal(t, "dev", buildinfo.FormattedVersion())
+	})
+
+	t.Run("includes injected build metadata", func(t *testing.T) {
+		buildinfo.Version = "9.9.9"
+		buildinfo.Commit = "abc123"
+		buildinfo.BuildTime = "2026-03-23_23:59:59"
+		assert.Equal(t, "9.9.9 commit=abc123 built=2026-03-23_23:59:59", buildinfo.FormattedVersion())
+		refreshRootVersion()
+		assert.Equal(t, buildinfo.FormattedVersion(), rootCmd.Version)
+	})
 }

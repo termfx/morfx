@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/oxhq/morfx/internal/buildinfo"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -145,7 +146,7 @@ func (s *StdioServer) handleInitialize(ctx context.Context, req Request) Respons
 		"capabilities":    s.serverCapabilities(),
 		"serverInfo": map[string]any{
 			"name":    "morfx",
-			"version": "1.5.0",
+			"version": buildinfo.Version,
 		},
 	}
 
