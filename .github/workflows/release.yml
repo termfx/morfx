@@ -21,7 +21,8 @@ jobs:
         run: go install github.com/oxhq/tfx/cmd/tfx@v0.1.1
 
       - name: Run TFX release flow
-        run: "$(go env GOPATH)/bin/tfx" --flow release --lane canary --run --quiet
+        run: |
+          "$(go env GOPATH)/bin/tfx" --flow release --lane canary --run --quiet
 
   build:
     needs: verify

@@ -19,10 +19,12 @@ jobs:
         run: go install github.com/oxhq/tfx/cmd/tfx@v0.1.1
 
       - name: Run TFX CI flow
-        run: "$(go env GOPATH)/bin/tfx" --flow ci --run --quiet
+        run: |
+          "$(go env GOPATH)/bin/tfx" --flow ci --run --quiet
 
       - name: Run TFX standalone flow
-        run: "$(go env GOPATH)/bin/tfx" --flow standalone --run --quiet
+        run: |
+          "$(go env GOPATH)/bin/tfx" --flow standalone --run --quiet
 
   lint:
     continue-on-error: true
