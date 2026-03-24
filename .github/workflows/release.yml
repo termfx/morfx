@@ -132,7 +132,7 @@ jobs:
           TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           title="Morfx ${TAG}"
           if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GH_REPO" --title "$title" --notes-file release/RELEASE_NOTES.md
+            gh release edit "$TAG" --repo "$GH_REPO" --notes-file release/RELEASE_NOTES.md
             gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/SHA256SUMS --clobber
           else
             gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/SHA256SUMS \
