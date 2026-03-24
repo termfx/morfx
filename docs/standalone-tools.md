@@ -4,6 +4,11 @@ Each command-line tool reads a single JSON document from stdin and emits a JSON
 response to stdout. All tools support `-h`/`--help` to print the same
 information summarised below.
 
+These are not flag-first CLIs. In normal use, the only flags you should expect
+to reach for are help flags and the occasional tool-specific control flag such
+as `apply --db ...`. The actual query or transform payload still travels over
+stdin/stdout as JSON.
+
 Build all standalone binaries locally with:
 
 ```bash
@@ -21,6 +26,10 @@ tfx --flow dogfood-tfx --run
 That flow builds the local binaries and runs
 [`tools/scripts/smoke-standalone.sh`](../tools/scripts/smoke-standalone.sh)
 against a temporary fixture.
+
+In that setup, Morfx remains the code-transformation engine and TFX acts as the
+runtime that wraps it with prompts, flow control, logs, step progress, and
+artifact handling.
 
 For more practical shell recipes and the external TFX dogfood path, see
 [`standalone-recipes.md`](./standalone-recipes.md).

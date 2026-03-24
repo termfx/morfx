@@ -1,6 +1,6 @@
 # Morfx
 
-> Deterministic AST-based code transformations for AI agents, via MCP and standalone tools.
+> Deterministic AST-based refactoring for AI agents and automation, via MCP, standalone JSON tools, and an optional TFX runtime.
 
 Morfx is a deterministic AST transformation engine that ships both an MCP server
 and standalone JSON tools. It gives AI coding agents and local automation the
@@ -24,16 +24,31 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 
 ## Modes
 
-Morfx ships in two complementary forms:
+Morfx ships in three operational shapes:
 
 - **`morfx mcp`** for MCP-compatible AI clients such as Claude Desktop or Codex
 - **Standalone binaries** such as `query`, `replace`, `file_query`, and `apply`
   for direct local automation
+- **A TFX-orchestrated runtime** for repeatable flows such as smoke checks,
+  dogfooding, quality gates, and release packaging
 
 For the standalone stdin/stdout contracts, see
 [docs/standalone-tools.md](./docs/standalone-tools.md). For shell-level usage
 patterns and TFX recipes, see
 [docs/standalone-recipes.md](./docs/standalone-recipes.md).
+
+## Morfx vs TFX
+
+Morfx and TFX solve different problems:
+
+- **Morfx** is the refactoring engine: AST query, replace, delete, insert, and
+  staged apply.
+- **TFX** is the terminal runtime around tools like Morfx: prompts, flow
+  selection, progress, logs, artifacts, and release-style orchestration.
+
+That means TFX does not replace Morfx. It hosts Morfx more effectively when the
+same standalone commands need to run as a product workflow instead of as ad-hoc
+shell snippets.
 
 ## Install
 
@@ -92,6 +107,10 @@ NO_COLOR = "1"
 Morfx speaks MCP 2025-11-25 over stdio. Point any MCP-compatible client at the binary with `mcp` as the subcommand.
 
 ## Standalone Tools
+
+The standalone binaries are **JSON-over-stdin tools**, not flag-heavy CLIs.
+Outside of `-h`/`--help`, you normally send them one JSON request on stdin and
+read one JSON response from stdout.
 
 | Tool | Description |
 |---|---|
@@ -169,8 +188,8 @@ morfx mcp --auto-threshold 0.9      # Stricter auto-apply
 
 ## TFX Dogfooding
 
-This repository now ships a root [`tfx.yaml`](./tfx.yaml) so Morfx can be
-orchestrated through TFX as a standalone product, not only as an MCP backend.
+This repository ships a root [`tfx.yaml`](./tfx.yaml) so Morfx can run as a
+product workflow, not only as an MCP backend or a pile of standalone binaries.
 
 Typical flows:
 
@@ -191,6 +210,11 @@ The `dogfood-tfx` flow targets a local checkout of `oxhq/tfx` through
 read-only queries on the real repo and a safe replacement against a temporary
 copy of a TFX source file. Override the target checkout with
 `MORFX_DOGFOOD_TFX_DIR=/path/to/tfx`.
+
+The important boundary is:
+
+- Morfx owns AST edits and standalone JSON contracts.
+- TFX owns flow control, prompts, runtime logs, progress, hooks, and artifacts.
 
 ## Supported languages
 
