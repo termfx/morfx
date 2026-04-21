@@ -638,7 +638,7 @@ func (c *phpOverlapVariableConfig) GetLanguage() *sitter.Language {
 func (c *phpOverlapVariableConfig) MapQueryTypeToNodeTypes(queryType string) []string {
 	switch queryType {
 	case "variable":
-		return []string{"property_declaration", "variable_name"}
+		return []string{"assignment_expression", "simple_parameter", "property_declaration", "variable_name"}
 	default:
 		return []string{queryType}
 	}
@@ -646,6 +646,14 @@ func (c *phpOverlapVariableConfig) MapQueryTypeToNodeTypes(queryType string) []s
 
 func (c *phpOverlapVariableConfig) ExtractNodeName(node *sitter.Node, source string) string {
 	switch node.Type() {
+	case "assignment_expression":
+		if left := c.variableTargetNode(node); left != nil {
+			return strings.TrimPrefix(source[left.StartByte():left.EndByte()], "$")
+		}
+	case "simple_parameter":
+		if nameNode := c.variableTargetNode(node); nameNode != nil {
+			return strings.TrimPrefix(source[nameNode.StartByte():nameNode.EndByte()], "$")
+		}
 	case "property_declaration":
 		for i := 0; i < int(node.ChildCount()); i++ {
 			child := node.Child(i)
@@ -670,6 +678,16 @@ func (c *phpOverlapVariableConfig) SupportedQueryTypes() []string {
 
 func (c *phpOverlapVariableConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
 	switch node.Type() {
+	case "assignment_expression":
+		if left := c.variableTargetNode(node); left != nil {
+			name := strings.TrimPrefix(source[left.StartByte():left.EndByte()], "$")
+			return []Target{NewTarget(left, query.Type, name)}
+		}
+	case "simple_parameter":
+		if nameNode := c.variableTargetNode(node); nameNode != nil {
+			name := strings.TrimPrefix(source[nameNode.StartByte():nameNode.EndByte()], "$")
+			return []Target{NewTarget(nameNode, query.Type, name)}
+		}
 	case "property_declaration":
 		var targets []Target
 		for i := 0; i < int(node.ChildCount()); i++ {
@@ -683,6 +701,31 @@ func (c *phpOverlapVariableConfig) ExpandMatches(node *sitter.Node, source strin
 	case "variable_name":
 		name := strings.TrimPrefix(source[node.StartByte():node.EndByte()], "$")
 		return []Target{NewTarget(node, query.Type, name)}
+	}
+
+	return nil
+}
+
+func (c *phpOverlapVariableConfig) variableTargetNode(node *sitter.Node) *sitter.Node {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Type() {
+	case "assignment_expression":
+		if left := node.ChildByFieldName("left"); left != nil && left.Type() == "variable_name" {
+			return left
+		}
+	case "simple_parameter":
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil && nameNode.Type() == "variable_name" {
+			return nameNode
+		}
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_name" {
+				return child
+			}
+		}
 	}
 
 	return nil
@@ -1088,6 +1131,53 @@ func TestTransformDedupesOverlappingExpandedPhpVariables(t *testing.T) {
 	}
 	if strings.Count(result.Modified, "/*marker*/") != 1 {
 		t.Fatalf("expected marker inserted once, got %q", result.Modified)
+	}
+}
+
+func TestQueryDedupesOverlappingPhpAssignmentVariables(t *testing.T) {
+	provider := New(&phpOverlapVariableConfig{})
+	source := "<?php $foo = 1;"
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "variable",
+		Name: "foo",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected 1 deduped PHP assignment variable match, got %d", len(result.Matches))
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected total 1 after PHP assignment dedupe, got %d", result.Total)
+	}
+	if result.Matches[0].Name != "foo" {
+		t.Fatalf("expected PHP assignment variable match %q, got %q", "foo", result.Matches[0].Name)
+	}
+}
+
+func TestTransformDedupesOverlappingPhpSimpleParameterVariables(t *testing.T) {
+	provider := New(&phpOverlapVariableConfig{})
+	source := "<?php function f($foo) {}"
+
+	result := provider.Transform(source, core.TransformOp{
+		Method: "insert_before",
+		Target: core.AgentQuery{
+			Type: "variable",
+			Name: "foo",
+		},
+		Content: "/*marker*/",
+	})
+	if result.Error != nil {
+		t.Fatalf("transform failed: %v", result.Error)
+	}
+
+	if result.MatchCount != 1 {
+		t.Fatalf("expected 1 deduped PHP parameter variable target, got %d", result.MatchCount)
+	}
+	if strings.Count(result.Modified, "/*marker*/") != 1 {
+		t.Fatalf("expected parameter marker inserted once, got %q", result.Modified)
 	}
 }
 

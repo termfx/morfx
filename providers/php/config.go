@@ -123,11 +123,14 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		return strings.TrimPrefix(name, "$") // Remove $ prefix
 	case "assignment_expression":
 		// Extract variable name from left side
-		if left := node.ChildByFieldName("left"); left != nil {
-			if left.Type() == "variable_name" {
-				name := source[left.StartByte():left.EndByte()]
-				return strings.TrimPrefix(name, "$")
-			}
+		if left := c.variableTargetNode(node); left != nil {
+			name := source[left.StartByte():left.EndByte()]
+			return strings.TrimPrefix(name, "$")
+		}
+	case "simple_parameter":
+		if nameNode := c.variableTargetNode(node); nameNode != nil {
+			name := source[nameNode.StartByte():nameNode.EndByte()]
+			return strings.TrimPrefix(name, "$")
 		}
 	case "namespace_definition":
 		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
@@ -257,16 +260,26 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	case "namespace_use_declaration":
 		return c.expandNamespaceUse(node, source, query)
 	case "assignment_expression":
+		if left := c.variableTargetNode(node); left != nil {
+			name := strings.TrimPrefix(source[left.StartByte():left.EndByte()], "$")
+			return makeMatch(left, name)
+		}
 		if left := node.ChildByFieldName("left"); left != nil {
-			if left.Type() == "variable_name" {
-				name := strings.TrimPrefix(source[left.StartByte():left.EndByte()], "$")
-				return makeMatch(node, name)
-			}
 			if left.Type() == "list_literal" {
 				return c.expandListLiteral(left, source, query)
 			}
 		}
 		name := c.ExtractNodeName(node, source)
+		return makeMatch(node, name)
+	case "simple_parameter":
+		if nameNode := c.variableTargetNode(node); nameNode != nil {
+			name := strings.TrimPrefix(source[nameNode.StartByte():nameNode.EndByte()], "$")
+			return makeMatch(nameNode, name)
+		}
+		name := c.ExtractNodeName(node, source)
+		return makeMatch(node, name)
+	case "variable_name":
+		name := strings.TrimPrefix(source[node.StartByte():node.EndByte()], "$")
 		return makeMatch(node, name)
 	default:
 		name := c.ExtractNodeName(node, source)
@@ -295,6 +308,31 @@ func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, que
 	}
 
 	return matches
+}
+
+func (c *Config) variableTargetNode(node *sitter.Node) *sitter.Node {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Type() {
+	case "assignment_expression":
+		if left := node.ChildByFieldName("left"); left != nil && left.Type() == "variable_name" {
+			return left
+		}
+	case "simple_parameter":
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil && nameNode.Type() == "variable_name" {
+			return nameNode
+		}
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_name" {
+				return child
+			}
+		}
+	}
+
+	return nil
 }
 
 func (c *Config) expandListLiteral(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
