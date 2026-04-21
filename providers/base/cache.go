@@ -35,8 +35,12 @@ var GlobalCache = &ASTCache{
 	maxAge: 5 * time.Minute,
 }
 
+type cacheParser interface {
+	ParseCtx(context.Context, *sitter.Tree, []byte) (*sitter.Tree, error)
+}
+
 // GetOrParse returns cached AST or parses new one
-func (c *ASTCache) GetOrParse(parser parserSeam, source []byte) (*sitter.Tree, bool) {
+func (c *ASTCache) GetOrParse(parser cacheParser, source []byte) (*sitter.Tree, bool) {
 	// Calculate hash
 	hash := c.hash(source)
 
