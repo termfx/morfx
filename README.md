@@ -67,6 +67,19 @@ make build-standalone
 go install github.com/oxhq/morfx/cmd/morfx@latest
 ```
 
+### Windows build notes
+
+Windows support is practical, but current provider builds require `CGO_ENABLED=1` and a compatible C compiler for tree-sitter grammars. Zig or MinGW-w64 both work; set `CC` before running Go commands:
+
+```powershell
+$env:CGO_ENABLED = "1"
+$env:CC = "zig cc -target x86_64-windows-gnu"
+go build ./cmd/morfx
+go test ./...
+```
+
+For the canonical Windows verification path, run `.\tools\scripts\verify-windows.ps1`. For the standalone smoke path, run `.\tools\scripts\smoke-standalone.ps1`. The other PowerShell helpers in `tools/scripts/` are the Windows-native path; the Unix `make` targets and `.sh` scripts remain for macOS/Linux.
+
 ## Setup
 
 ### Claude Desktop
@@ -257,6 +270,16 @@ go test -cover ./...        # Coverage
 make build-standalone       # Build standalone JSON tools
 make smoke-standalone       # Run standalone fixture smoke tests
 make verify                 # Strict local verification
+```
+
+Windows equivalents:
+
+```powershell
+$env:CGO_ENABLED = "1"
+$env:CC = "zig cc -target x86_64-windows-gnu"
+.\tools\scripts\build-standalone.ps1
+.\tools\scripts\verify-windows.ps1
+.\tools\scripts\smoke-standalone.ps1
 ```
 
 ## License
