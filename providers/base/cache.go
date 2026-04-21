@@ -36,7 +36,7 @@ var GlobalCache = &ASTCache{
 }
 
 // GetOrParse returns cached AST or parses new one
-func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tree, bool) {
+func (c *ASTCache) GetOrParse(parser parserSeam, source []byte) (*sitter.Tree, bool) {
 	// Calculate hash
 	hash := c.hash(source)
 
@@ -58,7 +58,7 @@ func (c *ASTCache) GetOrParse(parser *sitter.Parser, source []byte) (*sitter.Tre
 
 	c.misses.Add(1)
 
-	// Parse new tree using ParseCtx
+	// Parse new tree using the provider-owned seam.
 	tree, err := parser.ParseCtx(context.TODO(), nil, source)
 	if err != nil || tree == nil {
 		return nil, false

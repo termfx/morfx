@@ -61,9 +61,7 @@ func New(config LanguageConfig) *Provider {
 
 	pool := &sync.Pool{
 		New: func() any {
-			parser := sitter.NewParser()
-			parser.SetLanguage(lang)
-			return parser
+			return newParserAdapter(lang)
 		},
 	}
 
@@ -90,15 +88,15 @@ func (p *Provider) SupportedQueryTypes() []string {
 }
 
 // borrowParser retrieves a parser instance from the pool.
-func (p *Provider) borrowParser() *sitter.Parser {
-	parser := p.pool.Get().(*sitter.Parser)
+func (p *Provider) borrowParser() *parserAdapter {
+	parser := p.pool.Get().(*parserAdapter)
 	p.stats.borrowCount.Add(1)
 	p.stats.active.Add(1)
 	return parser
 }
 
 // releaseParser returns a parser instance to the pool.
-func (p *Provider) releaseParser(parser *sitter.Parser) {
+func (p *Provider) releaseParser(parser *parserAdapter) {
 	if parser != nil {
 		p.stats.returnCount.Add(1)
 		p.stats.active.Add(-1)
@@ -244,7 +242,7 @@ func (p *Provider) Validate(source string) providers.ValidationResult {
 	parser := p.borrowParser()
 	defer p.releaseParser(parser)
 
-	tree := parser.Parse(nil, []byte(source))
+	tree := parser.Parse([]byte(source))
 	if tree == nil {
 		return providers.ValidationResult{
 			Valid:  false,
