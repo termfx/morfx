@@ -14,17 +14,13 @@ import (
 
 	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/db"
+	"github.com/oxhq/morfx/internal/runtime"
 	"github.com/oxhq/morfx/mcp/prompts"
 	"github.com/oxhq/morfx/mcp/resources"
 	"github.com/oxhq/morfx/mcp/tools"
 	"github.com/oxhq/morfx/mcp/types"
 	"github.com/oxhq/morfx/models"
 	"github.com/oxhq/morfx/providers"
-	"github.com/oxhq/morfx/providers/golang"
-	"github.com/oxhq/morfx/providers/javascript"
-	"github.com/oxhq/morfx/providers/php"
-	"github.com/oxhq/morfx/providers/python"
-	"github.com/oxhq/morfx/providers/typescript"
 )
 
 // StdioServer handles MCP communication over stdio
@@ -97,7 +93,6 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		config:          config,
 		reader:          bufio.NewReader(os.Stdin),
 		writer:          bufio.NewWriter(os.Stdout),
-		providers:       providers.NewRegistry(),
 		router:          NewRouter(),
 		sessionState:    NewSessionState(),
 		pending:         make(map[string]chan ResponseMessage),
@@ -167,21 +162,11 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		server.toolRegistry.Register(tool.Name(), tool)
 	}
 
-	// Register providers
-	server.providers.Register(golang.New())
-	server.debugLog("Registered Go provider")
-
-	server.providers.Register(javascript.New())
-	server.debugLog("Registered JavaScript provider")
-
-	server.providers.Register(typescript.New())
-	server.debugLog("Registered TypeScript provider")
-
-	server.providers.Register(php.New())
-	server.debugLog("Registered PHP provider")
-
-	server.providers.Register(python.New())
-	server.debugLog("Registered Python provider")
+	rt, err := runtime.Build(runtime.Config{TransactionLogDir: defaultTransactionLogDir()})
+	if err != nil {
+		return nil, err
+	}
+	server.providers = rt.Providers
 
 	// Register dynamic spec resource via standard resources endpoint
 	resources.Registry.Register("config://query-spec", resources.NewDynamicResource(
@@ -213,11 +198,10 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		},
 	))
 
-	// Initialize file processor with providers
-	server.fileProcessor = core.NewFileProcessor(&providerRegistryAdapter{server.providers})
+	// Initialize file processor with shared runtime builder
+	server.fileProcessor = rt.FileProcessor
 	server.debugLog("Initialized file processor")
 	if txLogDir := defaultTransactionLogDir(); txLogDir != "" {
-		server.fileProcessor.SetTransactionLogDir(txLogDir)
 		server.debugLog("Configured file transaction log dir: %s", txLogDir)
 	}
 
