@@ -1,6 +1,7 @@
 package base
 
 import (
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,11 @@ func (m *mockConfig) IsExported(name string) bool {
 
 func (m *mockConfig) SupportedQueryTypes() []string {
 	return []string{"function", "struct", "variable"}
+}
+
+func (m *mockConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	name := m.ExtractNodeName(node, source)
+	return []Target{NewTarget(node, query.Type, name)}
 }
 
 func newTestProvider() *Provider {
@@ -992,6 +998,37 @@ func main() {}
 	}
 	if stats.Active != 0 {
 		t.Fatalf("expected no active parsers after query, got %d", stats.Active)
+	}
+}
+
+func TestMatchSeamKeepsParserNodesOutOfCore(t *testing.T) {
+	if _, ok := reflect.TypeOf(core.CodeMatch{}).FieldByName("Node"); ok {
+		t.Fatal("core.CodeMatch must not expose parser-native node state")
+	}
+
+	provider := newTestProvider()
+	source := `package main
+
+func demo() {}
+`
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(provider.config.GetLanguage())
+	tree := parser.Parse(nil, []byte(source))
+	if tree == nil {
+		t.Fatal("expected parsed tree")
+	}
+	defer tree.Close()
+
+	targets := provider.findTargets(tree.RootNode(), source, core.AgentQuery{
+		Type: "function",
+		Name: "demo",
+	})
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 provider target, got %d", len(targets))
+	}
+	if targets[0].Node == nil {
+		t.Fatal("provider-local targets must retain parser nodes for transforms")
 	}
 }
 

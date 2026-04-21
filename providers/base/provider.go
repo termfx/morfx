@@ -30,6 +30,9 @@ type LanguageConfig interface {
 
 	// For discovery/specification
 	SupportedQueryTypes() []string
+
+	// Provider-owned expansion targets retain parser-native state locally.
+	ExpandMatches(*sitter.Node, string, core.AgentQuery) []Target
 }
 
 // SmartAppendConfig allows language configs to provide smarter append behaviour.
@@ -218,7 +221,7 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 			}},
 		}
 
-		modified, err := p.doAppendToTarget(source, []*sitter.Node{root}, op.Content)
+		modified, err := p.doAppendToTarget(source, []Target{NewTarget(root, "", "")}, op.Content)
 		if err != nil {
 			return core.TransformResult{Error: err}
 		}
@@ -240,14 +243,8 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 		}
 	}
 
-	// Extract nodes for transformation operations
-	nodes := make([]*sitter.Node, len(matches))
-	for i, match := range matches {
-		nodes[i] = match.Node
-	}
-
 	// Calculate confidence
-	confidence := p.calculateConfidence(op, nodes, source)
+	confidence := p.calculateConfidence(op, matches, source)
 	var (
 		modified string
 		err      error
@@ -255,15 +252,15 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 
 	switch op.Method {
 	case "replace":
-		modified, err = p.doReplace(source, nodes, op.Replacement)
+		modified, err = p.doReplace(source, matches, op.Replacement)
 	case "delete":
-		modified, err = p.doDelete(source, nodes)
+		modified, err = p.doDelete(source, matches)
 	case "insert_before":
-		modified, err = p.doInsertBefore(source, nodes, op.Content)
+		modified, err = p.doInsertBefore(source, matches, op.Content)
 	case "insert_after":
-		modified, err = p.doInsertAfter(source, nodes, op.Content)
+		modified, err = p.doInsertAfter(source, matches, op.Content)
 	case "append":
-		modified, err = p.doAppendToTarget(source, nodes, op.Content)
+		modified, err = p.doAppendToTarget(source, matches, op.Content)
 	default:
 		return core.TransformResult{
 			Error: fmt.Errorf("unknown transform method: %s", op.Method),
@@ -277,7 +274,7 @@ func (p *Provider) Transform(source string, op core.TransformOp) core.TransformR
 	// Generate diff
 	diff := p.generateDiff(source, modified)
 
-	p.adjustConfidence(&confidence, op, source, modified, nodes)
+	p.adjustConfidence(&confidence, op, source, modified, matches)
 
 	return core.TransformResult{
 		Modified:   modified,
@@ -325,8 +322,8 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 }
 
 // findTargets finds all matches for the query with proper expansion
-func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []Target {
+	var matches []Target
 
 	var walk func(*sitter.Node)
 	walk = func(node *sitter.Node) {
@@ -345,26 +342,8 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 }
 
 // expandMatches converts a node into one or more matches
-func (p *Provider) expandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	// Check if provider has custom expansion logic
-	if expander, ok := p.config.(interface {
-		ExpandMatches(*sitter.Node, string, core.AgentQuery) []core.CodeMatch
-	}); ok {
-		return expander.ExpandMatches(node, source, query)
-	}
-
-	// Default: single match
-	name := p.config.ExtractNodeName(node, source)
-	return []core.CodeMatch{{
-		Node:      node,
-		Name:      name,
-		Type:      query.Type,
-		NodeType:  node.Type(),
-		StartByte: node.StartByte(),
-		EndByte:   node.EndByte(),
-		Line:      node.StartPoint().Row,
-		Column:    node.StartPoint().Column,
-	}}
+func (p *Provider) expandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	return p.config.ExpandMatches(node, source, query)
 }
 
 // nodeMatches checks if a node matches the query with provider-specific validation
@@ -396,17 +375,17 @@ func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.Agen
 }
 
 // sortTargetsDescending sorts nodes by start byte in descending order (reverse)
-func sortTargetsDescending(targets []*sitter.Node) []*sitter.Node {
-	sorted := make([]*sitter.Node, len(targets))
+func sortTargetsDescending(targets []Target) []Target {
+	sorted := make([]Target, len(targets))
 	copy(sorted, targets)
-	slices.SortFunc(sorted, func(a, b *sitter.Node) int {
-		return int(b.StartByte() - a.StartByte()) // Reverse order
+	slices.SortFunc(sorted, func(a, b Target) int {
+		return int(b.StartByte - a.StartByte) // Reverse order
 	})
 	return sorted
 }
 
 // doReplace performs replacement transformation
-func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement string) (string, error) {
+func (p *Provider) doReplace(source string, targets []Target, replacement string) (string, error) {
 	if len(targets) == 0 {
 		return source, fmt.Errorf("no targets to replace")
 	}
@@ -417,8 +396,8 @@ func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement 
 	// Replace each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		startPos := int(target.StartByte())
-		endPos := int(target.EndByte())
+		startPos := int(target.StartByte)
+		endPos := int(target.EndByte)
 
 		// Safety bounds check
 		if startPos > len(result) || endPos > len(result) || startPos < 0 || endPos < 0 {
@@ -434,12 +413,12 @@ func (p *Provider) doReplace(source string, targets []*sitter.Node, replacement 
 }
 
 // doDelete performs deletion transformation
-func (p *Provider) doDelete(source string, targets []*sitter.Node) (string, error) {
+func (p *Provider) doDelete(source string, targets []Target) (string, error) {
 	return p.doReplace(source, targets, "")
 }
 
 // doInsertBefore performs insertion before target
-func (p *Provider) doInsertBefore(source string, targets []*sitter.Node, content string) (string, error) {
+func (p *Provider) doInsertBefore(source string, targets []Target, content string) (string, error) {
 	if len(targets) == 0 {
 		return source, fmt.Errorf("no targets for insertion")
 	}
@@ -450,7 +429,7 @@ func (p *Provider) doInsertBefore(source string, targets []*sitter.Node, content
 	// Insert before each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		startPos := int(target.StartByte())
+		startPos := int(target.StartByte)
 
 		// Safety bounds check
 		if startPos > len(result) || startPos < 0 {
@@ -461,7 +440,7 @@ func (p *Provider) doInsertBefore(source string, targets []*sitter.Node, content
 		after := result[startPos:]
 
 		// Preserve indentation
-		indent := p.getIndentation(source, target)
+		indent := p.getIndentation(source, target.Node)
 		contentWithIndent := indent + content + "\n"
 
 		result = before + contentWithIndent + after
@@ -471,7 +450,7 @@ func (p *Provider) doInsertBefore(source string, targets []*sitter.Node, content
 }
 
 // doInsertAfter performs insertion after target
-func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content string) (string, error) {
+func (p *Provider) doInsertAfter(source string, targets []Target, content string) (string, error) {
 	if len(targets) == 0 {
 		return source, fmt.Errorf("no targets for insertion")
 	}
@@ -482,7 +461,7 @@ func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content 
 	// Insert after each target (from end to start to preserve positions)
 	result := source
 	for _, target := range sortedTargets {
-		endPos := int(target.EndByte())
+		endPos := int(target.EndByte)
 
 		// Safety bounds check
 		if endPos > len(result) || endPos < 0 {
@@ -493,7 +472,7 @@ func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content 
 		after := result[endPos:]
 
 		// Preserve indentation
-		indent := p.getIndentation(source, target)
+		indent := p.getIndentation(source, target.Node)
 		contentWithIndent := "\n" + indent + content
 
 		result = before + contentWithIndent + after
@@ -503,7 +482,7 @@ func (p *Provider) doInsertAfter(source string, targets []*sitter.Node, content 
 }
 
 // doAppendToTarget appends content to the end of target scope
-func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, content string) (string, error) {
+func (p *Provider) doAppendToTarget(source string, targets []Target, content string) (string, error) {
 	if len(targets) == 0 {
 		return source, fmt.Errorf("no targets for append")
 	}
@@ -512,13 +491,13 @@ func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, conte
 	target := targets[0]
 
 	if smart, ok := p.config.(SmartAppendConfig); ok {
-		if modified, handled := smart.SmartAppend(source, target, content); handled {
+		if modified, handled := smart.SmartAppend(source, target.Node, content); handled {
 			return modified, nil
 		}
 	}
 
 	// This is language-agnostic - append after target
-	insertPos := target.EndByte()
+	insertPos := int(target.EndByte)
 
 	before := source[:insertPos]
 	after := source[insertPos:]
@@ -531,6 +510,10 @@ func (p *Provider) doAppendToTarget(source string, targets []*sitter.Node, conte
 
 // getIndentation extracts indentation for a node
 func (p *Provider) getIndentation(source string, node *sitter.Node) string {
+	if node == nil {
+		return ""
+	}
+
 	line := node.StartPoint().Row
 	lineStart := 0
 	currentLine := uint32(0)
@@ -562,8 +545,8 @@ func (p *Provider) getIndentation(source string, node *sitter.Node) string {
 // calculateConfidence calculates transformation confidence
 func (p *Provider) calculateConfidence(
 	op core.TransformOp,
-	targets []*sitter.Node,
-	source string,
+	targets []Target,
+	_ string,
 ) core.ConfidenceScore {
 	score := 1.0
 	factors := []core.ConfidenceFactor{}
@@ -596,8 +579,7 @@ func (p *Provider) calculateConfidence(
 		})
 		// Check if deleting exported function
 		if len(targets) > 0 {
-			name := p.config.ExtractNodeName(targets[0], source)
-			if p.config.IsExported(name) {
+			if p.config.IsExported(targets[0].Name) {
 				score -= 0.3
 				factors = append(factors, core.ConfidenceFactor{
 					Name:   "delete_exported_api",
@@ -609,8 +591,7 @@ func (p *Provider) calculateConfidence(
 	case "replace":
 		// Check if replacing exported function using language-specific logic
 		if len(targets) > 0 {
-			name := p.config.ExtractNodeName(targets[0], source)
-			if p.config.IsExported(name) {
+			if p.config.IsExported(targets[0].Name) {
 				score -= 0.2
 				factors = append(factors, core.ConfidenceFactor{
 					Name:   "exported_api",
@@ -645,7 +626,7 @@ func (p *Provider) calculateConfidence(
 	}
 }
 
-func (p *Provider) adjustConfidence(conf *core.ConfidenceScore, op core.TransformOp, original, modified string, targets []*sitter.Node) {
+func (p *Provider) adjustConfidence(conf *core.ConfidenceScore, op core.TransformOp, original, modified string, targets []Target) {
 	if conf == nil {
 		return
 	}

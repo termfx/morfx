@@ -7,6 +7,7 @@ import (
 	"github.com/smacker/go-tree-sitter/javascript"
 
 	"github.com/oxhq/morfx/core"
+	base "github.com/oxhq/morfx/providers/base"
 )
 
 // Config implements LanguageConfig for JavaScript
@@ -161,7 +162,7 @@ func (c *Config) IsExported(name string) bool {
 }
 
 // ExpandMatches handles destructuring and multi-variable declarations in JavaScript
-func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	switch node.Type() {
 	case "variable_declaration", "lexical_declaration":
 		return c.expandVariableDeclaration(node, source, query)
@@ -170,16 +171,7 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	case "arrow_function":
 		// Fix arrow function names
 		name := c.getArrowFunctionName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	case "import_statement":
 		return c.expandImportStatement(node, source, query)
 	case "export_statement":
@@ -187,21 +179,12 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	default:
 		// Default single match
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 }
 
-func (c *Config) expandVariableDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandVariableDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
@@ -213,8 +196,8 @@ func (c *Config) expandVariableDeclaration(node *sitter.Node, source string, que
 	return matches
 }
 
-func (c *Config) expandVariableDeclarator(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandVariableDeclarator(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	idNode := node.ChildByFieldName("id")
 	if idNode == nil {
@@ -224,16 +207,7 @@ func (c *Config) expandVariableDeclarator(node *sitter.Node, source string, quer
 	switch idNode.Type() {
 	case "identifier":
 		name := source[idNode.StartByte():idNode.EndByte()]
-		matches = append(matches, core.CodeMatch{
-			Node:      idNode,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  "identifier",
-			StartByte: idNode.StartByte(),
-			EndByte:   idNode.EndByte(),
-			Line:      idNode.StartPoint().Row,
-			Column:    idNode.StartPoint().Column,
-		})
+		matches = append(matches, base.NewTarget(idNode, query.Type, name))
 	case "array_pattern":
 		matches = append(matches, c.expandArrayPattern(idNode, source, query)...)
 	case "object_pattern":
@@ -243,8 +217,8 @@ func (c *Config) expandVariableDeclarator(node *sitter.Node, source string, quer
 	return matches
 }
 
-func (c *Config) expandImportStatement(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandImportStatement(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 	// Try to capture each imported binding or namespace
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
@@ -253,109 +227,82 @@ func (c *Config) expandImportStatement(node *sitter.Node, source string, query c
 			// import { a as b } from 'x'
 			if alias := child.ChildByFieldName("alias"); alias != nil {
 				name := source[alias.StartByte():alias.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 		case "namespace_import":
 			// import * as ns from 'x'
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 		}
 	}
 	if len(matches) == 0 {
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 	return matches
 }
 
-func (c *Config) expandExportStatement(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandExportStatement(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 	// Handle named exports: export { a as b }
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "export_specifier" {
 			if alias := child.ChildByFieldName("alias"); alias != nil {
 				name := source[alias.StartByte():alias.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 		}
 	}
 	if len(matches) == 0 {
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 	return matches
 }
 
-func (c *Config) expandArrayPattern(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandArrayPattern(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "identifier",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandObjectPattern(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandObjectPattern(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		switch child.Type() {
 		case "shorthand_property_identifier":
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "identifier",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		case "pair":
 			if valueNode := child.ChildByFieldName("value"); valueNode != nil && valueNode.Type() == "identifier" {
 				name := source[valueNode.StartByte():valueNode.EndByte()]
-				matches = append(matches, core.CodeMatch{
-					Node:      valueNode,
-					Name:      name,
-					Type:      query.Type,
-					NodeType:  "identifier",
-					StartByte: valueNode.StartByte(),
-					EndByte:   valueNode.EndByte(),
-					Line:      valueNode.StartPoint().Row,
-					Column:    valueNode.StartPoint().Column,
-				})
+				matches = append(matches, base.NewTarget(valueNode, query.Type, name))
 			}
 		}
 	}

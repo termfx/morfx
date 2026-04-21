@@ -7,6 +7,7 @@ import (
 	"github.com/smacker/go-tree-sitter/php"
 
 	"github.com/oxhq/morfx/core"
+	base "github.com/oxhq/morfx/providers/base"
 )
 
 // Config implements LanguageConfig for PHP
@@ -243,18 +244,9 @@ func (c *Config) ValidateVisibility(node *sitter.Node, source string) bool {
 }
 
 // ExpandMatches handles multiple property declarations in PHP
-func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	makeMatch := func(target *sitter.Node, name string) []core.CodeMatch {
-		return []core.CodeMatch{{
-			Node:      target,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  target.Type(),
-			StartByte: target.StartByte(),
-			EndByte:   target.EndByte(),
-			Line:      target.StartPoint().Row,
-			Column:    target.StartPoint().Column,
-		}}
+func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	makeMatch := func(target *sitter.Node, name string) []base.Target {
+		return []base.Target{base.NewTarget(target, query.Type, name)}
 	}
 
 	switch node.Type() {
@@ -282,52 +274,34 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	}
 }
 
-func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "variable_name" && strings.HasPrefix(source[child.StartByte():child.EndByte()], "$") {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "variable_name",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandListLiteral(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandListLiteral(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "variable_name" {
 			name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "variable_name",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 	return matches
 }
 
-func (c *Config) expandConstDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandConstDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	// Constants can be declared as: const A = 1, B = 2;
 	// Collect each "name" token in the declaration
@@ -335,36 +309,18 @@ func (c *Config) expandConstDeclaration(node *sitter.Node, source string, query 
 		child := node.Child(i)
 		if child.Type() == "name" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "name",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		} else if inner := child.ChildByFieldName("name"); inner != nil {
 			name := source[inner.StartByte():inner.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      inner,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "name",
-				StartByte: inner.StartByte(),
-				EndByte:   inner.EndByte(),
-				Line:      inner.StartPoint().Row,
-				Column:    inner.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(inner, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandNamespaceUse(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandNamespaceUse(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	// Handle grouped and multiple clauses: use A\B, C\D as Alias;
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -374,61 +330,25 @@ func (c *Config) expandNamespaceUse(node *sitter.Node, source string, query core
 			// Prefer alias, otherwise name
 			if alias := child.ChildByFieldName("alias"); alias != nil {
 				name := source[alias.StartByte():alias.EndByte()]
-				matches = append(matches, core.CodeMatch{
-					Node:      alias,
-					Name:      name,
-					Type:      query.Type,
-					NodeType:  "alias",
-					StartByte: alias.StartByte(),
-					EndByte:   alias.EndByte(),
-					Line:      alias.StartPoint().Row,
-					Column:    alias.StartPoint().Column,
-				})
+				matches = append(matches, base.NewTarget(alias, query.Type, name))
 				continue
 			}
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{
-					Node:      nameNode,
-					Name:      name,
-					Type:      query.Type,
-					NodeType:  nameNode.Type(),
-					StartByte: nameNode.StartByte(),
-					EndByte:   nameNode.EndByte(),
-					Line:      nameNode.StartPoint().Row,
-					Column:    nameNode.StartPoint().Column,
-				})
+				matches = append(matches, base.NewTarget(nameNode, query.Type, name))
 				continue
 			}
 		case "qualified_name":
 			// Simple single-clause use
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  child.Type(),
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	// Fallback: single match for the whole declaration
 	if len(matches) == 0 {
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 
 	return matches

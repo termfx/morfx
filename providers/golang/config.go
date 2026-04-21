@@ -7,6 +7,7 @@ import (
 	"github.com/smacker/go-tree-sitter/golang"
 
 	"github.com/oxhq/morfx/core"
+	base "github.com/oxhq/morfx/providers/base"
 )
 
 // Config implements LanguageConfig for Go
@@ -329,7 +330,7 @@ func (c *Config) ValidateTypeSpec(node *sitter.Node, source, queryType string) b
 }
 
 // ExpandMatches handles multi-variable declarations in Go
-func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	switch node.Type() {
 	case "var_declaration", "const_declaration":
 		return c.expandVarDeclaration(node, source, query)
@@ -340,21 +341,12 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	default:
 		// Default single match
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 }
 
-func (c *Config) expandVarDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandVarDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	// Find var_spec nodes within var_declaration
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -367,8 +359,8 @@ func (c *Config) expandVarDeclaration(node *sitter.Node, source string, query co
 	return matches
 }
 
-func (c *Config) expandVarSpec(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandVarSpec(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	// var_spec contains identifiers directly (not in identifier_list)
 	// Structure: var_spec -> identifier, ',', identifier, type_identifier
@@ -376,24 +368,15 @@ func (c *Config) expandVarSpec(node *sitter.Node, source string, query core.Agen
 		child := node.Child(i)
 		if child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "identifier",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandShortVarDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandShortVarDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	// short_var_declaration -> expression_list -> identifiers
 	// Structure: short_var_declaration -> expression_list, ':=', expression_list
@@ -405,16 +388,7 @@ func (c *Config) expandShortVarDeclaration(node *sitter.Node, source string, que
 				identifier := child.Child(j)
 				if identifier.Type() == "identifier" {
 					name := source[identifier.StartByte():identifier.EndByte()]
-					matches = append(matches, core.CodeMatch{
-						Node:      identifier,
-						Name:      name,
-						Type:      query.Type,
-						NodeType:  "identifier",
-						StartByte: identifier.StartByte(),
-						EndByte:   identifier.EndByte(),
-						Line:      identifier.StartPoint().Row,
-						Column:    identifier.StartPoint().Column,
-					})
+					matches = append(matches, base.NewTarget(identifier, query.Type, name))
 				}
 			}
 			// Only process first expression_list (left side of :=)
@@ -425,8 +399,8 @@ func (c *Config) expandShortVarDeclaration(node *sitter.Node, source string, que
 	return matches
 }
 
-func (c *Config) expandImportDeclaration(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandImportDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
@@ -448,31 +422,13 @@ func (c *Config) expandImportDeclaration(node *sitter.Node, source string, query
 				}
 			}
 		}
-		matches = append(matches, core.CodeMatch{
-			Node:      child,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  child.Type(),
-			StartByte: child.StartByte(),
-			EndByte:   child.EndByte(),
-			Line:      child.StartPoint().Row,
-			Column:    child.StartPoint().Column,
-		})
+		matches = append(matches, base.NewTarget(child, query.Type, name))
 	}
 
 	if len(matches) == 0 {
 		// Fallback single match
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 
 	return matches

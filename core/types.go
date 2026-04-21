@@ -1,9 +1,5 @@
 package core
 
-import (
-	sitter "github.com/smacker/go-tree-sitter"
-)
-
 // AgentQuery represents a natural language query for code elements
 type AgentQuery struct {
 	Type     string       `json:"type"`               // function, struct, class, etc
@@ -93,14 +89,13 @@ type FileTransformOp struct {
 
 // CodeMatch represents a specific code element match with precise location
 type CodeMatch struct {
-	Node      *sitter.Node `json:"-"`         // AST node (not serialized)
-	Name      string       `json:"name"`      // Extracted name/identifier
-	Type      string       `json:"type"`      // Query type that matched
-	NodeType  string       `json:"node_type"` // AST node type
-	StartByte uint32       `json:"start_byte"`
-	EndByte   uint32       `json:"end_byte"`
-	Line      uint32       `json:"line"`
-	Column    uint32       `json:"column"`
+	Name      string `json:"name"`      // Extracted name/identifier
+	Type      string `json:"type"`      // Query type that matched
+	NodeType  string `json:"node_type"` // AST node type
+	StartByte uint32 `json:"start_byte"`
+	EndByte   uint32 `json:"end_byte"`
+	Line      uint32 `json:"line"`
+	Column    uint32 `json:"column"`
 }
 
 // FileMatch represents a code match with file information

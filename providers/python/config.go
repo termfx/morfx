@@ -7,6 +7,7 @@ import (
 	"github.com/smacker/go-tree-sitter/python"
 
 	"github.com/oxhq/morfx/core"
+	base "github.com/oxhq/morfx/providers/base"
 )
 
 // Config implements LanguageConfig for Python
@@ -179,7 +180,7 @@ func (c *Config) IsExported(name string) bool {
 }
 
 // ExpandMatches handles tuple unpacking and multiple assignments in Python
-func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
+func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	switch node.Type() {
 	case "assignment":
 		return c.expandAssignment(node, source, query)
@@ -191,21 +192,12 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 		return c.expandImportFrom(node, source, query)
 	default:
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{
-			Node:      node,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  node.Type(),
-			StartByte: node.StartByte(),
-			EndByte:   node.EndByte(),
-			Line:      node.StartPoint().Row,
-			Column:    node.StartPoint().Column,
-		}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 }
 
-func (c *Config) expandAssignment(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandAssignment(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	leftNode := node.ChildByFieldName("left")
 	if leftNode == nil {
@@ -215,16 +207,7 @@ func (c *Config) expandAssignment(node *sitter.Node, source string, query core.A
 	switch leftNode.Type() {
 	case "identifier":
 		name := source[leftNode.StartByte():leftNode.EndByte()]
-		matches = append(matches, core.CodeMatch{
-			Node:      leftNode,
-			Name:      name,
-			Type:      query.Type,
-			NodeType:  "identifier",
-			StartByte: leftNode.StartByte(),
-			EndByte:   leftNode.EndByte(),
-			Line:      leftNode.StartPoint().Row,
-			Column:    leftNode.StartPoint().Column,
-		})
+		matches = append(matches, base.NewTarget(leftNode, query.Type, name))
 	case "tuple", "list":
 		matches = append(matches, c.expandTupleOrList(leftNode, source, query)...)
 	case "pattern_list":
@@ -234,106 +217,88 @@ func (c *Config) expandAssignment(node *sitter.Node, source string, query core.A
 	return matches
 }
 
-func (c *Config) expandTupleOrList(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandTupleOrList(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "identifier",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandPatternList(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandPatternList(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{
-				Node:      child,
-				Name:      name,
-				Type:      query.Type,
-				NodeType:  "identifier",
-				StartByte: child.StartByte(),
-				EndByte:   child.EndByte(),
-				Line:      child.StartPoint().Row,
-				Column:    child.StartPoint().Column,
-			})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 
 	return matches
 }
 
-func (c *Config) expandImport(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandImport(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 	// import a as b, c
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "aliased_import" {
 			if alias := child.ChildByFieldName("alias"); alias != nil {
 				name := source[alias.StartByte():alias.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 		}
 		if child.Type() == "dotted_name" || child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 	if len(matches) == 0 {
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 	return matches
 }
 
-func (c *Config) expandImportFrom(node *sitter.Node, source string, query core.AgentQuery) []core.CodeMatch {
-	var matches []core.CodeMatch
+func (c *Config) expandImportFrom(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
+	var matches []base.Target
 	// from x import a as b, c
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "aliased_import" {
 			if alias := child.ChildByFieldName("alias"); alias != nil {
 				name := source[alias.StartByte():alias.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
 				name := source[nameNode.StartByte():nameNode.EndByte()]
-				matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+				matches = append(matches, base.NewTarget(child, query.Type, name))
 				continue
 			}
 		}
 		if child.Type() == "identifier" {
 			name := source[child.StartByte():child.EndByte()]
-			matches = append(matches, core.CodeMatch{Node: child, Name: name, Type: query.Type, NodeType: child.Type(), StartByte: child.StartByte(), EndByte: child.EndByte(), Line: child.StartPoint().Row, Column: child.StartPoint().Column})
+			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}
 	if len(matches) == 0 {
 		name := c.ExtractNodeName(node, source)
-		return []core.CodeMatch{{Node: node, Name: name, Type: query.Type, NodeType: node.Type(), StartByte: node.StartByte(), EndByte: node.EndByte(), Line: node.StartPoint().Row, Column: node.StartPoint().Column}}
+		return []base.Target{base.NewTarget(node, query.Type, name)}
 	}
 	return matches
 }
