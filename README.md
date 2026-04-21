@@ -69,7 +69,7 @@ go install github.com/oxhq/morfx/cmd/morfx@latest
 
 ### Windows build notes
 
-Windows support is practical, but current provider builds require `CGO_ENABLED=1` and a compatible C compiler for tree-sitter grammars. Zig or MinGW-w64 both work; set `CC` before running Go commands:
+Windows support is practical, but current provider builds require `CGO_ENABLED=1` and a compatible C compiler for tree-sitter grammars. The verified path in this repo uses Zig; set `CC` before running Go commands:
 
 ```powershell
 $env:CGO_ENABLED = "1"
