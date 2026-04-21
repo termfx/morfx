@@ -164,6 +164,62 @@ func (c *Config) inferImplicitAppendScope(root *sitter.Node, content string) (*s
 	return scope, scope != nil
 }
 
+func (c *Config) ValidateQueryNode(node *sitter.Node, source, queryType string) bool {
+	switch queryType {
+	case "constructor", "ctor":
+		return node.Type() == "method_definition" && c.ExtractNodeName(node, source) == "constructor"
+	case "getter":
+		return c.hasMemberKeywordBeforeName(node, source, "get")
+	case "setter":
+		return c.hasMemberKeywordBeforeName(node, source, "set")
+	case "accessor":
+		return c.hasMemberKeywordBeforeName(node, source, "accessor")
+	default:
+		return true
+	}
+}
+
+func (c *Config) hasMemberKeywordBeforeName(node *sitter.Node, source, keyword string) bool {
+	if node == nil {
+		return false
+	}
+
+	nameNode := node.ChildByFieldName("name")
+	if nameNode == nil {
+		nameNode = node.ChildByFieldName("key")
+	}
+	if nameNode == nil {
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child == nil {
+				continue
+			}
+			switch child.Type() {
+			case "property_identifier", "private_property_identifier", "identifier":
+				nameNode = child
+				i = int(node.ChildCount())
+			}
+		}
+	}
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child == nil {
+			continue
+		}
+		if nameNode != nil && child.StartByte() == nameNode.StartByte() && child.EndByte() == nameNode.EndByte() {
+			return false
+		}
+
+		text := strings.TrimSpace(source[child.StartByte():child.EndByte()])
+		if text == keyword {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (c *Config) appendScopeCandidate(node *sitter.Node) *sitter.Node {
 	if node == nil {
 		return nil

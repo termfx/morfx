@@ -369,6 +369,14 @@ func (p *Provider) nodeMatches(node *sitter.Node, source string, queryType strin
 
 func (p *Provider) passesProviderValidation(node *sitter.Node, source string, queryType string) bool {
 	if validator, ok := p.config.(interface {
+		ValidateQueryNode(*sitter.Node, string, string) bool
+	}); ok {
+		if !validator.ValidateQueryNode(node, source, queryType) {
+			return false
+		}
+	}
+
+	if validator, ok := p.config.(interface {
 		ValidateTypeSpec(*sitter.Node, string, string) bool
 	}); ok {
 		if !validator.ValidateTypeSpec(node, source, queryType) {

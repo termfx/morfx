@@ -274,6 +274,15 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	}
 }
 
+func (c *Config) ValidateQueryNode(node *sitter.Node, source, queryType string) bool {
+	switch queryType {
+	case "constructor", "ctor":
+		return node.Type() == "method_declaration" && strings.EqualFold(c.ExtractNodeName(node, source), "__construct")
+	default:
+		return true
+	}
+}
+
 func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	var matches []base.Target
 

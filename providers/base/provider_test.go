@@ -8,8 +8,10 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
+	tsjavascript "github.com/smacker/go-tree-sitter/javascript"
 	tsphp "github.com/smacker/go-tree-sitter/php"
 	tspython "github.com/smacker/go-tree-sitter/python"
+	tstypescript "github.com/smacker/go-tree-sitter/typescript/typescript"
 
 	"github.com/oxhq/morfx/core"
 )
@@ -31,6 +33,9 @@ type typeSpecValidatorConfig struct{}
 type ifaceAliasConfig struct{}
 type pythonVarAliasConfig struct{}
 type phpPropertyConfig struct{}
+type jsConstructorConfig struct{}
+type tsSemanticMethodConfig struct{}
+type phpConstructorConfig struct{}
 
 func (m *mockConfig) Language() string {
 	return m.language
@@ -400,6 +405,195 @@ func (c *phpPropertyConfig) ExpandMatches(node *sitter.Node, source string, quer
 	return targets
 }
 
+func (c *jsConstructorConfig) Language() string {
+	return "javascript"
+}
+
+func (c *jsConstructorConfig) Extensions() []string {
+	return []string{".js"}
+}
+
+func (c *jsConstructorConfig) GetLanguage() *sitter.Language {
+	return tsjavascript.GetLanguage()
+}
+
+func (c *jsConstructorConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "constructor", "ctor":
+		return []string{"method_definition"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *jsConstructorConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	if keyNode := node.ChildByFieldName("key"); keyNode != nil {
+		return source[keyNode.StartByte():keyNode.EndByte()]
+	}
+	return ""
+}
+
+func (c *jsConstructorConfig) IsExported(name string) bool {
+	return true
+}
+
+func (c *jsConstructorConfig) SupportedQueryTypes() []string {
+	return []string{"constructor", "ctor"}
+}
+
+func (c *jsConstructorConfig) ValidateQueryNode(node *sitter.Node, source, queryType string) bool {
+	if queryType != "constructor" && queryType != "ctor" {
+		return true
+	}
+	return node.Type() == "method_definition" && c.ExtractNodeName(node, source) == "constructor"
+}
+
+func (c *tsSemanticMethodConfig) Language() string {
+	return "typescript"
+}
+
+func (c *tsSemanticMethodConfig) Extensions() []string {
+	return []string{".ts"}
+}
+
+func (c *tsSemanticMethodConfig) GetLanguage() *sitter.Language {
+	return tstypescript.GetLanguage()
+}
+
+func (c *tsSemanticMethodConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "getter", "setter", "accessor":
+		return []string{"method_definition", "method_signature"}
+	case "constructor", "ctor":
+		return []string{"method_definition"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *tsSemanticMethodConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	if keyNode := node.ChildByFieldName("key"); keyNode != nil {
+		return source[keyNode.StartByte():keyNode.EndByte()]
+	}
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		return source[nameNode.StartByte():nameNode.EndByte()]
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "property_identifier" {
+			return source[child.StartByte():child.EndByte()]
+		}
+	}
+	return ""
+}
+
+func (c *tsSemanticMethodConfig) IsExported(name string) bool {
+	return true
+}
+
+func (c *tsSemanticMethodConfig) SupportedQueryTypes() []string {
+	return []string{"getter", "setter", "accessor", "constructor", "ctor"}
+}
+
+func (c *tsSemanticMethodConfig) ValidateQueryNode(node *sitter.Node, source, queryType string) bool {
+	switch queryType {
+	case "constructor", "ctor":
+		return node.Type() == "method_definition" && c.ExtractNodeName(node, source) == "constructor"
+	case "getter":
+		return testMemberKeywordBeforeName(node, source, "get")
+	case "setter":
+		return testMemberKeywordBeforeName(node, source, "set")
+	case "accessor":
+		return testMemberKeywordBeforeName(node, source, "accessor")
+	default:
+		return true
+	}
+}
+
+func (c *phpConstructorConfig) Language() string {
+	return "php"
+}
+
+func (c *phpConstructorConfig) Extensions() []string {
+	return []string{".php"}
+}
+
+func (c *phpConstructorConfig) GetLanguage() *sitter.Language {
+	return tsphp.GetLanguage()
+}
+
+func (c *phpConstructorConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "constructor", "ctor":
+		return []string{"method_declaration"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *phpConstructorConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		return source[nameNode.StartByte():nameNode.EndByte()]
+	}
+	return ""
+}
+
+func (c *phpConstructorConfig) IsExported(name string) bool {
+	return true
+}
+
+func (c *phpConstructorConfig) SupportedQueryTypes() []string {
+	return []string{"constructor", "ctor"}
+}
+
+func (c *phpConstructorConfig) ValidateQueryNode(node *sitter.Node, source, queryType string) bool {
+	if queryType != "constructor" && queryType != "ctor" {
+		return true
+	}
+	return node.Type() == "method_declaration" && strings.EqualFold(c.ExtractNodeName(node, source), "__construct")
+}
+
+func testMemberKeywordBeforeName(node *sitter.Node, source, keyword string) bool {
+	if node == nil {
+		return false
+	}
+
+	nameNode := node.ChildByFieldName("name")
+	if nameNode == nil {
+		nameNode = node.ChildByFieldName("key")
+	}
+	if nameNode == nil {
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child == nil {
+				continue
+			}
+			switch child.Type() {
+			case "property_identifier", "private_property_identifier", "identifier":
+				nameNode = child
+				i = int(node.ChildCount())
+			}
+		}
+	}
+
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child == nil {
+			continue
+		}
+		if nameNode != nil && child.StartByte() == nameNode.StartByte() && child.EndByte() == nameNode.EndByte() {
+			return false
+		}
+
+		text := strings.TrimSpace(source[child.StartByte():child.EndByte()])
+		if text == keyword {
+			return true
+		}
+	}
+
+	return false
+}
+
 func newTestProvider() *Provider {
 	config := &mockConfig{
 		language:   "go",
@@ -642,6 +836,76 @@ func TestQueryMatchesPhpExpandedPropertyNamesWithoutDollar(t *testing.T) {
 	}
 	if result.Matches[0].Name != "foo" {
 		t.Fatalf("expected property match %q, got %q", "foo", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesJavaScriptConstructorValidation(t *testing.T) {
+	provider := New(&jsConstructorConfig{})
+	source := `class Example {
+	constructor() {}
+	render() {}
+}`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "constructor",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only constructor match, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "constructor" {
+		t.Fatalf("expected constructor match %q, got %q", "constructor", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesTypeScriptGetterValidation(t *testing.T) {
+	provider := New(&tsSemanticMethodConfig{})
+	source := `class Example {
+	get value(): string { return this._value; }
+	value(): string { return this._value; }
+}`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "getter",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only getter match, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "value" {
+		t.Fatalf("expected getter match %q, got %q", "value", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesPhpConstructorValidation(t *testing.T) {
+	provider := New(&phpConstructorConfig{})
+	source := `<?php
+class Example {
+	public function __construct() {}
+	public function render() {}
+}`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "ctor",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only PHP constructor match, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "__construct" {
+		t.Fatalf("expected constructor match %q, got %q", "__construct", result.Matches[0].Name)
 	}
 }
 
