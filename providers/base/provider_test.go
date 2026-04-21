@@ -23,6 +23,10 @@ type legacyMockConfig struct {
 	extensions []string
 }
 
+type multiBindingConfig struct{}
+
+type typeSpecValidatorConfig struct{}
+
 func (m *mockConfig) Language() string {
 	return m.language
 }
@@ -94,6 +98,122 @@ func (m *legacyMockConfig) SupportedQueryTypes() []string {
 func (m *mockConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
 	name := m.ExtractNodeName(node, source)
 	return []Target{NewTarget(node, query.Type, name)}
+}
+
+func (c *multiBindingConfig) Language() string {
+	return "go"
+}
+
+func (c *multiBindingConfig) Extensions() []string {
+	return []string{".go"}
+}
+
+func (c *multiBindingConfig) GetLanguage() *sitter.Language {
+	return golang.GetLanguage()
+}
+
+func (c *multiBindingConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	if queryType == "variable" {
+		return []string{"var_declaration"}
+	}
+	return []string{queryType}
+}
+
+func (c *multiBindingConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "var_spec" {
+			for j := 0; j < int(child.ChildCount()); j++ {
+				identifier := child.Child(j)
+				if identifier.Type() == "identifier" {
+					return source[identifier.StartByte():identifier.EndByte()]
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (c *multiBindingConfig) IsExported(name string) bool {
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func (c *multiBindingConfig) SupportedQueryTypes() []string {
+	return []string{"variable"}
+}
+
+func (c *multiBindingConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	var targets []Target
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() != "var_spec" {
+			continue
+		}
+		for j := 0; j < int(child.ChildCount()); j++ {
+			identifier := child.Child(j)
+			if identifier.Type() == "identifier" {
+				name := source[identifier.StartByte():identifier.EndByte()]
+				targets = append(targets, NewTarget(identifier, query.Type, name))
+			}
+		}
+	}
+	return targets
+}
+
+func (c *typeSpecValidatorConfig) Language() string {
+	return "go"
+}
+
+func (c *typeSpecValidatorConfig) Extensions() []string {
+	return []string{".go"}
+}
+
+func (c *typeSpecValidatorConfig) GetLanguage() *sitter.Language {
+	return golang.GetLanguage()
+}
+
+func (c *typeSpecValidatorConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "struct", "interface":
+		return []string{"type_spec"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *typeSpecValidatorConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		return source[nameNode.StartByte():nameNode.EndByte()]
+	}
+	return ""
+}
+
+func (c *typeSpecValidatorConfig) IsExported(name string) bool {
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func (c *typeSpecValidatorConfig) SupportedQueryTypes() []string {
+	return []string{"struct", "interface"}
+}
+
+func (c *typeSpecValidatorConfig) ValidateTypeSpec(node *sitter.Node, source, queryType string) bool {
+	if node.Type() != "type_spec" {
+		return true
+	}
+
+	typeNode := node.ChildByFieldName("type")
+	if typeNode == nil {
+		return false
+	}
+
+	switch queryType {
+	case "struct":
+		return typeNode.Type() == "struct_type"
+	case "interface":
+		return typeNode.Type() == "interface_type"
+	default:
+		return true
+	}
 }
 
 func newTestProvider() *Provider {
@@ -227,6 +347,53 @@ func OtherFunc() {}
 	// Should match TestFunc1 and TestFunc2
 	if len(result.Matches) != 2 {
 		t.Errorf("Expected 2 matches, got %d", len(result.Matches))
+	}
+}
+
+func TestQueryFindsSecondaryExpandedName(t *testing.T) {
+	provider := New(&multiBindingConfig{})
+	source := `package main
+
+var alpha, beta int
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "variable",
+		Name: "beta",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected 1 expanded secondary-name match, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "beta" {
+		t.Fatalf("expected match name %q, got %q", "beta", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesTypeSpecValidation(t *testing.T) {
+	provider := New(&typeSpecValidatorConfig{})
+	source := `package main
+
+type Reader interface { Read() }
+type User struct { Name string }
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "struct",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only struct match after validation, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "User" {
+		t.Fatalf("expected struct match %q, got %q", "User", result.Matches[0].Name)
 	}
 }
 

@@ -147,8 +147,8 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 
 // walkTree recursively walks AST looking for matches
 func (p *Provider) walkTree(node *sitter.Node, source string, query core.AgentQuery, matches *[]core.Match) {
-	if match := p.checkNode(node, source, query); match != nil {
-		*matches = append(*matches, *match)
+	if nodeMatches := p.checkNode(node, source, query); len(nodeMatches) > 0 {
+		*matches = append(*matches, nodeMatches...)
 	}
 
 	for i := 0; i < int(node.ChildCount()); i++ {
@@ -158,37 +158,18 @@ func (p *Provider) walkTree(node *sitter.Node, source string, query core.AgentQu
 }
 
 // checkNode checks if a node matches the query using language-specific mapping
-func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQuery) *core.Match {
-	nodeType := node.Type()
-
-	// Get valid node types for this query from language config
-	validTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
-	if !slices.Contains(validTypes, nodeType) {
+func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQuery) []core.Match {
+	targets := p.candidateTargets(node, source, query)
+	if len(targets) == 0 {
 		return nil
 	}
 
-	// Extract name using language-specific logic
-	name := p.config.ExtractNodeName(node, source)
-	if name == "" {
-		name = "anonymous"
+	matches := make([]core.Match, 0, len(targets))
+	for _, target := range targets {
+		matches = append(matches, p.targetToMatch(source, query.Type, target))
 	}
 
-	// Check name pattern
-	if !p.matchesPattern(name, query.Name) {
-		return nil
-	}
-
-	return &core.Match{
-		Type: query.Type,
-		Name: name,
-		Location: core.Location{
-			Line:      int(node.StartPoint().Row) + 1,
-			Column:    int(node.StartPoint().Column) + 1,
-			EndLine:   int(node.EndPoint().Row) + 1,
-			EndColumn: int(node.EndPoint().Column) + 1,
-		},
-		Content: source[node.StartByte():node.EndByte()],
-	}
+	return matches
 }
 
 // Transform applies a transformation operation
@@ -325,10 +306,8 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 
 	var walk func(*sitter.Node)
 	walk = func(node *sitter.Node) {
-		if p.nodeMatches(node, source, query) {
-			// Expand node into multiple matches if needed
-			expanded := p.expandMatches(node, source, query)
-			matches = append(matches, expanded...)
+		if targets := p.candidateTargets(node, source, query); len(targets) > 0 {
+			matches = append(matches, targets...)
 		}
 		for i := 0; i < int(node.ChildCount()); i++ {
 			walk(node.Child(i))
@@ -351,32 +330,87 @@ func (p *Provider) expandMatches(node *sitter.Node, source string, query core.Ag
 	return []Target{NewTarget(node, query.Type, name)}
 }
 
+func (p *Provider) candidateTargets(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	if !p.nodeMatches(node, source, query.Type) {
+		return nil
+	}
+
+	targets := p.expandMatches(node, source, query)
+	if len(targets) == 0 {
+		return nil
+	}
+
+	filtered := make([]Target, 0, len(targets))
+	for _, target := range targets {
+		name := target.Name
+		if name == "" {
+			name = "anonymous"
+			target.Name = name
+		}
+		if p.matchesPattern(name, query.Name) {
+			filtered = append(filtered, target)
+		}
+	}
+
+	return filtered
+}
+
 // nodeMatches checks if a node matches the query with provider-specific validation
-func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.AgentQuery) bool {
-	nodeTypes := p.config.MapQueryTypeToNodeTypes(query.Type)
+func (p *Provider) nodeMatches(node *sitter.Node, source string, queryType string) bool {
+	nodeTypes := p.config.MapQueryTypeToNodeTypes(queryType)
 	typeMatches := slices.Contains(nodeTypes, node.Type())
 
 	if !typeMatches {
 		return false
 	}
 
-	// Provider-specific validation (e.g., Go struct vs interface in type_spec)
+	return p.passesProviderValidation(node, source, queryType)
+}
+
+func (p *Provider) passesProviderValidation(node *sitter.Node, source string, queryType string) bool {
 	if validator, ok := p.config.(interface {
 		ValidateTypeSpec(*sitter.Node, string, string) bool
 	}); ok {
-		if !validator.ValidateTypeSpec(node, source, query.Type) {
+		if !validator.ValidateTypeSpec(node, source, queryType) {
 			return false
 		}
 	}
 
-	if query.Name != "" {
-		name := p.config.ExtractNodeName(node, source)
-		if !p.matchesPattern(name, query.Name) {
+	if validator, ok := p.config.(interface {
+		ValidateAssignment(*sitter.Node, string, string) bool
+	}); ok {
+		if !validator.ValidateAssignment(node, source, queryType) {
 			return false
 		}
 	}
 
 	return true
+}
+
+func (p *Provider) targetToMatch(source, queryType string, target Target) core.Match {
+	location := core.Location{
+		Line:   int(target.Line) + 1,
+		Column: int(target.Column) + 1,
+	}
+
+	if target.Node != nil {
+		location.EndLine = int(target.Node.EndPoint().Row) + 1
+		location.EndColumn = int(target.Node.EndPoint().Column) + 1
+	}
+
+	content := ""
+	start := int(target.StartByte)
+	end := int(target.EndByte)
+	if start >= 0 && end >= 0 && start <= end && end <= len(source) {
+		content = source[start:end]
+	}
+
+	return core.Match{
+		Type:     queryType,
+		Name:     target.Name,
+		Location: location,
+		Content:  content,
+	}
 }
 
 // sortTargetsDescending sorts nodes by start byte in descending order (reverse)
