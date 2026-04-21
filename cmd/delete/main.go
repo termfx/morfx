@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/internal/toolcmd"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
 
@@ -107,13 +108,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	var wroteFile bool
-	if src.FromFile && strings.TrimSpace(result.Modified) != "" && result.Modified != src.Code {
-		if err := os.WriteFile(src.Path, []byte(result.Modified), src.Perm); err != nil {
-			_ = toolenv.WriteError(os.Stdout, "failed to write modified file", err)
-			os.Exit(1)
-		}
-		wroteFile = true
+	wroteFile, err := toolcmd.WriteModifiedSource(src.Path, src.FromFile, src.Code, result.Modified, src.Perm)
+	if err != nil {
+		_ = toolenv.WriteError(os.Stdout, "failed to write modified file", err)
+		os.Exit(1)
 	}
 
 	responseText := formatDeleteResponse(result, src.Path, src.FromFile, wroteFile)
@@ -156,25 +154,8 @@ func formatDeleteResponse(result core.TransformResult, path string, fromFile boo
 	builder.WriteString(fmt.Sprintf("Deletions made: %d\n", result.MatchCount))
 
 	builder.WriteString("\nConfidence: ")
-	builder.WriteString(formatConfidence(result.Confidence.Score))
+	builder.WriteString(toolcmd.FormatConfidence(result.Confidence.Score))
 	builder.WriteString(fmt.Sprintf(" (%.1f%%)", result.Confidence.Score*100))
 
 	return builder.String()
-}
-
-func formatConfidence(score float64) string {
-	if score < 0 {
-		score = 0
-	}
-	if score > 1 {
-		score = 1
-	}
-	filled := int(score * 10)
-	if filled > 10 {
-		filled = 10
-	}
-	if filled < 0 {
-		filled = 0
-	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
 }
