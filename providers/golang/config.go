@@ -319,13 +319,22 @@ func (c *Config) ValidateTypeSpec(node *sitter.Node, source, queryType string) b
 		return false
 	}
 
-	switch queryType {
+	switch c.canonicalTypeQuery(queryType) {
 	case "struct":
 		return typeNode.Type() == "struct_type"
 	case "interface":
 		return typeNode.Type() == "interface_type"
 	default:
 		return true // For other queries like "type", accept any type_spec
+	}
+}
+
+func (c *Config) canonicalTypeQuery(queryType string) string {
+	switch queryType {
+	case "iface":
+		return "interface"
+	default:
+		return queryType
 	}
 }
 

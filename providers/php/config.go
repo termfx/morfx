@@ -280,7 +280,7 @@ func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, que
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
 		if child.Type() == "variable_name" && strings.HasPrefix(source[child.StartByte():child.EndByte()], "$") {
-			name := source[child.StartByte():child.EndByte()]
+			name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
 			matches = append(matches, base.NewTarget(child, query.Type, name))
 		}
 	}

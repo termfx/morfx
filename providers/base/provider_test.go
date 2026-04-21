@@ -8,6 +8,8 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/golang"
+	tsphp "github.com/smacker/go-tree-sitter/php"
+	tspython "github.com/smacker/go-tree-sitter/python"
 
 	"github.com/oxhq/morfx/core"
 )
@@ -26,6 +28,9 @@ type legacyMockConfig struct {
 type multiBindingConfig struct{}
 
 type typeSpecValidatorConfig struct{}
+type ifaceAliasConfig struct{}
+type pythonVarAliasConfig struct{}
+type phpPropertyConfig struct{}
 
 func (m *mockConfig) Language() string {
 	return m.language
@@ -216,6 +221,185 @@ func (c *typeSpecValidatorConfig) ValidateTypeSpec(node *sitter.Node, source, qu
 	}
 }
 
+func (c *ifaceAliasConfig) Language() string {
+	return "go"
+}
+
+func (c *ifaceAliasConfig) Extensions() []string {
+	return []string{".go"}
+}
+
+func (c *ifaceAliasConfig) GetLanguage() *sitter.Language {
+	return golang.GetLanguage()
+}
+
+func (c *ifaceAliasConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "interface", "iface":
+		return []string{"type_spec"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *ifaceAliasConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		return source[nameNode.StartByte():nameNode.EndByte()]
+	}
+	return ""
+}
+
+func (c *ifaceAliasConfig) IsExported(name string) bool {
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func (c *ifaceAliasConfig) SupportedQueryTypes() []string {
+	return []string{"interface", "iface"}
+}
+
+func (c *ifaceAliasConfig) ValidateTypeSpec(node *sitter.Node, source, queryType string) bool {
+	if node.Type() != "type_spec" {
+		return true
+	}
+
+	typeNode := node.ChildByFieldName("type")
+	if typeNode == nil {
+		return false
+	}
+
+	switch queryType {
+	case "interface", "iface":
+		return typeNode.Type() == "interface_type"
+	default:
+		return true
+	}
+}
+
+func (c *pythonVarAliasConfig) Language() string {
+	return "python"
+}
+
+func (c *pythonVarAliasConfig) Extensions() []string {
+	return []string{".py"}
+}
+
+func (c *pythonVarAliasConfig) GetLanguage() *sitter.Language {
+	return tspython.GetLanguage()
+}
+
+func (c *pythonVarAliasConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "variable", "var":
+		return []string{"assignment", "augmented_assignment"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *pythonVarAliasConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	left := node.ChildByFieldName("left")
+	if left == nil {
+		return ""
+	}
+
+	switch left.Type() {
+	case "identifier":
+		return source[left.StartByte():left.EndByte()]
+	case "attribute":
+		for i := 0; i < int(left.ChildCount()); i++ {
+			child := left.Child(i)
+			if child.Type() == "identifier" {
+				return source[child.StartByte():child.EndByte()]
+			}
+		}
+	}
+
+	return ""
+}
+
+func (c *pythonVarAliasConfig) IsExported(name string) bool {
+	return !strings.HasPrefix(name, "_")
+}
+
+func (c *pythonVarAliasConfig) SupportedQueryTypes() []string {
+	return []string{"variable", "var"}
+}
+
+func (c *pythonVarAliasConfig) ValidateAssignment(node *sitter.Node, source, queryType string) bool {
+	if node.Type() != "assignment" && node.Type() != "augmented_assignment" {
+		return true
+	}
+
+	if queryType != "variable" && queryType != "var" {
+		return true
+	}
+
+	left := node.ChildByFieldName("left")
+	if left == nil {
+		return false
+	}
+
+	switch left.Type() {
+	case "identifier", "tuple", "list", "pattern_list":
+		return true
+	case "attribute", "subscript":
+		return false
+	default:
+		return false
+	}
+}
+
+func (c *phpPropertyConfig) Language() string {
+	return "php"
+}
+
+func (c *phpPropertyConfig) Extensions() []string {
+	return []string{".php"}
+}
+
+func (c *phpPropertyConfig) GetLanguage() *sitter.Language {
+	return tsphp.GetLanguage()
+}
+
+func (c *phpPropertyConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "property":
+		return []string{"property_declaration"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *phpPropertyConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "variable_name" {
+			return strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+		}
+	}
+	return ""
+}
+
+func (c *phpPropertyConfig) IsExported(name string) bool {
+	return !strings.HasPrefix(name, "_")
+}
+
+func (c *phpPropertyConfig) SupportedQueryTypes() []string {
+	return []string{"property"}
+}
+
+func (c *phpPropertyConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	var targets []Target
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "variable_name" {
+			name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+			targets = append(targets, NewTarget(child, query.Type, name))
+		}
+	}
+	return targets
+}
+
 func newTestProvider() *Provider {
 	config := &mockConfig{
 		language:   "go",
@@ -394,6 +578,70 @@ type User struct { Name string }
 	}
 	if result.Matches[0].Name != "User" {
 		t.Fatalf("expected struct match %q, got %q", "User", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesIfaceAliasValidation(t *testing.T) {
+	provider := New(&ifaceAliasConfig{})
+	source := `package main
+
+type Reader interface { Read() }
+type User struct { Name string }
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "iface",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only interface match for iface alias, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "Reader" {
+		t.Fatalf("expected interface match %q, got %q", "Reader", result.Matches[0].Name)
+	}
+}
+
+func TestQueryAppliesVarAliasValidation(t *testing.T) {
+	provider := New(&pythonVarAliasConfig{})
+	source := "a = 1\nobj.x = 2\n"
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "var",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected only simple assignment match for var alias, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "a" {
+		t.Fatalf("expected variable match %q, got %q", "a", result.Matches[0].Name)
+	}
+}
+
+func TestQueryMatchesPhpExpandedPropertyNamesWithoutDollar(t *testing.T) {
+	provider := New(&phpPropertyConfig{})
+	source := "<?php class Test { public $foo, $bar; }"
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "property",
+		Name: "foo",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected exact property match without dollar prefix, got %d", len(result.Matches))
+	}
+	if result.Matches[0].Name != "foo" {
+		t.Fatalf("expected property match %q, got %q", "foo", result.Matches[0].Name)
 	}
 }
 

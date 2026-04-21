@@ -145,7 +145,7 @@ func (c *Config) commentSummary(raw string) string {
 
 // ValidateAssignment ensures assignments are actual variable definitions, not attribute assignments
 func (c *Config) ValidateAssignment(node *sitter.Node, source, queryType string) bool {
-	if (node.Type() != "assignment" && node.Type() != "augmented_assignment") || queryType != "variable" {
+	if (node.Type() != "assignment" && node.Type() != "augmented_assignment") || c.canonicalAssignmentQuery(queryType) != "variable" {
 		return true // Not assignment or not variable query
 	}
 
@@ -166,6 +166,15 @@ func (c *Config) ValidateAssignment(node *sitter.Node, source, queryType string)
 		return false // Array assignment: arr[0] = 1
 	default:
 		return false
+	}
+}
+
+func (c *Config) canonicalAssignmentQuery(queryType string) string {
+	switch queryType {
+	case "var":
+		return "variable"
+	default:
+		return queryType
 	}
 }
 
