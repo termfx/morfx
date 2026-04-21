@@ -38,6 +38,34 @@ func TestBuildCreatesFileProcessor(t *testing.T) {
 	}
 }
 
+func TestBuildLeavesBuiltinTransactionLogDirWhenEmpty(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir(%q) error = %v", tmpDir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(cwd)
+	})
+
+	rt, err := Build(Config{})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if rt.FileProcessor == nil {
+		t.Fatal("FileProcessor is nil")
+	}
+
+	txDir := filepath.Join(tmpDir, ".morfx", "transactions")
+	if _, statErr := os.Stat(txDir); !os.IsNotExist(statErr) {
+		t.Fatalf("empty-config Build() created %q; want no cwd-local transaction dir", txDir)
+	}
+}
+
 func TestBuildCreatesTransactionLogDir(t *testing.T) {
 	t.Parallel()
 

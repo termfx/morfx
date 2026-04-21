@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/providers"
@@ -31,14 +32,13 @@ func Build(cfg Config) (*Runtime, error) {
 
 	fileProcessor := core.NewFileProcessor(&providerRegistryAdapter{registry: registry})
 
-	logDir := cfg.TransactionLogDir
-	if logDir == "" {
-		logDir = ".morfx/transactions"
+	logDir := strings.TrimSpace(cfg.TransactionLogDir)
+	if logDir != "" {
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create transaction log directory: %w", err)
+		}
+		fileProcessor.SetTransactionLogDir(logDir)
 	}
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create transaction log directory: %w", err)
-	}
-	fileProcessor.SetTransactionLogDir(logDir)
 
 	return &Runtime{
 		Providers:     registry,
