@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/glebarez/sqlite"
 	libsql "github.com/tursodatabase/libsql-client-go/libsql"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -64,11 +64,11 @@ func Connect(dsn string, debug bool) (*gorm.DB, error) {
 		}
 
 		conn = sql.OpenDB(connector)
-		dialector = sqlite.New(sqlite.Config{
+		dialector = sqlite.Dialector{
 			DriverName: "libsql",
 			Conn:       conn,
 			DSN:        dsn,
-		})
+		}
 	} else {
 		dialector = sqlite.Open(dsn)
 	}

@@ -47,6 +47,10 @@ jobs:
           - os: macos-latest
             goos: darwin
             goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            zig_target: x86_64-windows-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -57,7 +61,22 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Install Zig toolchain
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '0.16.0'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'zig'
+          Invoke-WebRequest -Uri "https://ziglang.org/download/$version/zig-x86_64-windows-$version.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $zigDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+          $zigDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CC=zig cc -target ${{ matrix.zig_target }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build archive
+        shell: bash
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -87,12 +106,55 @@ jobs:
               cp "$asset" "$ARCHIVE_DIR"/
             fi
           done
+
+      - name: Run standalone smoke
+        if: matrix.goos != 'windows'
+        shell: bash
+        env:
+          MORFX_BIN_DIR: ${{ github.workspace }}/release/morfx_${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          MORFX_ARTIFACT_DIR: ${{ github.workspace }}/release/smoke-${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          export MORFX_BIN_DIR="${GITHUB_WORKSPACE}/release/morfx_${VERSION#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tools/scripts/smoke-standalone.sh
+
+      - name: Run standalone smoke
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        env:
+          MORFX_BIN_DIR: ${{ github.workspace }}\release\morfx_${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          MORFX_ARTIFACT_DIR: ${{ github.workspace }}\release\smoke-${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          $version = "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}".TrimStart('v')
+          $env:MORFX_BIN_DIR = Join-Path $env:GITHUB_WORKSPACE "release\morfx_${version}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          .\tools\scripts\smoke-standalone.ps1
+
+      - name: Package archive
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          ARCHIVE_DIR="release/morfx_${VERSION#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
           tar -C release -czf "${ARCHIVE_DIR}.tar.gz" "$(basename "$ARCHIVE_DIR")"
+
+      - name: Package archive
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}".TrimStart('v')
+          $archiveDir = Join-Path $env:GITHUB_WORKSPACE "release\morfx_${version}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          $zipPath = "$archiveDir.zip"
+          Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $archiveDir "*") -DestinationPath $zipPath
 
       - uses: actions/upload-artifact@v4
         with:
           name: morfx-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: release/*.tar.gz
+          path: |
+            release/*.tar.gz
+            release/*.zip
 
   release:
     needs: build
@@ -111,7 +173,16 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          (cd release && sha256sum *.tar.gz > SHA256SUMS)
+          (
+            cd release
+            shopt -s nullglob
+            archives=( *.tar.gz *.zip )
+            if [ "${#archives[@]}" -eq 0 ]; then
+              echo "no release archives found" >&2
+              exit 1
+            fi
+            sha256sum "${archives[@]}" > SHA256SUMS
+          )
           NOTES_FILE="docs/release-notes-${TAG}.md"
           if [ -f "$NOTES_FILE" ]; then
             cp "$NOTES_FILE" release/RELEASE_NOTES.md
@@ -133,9 +204,9 @@ jobs:
           title="Morfx ${TAG}"
           if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GH_REPO" --notes-file release/RELEASE_NOTES.md
-            gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/SHA256SUMS --clobber
+            gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS --clobber
           else
-            gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/SHA256SUMS \
+            gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS \
               --title "$title" \
               --notes-file release/RELEASE_NOTES.md
           fi

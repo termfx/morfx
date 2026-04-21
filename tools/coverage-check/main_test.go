@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -104,7 +105,7 @@ func TestParseCoverageFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var coverageFile string
 			if tt.name == "non-existent file" {
-				coverageFile = "/non/existent/path/coverage.out"
+				coverageFile = filepath.Join(t.TempDir(), "does-not-exist", "coverage.out")
 			} else {
 				coverageFile = setupTempCoverageFile(t, tt.data)
 			}
@@ -583,6 +584,10 @@ github.com/oxhq/morfx/core/fileprocessor.go:17.1,22.2 5 1
 }
 
 func TestCoverageFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file permissions do not reliably map to POSIX no-read semantics")
+	}
+
 	tmpDir := t.TempDir()
 
 	// Create a file with restricted permissions
@@ -595,6 +600,7 @@ func TestCoverageFilePermissions(t *testing.T) {
 	_, err = parseCoverageFile(coverageFile)
 	if err == nil {
 		t.Error("Expected error when reading file with no permissions")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "permission denied") && !strings.Contains(err.Error(), "access is denied") {

@@ -23,12 +23,11 @@ func TestAtomicWriter_WriteFile_BackupCreationFailure(t *testing.T) {
 	config := DefaultAtomicConfig()
 	config.BackupOriginal = true
 
-	// Make directory read-only to cause backup creation to fail
-	err = os.Chmod(tempDir, 0o444)
-	if err != nil {
-		t.Fatalf("Failed to make directory read-only: %v", err)
+	blocker := filepath.Join(tempDir, "blocked-parent")
+	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
+		t.Fatalf("Failed to create blocker: %v", err)
 	}
-	defer os.Chmod(tempDir, 0o755) // Restore permissions for cleanup
+	testFile = filepath.Join(blocker, "test.txt")
 
 	writer := NewAtomicWriter(config)
 
@@ -48,17 +47,10 @@ func TestAtomicWriter_WriteFile_TempFileCreationFailure(t *testing.T) {
 
 	// Create a directory where we can't write temp files
 	restrictedDir := filepath.Join(tempDir, "restricted")
-	err := os.Mkdir(restrictedDir, 0o755)
+	err := os.WriteFile(restrictedDir, []byte("block"), 0o644)
 	if err != nil {
-		t.Fatalf("Failed to create restricted directory: %v", err)
+		t.Fatalf("Failed to create restricted path: %v", err)
 	}
-
-	// Make it read-only
-	err = os.Chmod(restrictedDir, 0o444)
-	if err != nil {
-		t.Fatalf("Failed to make directory read-only: %v", err)
-	}
-	defer os.Chmod(restrictedDir, 0o755)
 
 	testFile := filepath.Join(restrictedDir, "test.txt")
 
@@ -250,18 +242,12 @@ func TestAtomicWriter_DeadProcessLock(t *testing.T) {
 func TestAtomicWriter_LockFileCreationError(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create a read-only directory where lock files can't be created
+	// Create a file where a directory is expected so lock file creation fails consistently.
 	restrictedDir := filepath.Join(tempDir, "restricted")
-	err := os.Mkdir(restrictedDir, 0o755)
+	err := os.WriteFile(restrictedDir, []byte("block"), 0o644)
 	if err != nil {
-		t.Fatalf("Failed to create restricted directory: %v", err)
+		t.Fatalf("Failed to create restricted path: %v", err)
 	}
-
-	err = os.Chmod(restrictedDir, 0o444)
-	if err != nil {
-		t.Fatalf("Failed to make directory read-only: %v", err)
-	}
-	defer os.Chmod(restrictedDir, 0o755)
 
 	testFile := filepath.Join(restrictedDir, "test.txt")
 
