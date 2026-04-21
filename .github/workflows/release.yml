@@ -29,8 +29,38 @@ jobs:
         run: |
           make verify
 
+  verify-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install Zig toolchain
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '0.16.0'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'zig'
+          Invoke-WebRequest -Uri "https://ziglang.org/download/$version/zig-x86_64-windows-$version.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $zigDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+          $zigDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Run Windows verification
+        shell: pwsh
+        run: |
+          .\tools\scripts\verify-windows.ps1
+
   build:
-    needs: verify
+    needs:
+      - verify
+      - verify-windows
     name: Build release archives
     strategy:
       matrix:

@@ -67,15 +67,6 @@ func TestConnect(t *testing.T) {
 			expectedError: true,
 			errorContains: "failed to connect",
 		},
-		{
-			name: "connection with invalid directory permissions",
-			dsn:  "/root/restricted/test_morfx.db",
-			setupFunc: func(dsn string) {
-				// This will fail on most systems due to permissions
-			},
-			expectedError: true,
-			errorContains: "failed to create database directory",
-		},
 	}
 
 	for _, tt := range tests {
@@ -101,11 +92,12 @@ func TestConnect(t *testing.T) {
 
 			// Assert
 			if tt.expectedError {
-				assert.Error(t, err)
+				require.Error(t, err)
 				if tt.errorContains != "" {
 					assert.Contains(t, err.Error(), tt.errorContains)
 				}
 				assert.Nil(t, db)
+				return
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, db)
@@ -135,6 +127,19 @@ func TestConnect(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConnectFailsWhenDatabaseParentIsFile(t *testing.T) {
+	tempDir := t.TempDir()
+	blocker := filepath.Join(tempDir, "blocked")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o644))
+
+	dbPath := filepath.Join(blocker, "test_morfx.db")
+	db, err := Connect(dbPath, false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create database directory")
+	assert.Nil(t, db)
 }
 
 func TestIsURL(t *testing.T) {

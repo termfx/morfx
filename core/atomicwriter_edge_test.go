@@ -11,23 +11,18 @@ import (
 
 func TestAtomicWriter_WriteFile_BackupCreationFailure(t *testing.T) {
 	tempDir := t.TempDir()
-	testFile := filepath.Join(tempDir, "test.txt")
+	testFile := filepath.Join(tempDir, "target-dir")
 
-	// Create initial file
-	err := os.WriteFile(testFile, []byte("original content"), 0o644)
+	// Use an existing directory target so lock acquisition succeeds and backup creation
+	// fails when createBackup attempts to read directory contents as a file.
+	err := os.Mkdir(testFile, 0o755)
 	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
+		t.Fatalf("Failed to create target directory: %v", err)
 	}
 
 	// Create config with backup enabled
 	config := DefaultAtomicConfig()
 	config.BackupOriginal = true
-
-	blocker := filepath.Join(tempDir, "blocked-parent")
-	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
-		t.Fatalf("Failed to create blocker: %v", err)
-	}
-	testFile = filepath.Join(blocker, "test.txt")
 
 	writer := NewAtomicWriter(config)
 
@@ -36,26 +31,23 @@ func TestAtomicWriter_WriteFile_BackupCreationFailure(t *testing.T) {
 		t.Error("Expected error when backup creation fails")
 	}
 
-	// The error may be related to lock file creation or backup - both are valid
-	if !strings.Contains(err.Error(), "backup") && !strings.Contains(err.Error(), "lock") {
-		t.Errorf("Expected backup or lock-related error, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to create backup") {
+		t.Errorf("Expected backup creation error, got: %v", err)
 	}
 }
 
 func TestAtomicWriter_WriteFile_TempFileCreationFailure(t *testing.T) {
 	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.txt")
 
-	// Create a directory where we can't write temp files
-	restrictedDir := filepath.Join(tempDir, "restricted")
-	err := os.WriteFile(restrictedDir, []byte("block"), 0o644)
+	err := os.WriteFile(testFile, []byte("original"), 0o644)
 	if err != nil {
-		t.Fatalf("Failed to create restricted path: %v", err)
+		t.Fatalf("Failed to create test file: %v", err)
 	}
-
-	testFile := filepath.Join(restrictedDir, "test.txt")
 
 	config := DefaultAtomicConfig()
 	config.BackupOriginal = false
+	config.TempSuffix = string(os.PathSeparator) + "blocked" + string(os.PathSeparator) + "tmp"
 	writer := NewAtomicWriter(config)
 
 	err = writer.WriteFile(testFile, "content")
@@ -63,9 +55,8 @@ func TestAtomicWriter_WriteFile_TempFileCreationFailure(t *testing.T) {
 		t.Error("Expected error when temp file creation fails")
 	}
 
-	// The error may be related to lock file or temp file creation - both are valid
-	if !strings.Contains(err.Error(), "temp file") && !strings.Contains(err.Error(), "lock") {
-		t.Errorf("Expected temp file or lock error, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to create temp file") {
+		t.Errorf("Expected temp file creation error, got: %v", err)
 	}
 }
 
