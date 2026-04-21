@@ -36,6 +36,8 @@ type phpPropertyConfig struct{}
 type jsConstructorConfig struct{}
 type tsSemanticMethodConfig struct{}
 type phpConstructorConfig struct{}
+type jsOverlapVariableConfig struct{}
+type phpOverlapVariableConfig struct{}
 
 func (m *mockConfig) Language() string {
 	return m.language
@@ -553,6 +555,139 @@ func (c *phpConstructorConfig) ValidateQueryNode(node *sitter.Node, source, quer
 	return node.Type() == "method_declaration" && strings.EqualFold(c.ExtractNodeName(node, source), "__construct")
 }
 
+func (c *jsOverlapVariableConfig) Language() string {
+	return "javascript"
+}
+
+func (c *jsOverlapVariableConfig) Extensions() []string {
+	return []string{".js"}
+}
+
+func (c *jsOverlapVariableConfig) GetLanguage() *sitter.Language {
+	return tsjavascript.GetLanguage()
+}
+
+func (c *jsOverlapVariableConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "variable":
+		return []string{"lexical_declaration", "variable_declarator"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *jsOverlapVariableConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	switch node.Type() {
+	case "lexical_declaration":
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_declarator" {
+				return c.ExtractNodeName(child, source)
+			}
+		}
+	case "variable_declarator":
+		if idNode := node.ChildByFieldName("id"); idNode != nil {
+			return source[idNode.StartByte():idNode.EndByte()]
+		}
+	}
+
+	return ""
+}
+
+func (c *jsOverlapVariableConfig) IsExported(name string) bool {
+	return true
+}
+
+func (c *jsOverlapVariableConfig) SupportedQueryTypes() []string {
+	return []string{"variable"}
+}
+
+func (c *jsOverlapVariableConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	switch node.Type() {
+	case "lexical_declaration":
+		var targets []Target
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_declarator" {
+				targets = append(targets, c.ExpandMatches(child, source, query)...)
+			}
+		}
+		return targets
+	case "variable_declarator":
+		if idNode := node.ChildByFieldName("id"); idNode != nil {
+			name := source[idNode.StartByte():idNode.EndByte()]
+			return []Target{NewTarget(idNode, query.Type, name)}
+		}
+	}
+
+	return nil
+}
+
+func (c *phpOverlapVariableConfig) Language() string {
+	return "php"
+}
+
+func (c *phpOverlapVariableConfig) Extensions() []string {
+	return []string{".php"}
+}
+
+func (c *phpOverlapVariableConfig) GetLanguage() *sitter.Language {
+	return tsphp.GetLanguage()
+}
+
+func (c *phpOverlapVariableConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	switch queryType {
+	case "variable":
+		return []string{"property_declaration", "variable_name"}
+	default:
+		return []string{queryType}
+	}
+}
+
+func (c *phpOverlapVariableConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	switch node.Type() {
+	case "property_declaration":
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_name" {
+				return strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+			}
+		}
+	case "variable_name":
+		return strings.TrimPrefix(source[node.StartByte():node.EndByte()], "$")
+	}
+
+	return ""
+}
+
+func (c *phpOverlapVariableConfig) IsExported(name string) bool {
+	return true
+}
+
+func (c *phpOverlapVariableConfig) SupportedQueryTypes() []string {
+	return []string{"variable"}
+}
+
+func (c *phpOverlapVariableConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
+	switch node.Type() {
+	case "property_declaration":
+		var targets []Target
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "variable_name" {
+				name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+				targets = append(targets, NewTarget(child, query.Type, name))
+			}
+		}
+		return targets
+	case "variable_name":
+		name := strings.TrimPrefix(source[node.StartByte():node.EndByte()], "$")
+		return []Target{NewTarget(node, query.Type, name)}
+	}
+
+	return nil
+}
+
 func testMemberKeywordBeforeName(node *sitter.Node, source, keyword string) bool {
 	if node == nil {
 		return false
@@ -906,6 +1041,53 @@ class Example {
 	}
 	if result.Matches[0].Name != "__construct" {
 		t.Fatalf("expected constructor match %q, got %q", "__construct", result.Matches[0].Name)
+	}
+}
+
+func TestQueryDedupesOverlappingExpandedJavaScriptVariables(t *testing.T) {
+	provider := New(&jsOverlapVariableConfig{})
+	source := "const foo = 1;"
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "variable",
+		Name: "foo",
+	})
+	if result.Error != nil {
+		t.Fatalf("query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected 1 deduped JS variable match, got %d", len(result.Matches))
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected total 1 after dedupe, got %d", result.Total)
+	}
+	if result.Matches[0].Name != "foo" {
+		t.Fatalf("expected JS variable match %q, got %q", "foo", result.Matches[0].Name)
+	}
+}
+
+func TestTransformDedupesOverlappingExpandedPhpVariables(t *testing.T) {
+	provider := New(&phpOverlapVariableConfig{})
+	source := "<?php class Test { public $foo; }"
+
+	result := provider.Transform(source, core.TransformOp{
+		Method: "insert_before",
+		Target: core.AgentQuery{
+			Type: "variable",
+			Name: "foo",
+		},
+		Content: "/*marker*/",
+	})
+	if result.Error != nil {
+		t.Fatalf("transform failed: %v", result.Error)
+	}
+
+	if result.MatchCount != 1 {
+		t.Fatalf("expected 1 deduped PHP variable target, got %d", result.MatchCount)
+	}
+	if strings.Count(result.Modified, "/*marker*/") != 1 {
+		t.Fatalf("expected marker inserted once, got %q", result.Modified)
 	}
 }
 

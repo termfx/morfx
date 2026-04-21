@@ -136,40 +136,16 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 		return core.QueryResult{Error: fmt.Errorf("syntax errors in source: %v", errors)}
 	}
 
-	var matches []core.Match
-	p.walkTree(tree.RootNode(), source, query, &matches)
-
-	return core.QueryResult{
-		Matches: matches,
-		Total:   len(matches),
-	}
-}
-
-// walkTree recursively walks AST looking for matches
-func (p *Provider) walkTree(node *sitter.Node, source string, query core.AgentQuery, matches *[]core.Match) {
-	if nodeMatches := p.checkNode(node, source, query); len(nodeMatches) > 0 {
-		*matches = append(*matches, nodeMatches...)
-	}
-
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		p.walkTree(child, source, query, matches)
-	}
-}
-
-// checkNode checks if a node matches the query using language-specific mapping
-func (p *Provider) checkNode(node *sitter.Node, source string, query core.AgentQuery) []core.Match {
-	targets := p.candidateTargets(node, source, query)
-	if len(targets) == 0 {
-		return nil
-	}
-
+	targets := p.findTargets(tree.RootNode(), source, query)
 	matches := make([]core.Match, 0, len(targets))
 	for _, target := range targets {
 		matches = append(matches, p.targetToMatch(source, query.Type, target))
 	}
 
-	return matches
+	return core.QueryResult{
+		Matches: matches,
+		Total:   len(matches),
+	}
 }
 
 // Transform applies a transformation operation
@@ -303,11 +279,19 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 // findTargets finds all matches for the query with proper expansion
 func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []Target {
 	var matches []Target
+	seen := make(map[string]struct{})
 
 	var walk func(*sitter.Node)
 	walk = func(node *sitter.Node) {
 		if targets := p.candidateTargets(node, source, query); len(targets) > 0 {
-			matches = append(matches, targets...)
+			for _, target := range targets {
+				key := semanticTargetKey(query.Type, target)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				matches = append(matches, target)
+			}
 		}
 		for i := 0; i < int(node.ChildCount()); i++ {
 			walk(node.Child(i))
@@ -316,6 +300,10 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 
 	walk(root)
 	return matches
+}
+
+func semanticTargetKey(queryType string, target Target) string {
+	return fmt.Sprintf("%s:%d:%d:%s", queryType, target.StartByte, target.EndByte, target.Name)
 }
 
 // expandMatches converts a node into one or more matches
