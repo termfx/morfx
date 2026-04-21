@@ -5,6 +5,7 @@ import (
 	"math"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,9 +31,6 @@ type LanguageConfig interface {
 
 	// For discovery/specification
 	SupportedQueryTypes() []string
-
-	// Provider-owned expansion targets retain parser-native state locally.
-	ExpandMatches(*sitter.Node, string, core.AgentQuery) []Target
 }
 
 // SmartAppendConfig allows language configs to provide smarter append behaviour.
@@ -343,7 +341,14 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 
 // expandMatches converts a node into one or more matches
 func (p *Provider) expandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
-	return p.config.ExpandMatches(node, source, query)
+	if expander, ok := p.config.(interface {
+		ExpandMatches(*sitter.Node, string, core.AgentQuery) []Target
+	}); ok {
+		return expander.ExpandMatches(node, source, query)
+	}
+
+	name := p.config.ExtractNodeName(node, source)
+	return []Target{NewTarget(node, query.Type, name)}
 }
 
 // nodeMatches checks if a node matches the query with provider-specific validation
@@ -378,8 +383,18 @@ func (p *Provider) nodeMatches(node *sitter.Node, source string, query core.Agen
 func sortTargetsDescending(targets []Target) []Target {
 	sorted := make([]Target, len(targets))
 	copy(sorted, targets)
-	slices.SortFunc(sorted, func(a, b Target) int {
-		return int(b.StartByte - a.StartByte) // Reverse order
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a := sorted[i]
+		b := sorted[j]
+
+		if a.StartByte != b.StartByte {
+			return a.StartByte > b.StartByte
+		}
+		if a.EndByte != b.EndByte {
+			return a.EndByte > b.EndByte
+		}
+
+		return false
 	})
 	return sorted
 }

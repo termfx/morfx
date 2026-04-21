@@ -18,7 +18,16 @@ type mockConfig struct {
 	extensions []string
 }
 
+type legacyMockConfig struct {
+	language   string
+	extensions []string
+}
+
 func (m *mockConfig) Language() string {
+	return m.language
+}
+
+func (m *legacyMockConfig) Language() string {
 	return m.language
 }
 
@@ -26,7 +35,15 @@ func (m *mockConfig) Extensions() []string {
 	return m.extensions
 }
 
+func (m *legacyMockConfig) Extensions() []string {
+	return m.extensions
+}
+
 func (m *mockConfig) GetLanguage() *sitter.Language {
+	return golang.GetLanguage()
+}
+
+func (m *legacyMockConfig) GetLanguage() *sitter.Language {
 	return golang.GetLanguage()
 }
 
@@ -43,6 +60,10 @@ func (m *mockConfig) MapQueryTypeToNodeTypes(queryType string) []string {
 	}
 }
 
+func (m *legacyMockConfig) MapQueryTypeToNodeTypes(queryType string) []string {
+	return (&mockConfig{}).MapQueryTypeToNodeTypes(queryType)
+}
+
 func (m *mockConfig) ExtractNodeName(node *sitter.Node, source string) string {
 	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
 		return source[nameNode.StartByte():nameNode.EndByte()]
@@ -50,12 +71,24 @@ func (m *mockConfig) ExtractNodeName(node *sitter.Node, source string) string {
 	return ""
 }
 
+func (m *legacyMockConfig) ExtractNodeName(node *sitter.Node, source string) string {
+	return (&mockConfig{}).ExtractNodeName(node, source)
+}
+
 func (m *mockConfig) IsExported(name string) bool {
 	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
 }
 
+func (m *legacyMockConfig) IsExported(name string) bool {
+	return (&mockConfig{}).IsExported(name)
+}
+
 func (m *mockConfig) SupportedQueryTypes() []string {
 	return []string{"function", "struct", "variable"}
+}
+
+func (m *legacyMockConfig) SupportedQueryTypes() []string {
+	return (&mockConfig{}).SupportedQueryTypes()
 }
 
 func (m *mockConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
@@ -293,6 +326,24 @@ func OldFunc() string {
 	// Diff should be present
 	if result.Diff == "" {
 		t.Error("Diff should not be empty")
+	}
+}
+
+func TestDoReplaceAppliesTargetsFromEnd(t *testing.T) {
+	provider := newTestProvider()
+	source := "abcdef"
+	targets := []Target{
+		{Match: Match{Name: "bc", StartByte: 1, EndByte: 3}},
+		{Match: Match{Name: "ef", StartByte: 4, EndByte: 6}},
+	}
+
+	modified, err := provider.doReplace(source, targets, "X")
+	if err != nil {
+		t.Fatalf("replace failed: %v", err)
+	}
+
+	if modified != "aXdX" {
+		t.Fatalf("expected end-to-start replacement result %q, got %q", "aXdX", modified)
 	}
 }
 
@@ -1029,6 +1080,39 @@ func demo() {}
 	}
 	if targets[0].Node == nil {
 		t.Fatal("provider-local targets must retain parser nodes for transforms")
+	}
+}
+
+func TestExpandMatchesFallsBackForLegacyConfig(t *testing.T) {
+	provider := New(&legacyMockConfig{
+		language:   "go",
+		extensions: []string{".go"},
+	})
+	source := `package main
+
+func demo() {}
+`
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(provider.config.GetLanguage())
+	tree := parser.Parse(nil, []byte(source))
+	if tree == nil {
+		t.Fatal("expected parsed tree")
+	}
+	defer tree.Close()
+
+	targets := provider.findTargets(tree.RootNode(), source, core.AgentQuery{
+		Type: "function",
+		Name: "demo",
+	})
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 fallback target, got %d", len(targets))
+	}
+	if targets[0].Name != "demo" {
+		t.Fatalf("expected fallback target name %q, got %q", "demo", targets[0].Name)
+	}
+	if targets[0].Node == nil {
+		t.Fatal("fallback target must retain parser node")
 	}
 }
 
