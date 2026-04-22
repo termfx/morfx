@@ -220,6 +220,13 @@ func (tm *TransactionManager) RollbackTransaction() error {
 func (tm *TransactionManager) rollbackOperation(op TransactionOperation) error {
 	switch op.Type {
 	case "modify":
+		// If the modify operation itself failed, the original file remains in place.
+		// Re-entering the atomic writer during rollback can fail on Windows when the
+		// target is read-only, even though there is nothing to restore.
+		if op.Error != "" {
+			return nil
+		}
+
 		// Restore from backup
 		if op.BackupPath == "" {
 			return fmt.Errorf("no backup path for modify operation")
@@ -311,8 +318,8 @@ func (tm *TransactionManager) CleanupOldTransactions(olderThan time.Duration) er
 				continue
 			}
 
-			// Remove completed transactions older than cutoff
-			if tx.Status != "pending" && tx.Completed.Before(cutoff) {
+			// Remove all completed transactions when olderThan <= 0.
+			if tx.Status != "pending" && (olderThan <= 0 || tx.Completed.Before(cutoff)) {
 				logPath := filepath.Join(tm.logDir, file.Name())
 				os.Remove(logPath)
 

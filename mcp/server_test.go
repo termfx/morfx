@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -343,7 +345,7 @@ func TestServerComponentInitialization(t *testing.T) {
 // TestNewStdioServerDatabaseConnectionFailed tests server creation when database connection fails
 func TestNewStdioServerDatabaseConnectionFailed(t *testing.T) {
 	config := newServerConfig()
-	config.DatabaseURL = "/dev/null/impossible/path/database.db"
+	config.DatabaseURL = invalidDatabasePath(t)
 	config.Debug = false
 
 	// Should not fail even with invalid database URL
@@ -1328,6 +1330,17 @@ func cloneStage(stage map[string]any) map[string]any {
 		copy[k] = v
 	}
 	return copy
+}
+
+func invalidDatabasePath(t *testing.T) string {
+	t.Helper()
+
+	blocker := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("failed to create blocking file: %v", err)
+	}
+
+	return filepath.Join(blocker, "database.db")
 }
 
 type watchableTestResource struct {

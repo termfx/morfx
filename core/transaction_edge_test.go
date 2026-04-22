@@ -2,9 +2,11 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +39,7 @@ func TestTransactionManager_BeginTransaction_AlreadyActive(t *testing.T) {
 
 func TestTransactionManager_BeginTransaction_LogWriteFailure(t *testing.T) {
 	// Use invalid log directory to cause write failure
-	invalidLogDir := "/dev/null/invalid/path"
+	invalidLogDir := invalidNestedPath(t, "invalid", "path")
 
 	config := DefaultAtomicConfig()
 	writer := NewAtomicWriter(config)
@@ -134,6 +136,10 @@ func TestTransactionManager_AddOperation_BackupCreationFailure(t *testing.T) {
 }
 
 func TestTransactionManager_AddOperation_ChecksumGenerationFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file permissions do not reliably map to POSIX unreadable files")
+	}
+
 	tempDir := t.TempDir()
 	logDir := filepath.Join(tempDir, "tx_logs")
 
@@ -494,6 +500,49 @@ func TestTransactionManager_RollbackTransaction_MissingBackup(t *testing.T) {
 	}
 }
 
+func TestTransactionManager_RollbackTransaction_SkipsFailedModifyRestore(t *testing.T) {
+	tempDir := t.TempDir()
+	logDir := filepath.Join(tempDir, "tx_logs")
+
+	manager := NewTransactionManager(logDir, NewAtomicWriter(DefaultAtomicConfig()))
+
+	tx, err := manager.BeginTransaction("Test rollback after failed modify")
+	if err != nil {
+		t.Fatalf("BeginTransaction failed: %v", err)
+	}
+
+	testFile := filepath.Join(tempDir, "test.txt")
+	originalContent := "original content"
+	if err := os.WriteFile(testFile, []byte(originalContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	if _, err := manager.AddOperation("modify", testFile); err != nil {
+		t.Fatalf("AddOperation failed: %v", err)
+	}
+
+	writeErr := errors.New("write failed: Access is denied")
+	if err := manager.CompleteOperation(testFile, writeErr); err != nil {
+		t.Fatalf("CompleteOperation failed: %v", err)
+	}
+
+	if err := manager.RollbackTransaction(); err != nil {
+		t.Fatalf("RollbackTransaction should ignore restore for failed modify op: %v", err)
+	}
+
+	if tx.Status != "rolled_back" {
+		t.Fatalf("Expected status rolled_back, got %s", tx.Status)
+	}
+
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to read file after rollback: %v", err)
+	}
+	if string(content) != originalContent {
+		t.Fatalf("Expected file content %q, got %q", originalContent, string(content))
+	}
+}
+
 func TestTransactionManager_RollbackTransaction_UnknownOperationType(t *testing.T) {
 	tempDir := t.TempDir()
 	logDir := filepath.Join(tempDir, "tx_logs")
@@ -605,8 +654,7 @@ func TestTransactionManager_ListPendingTransactions_CorruptedLog(t *testing.T) {
 }
 
 func TestTransactionManager_CleanupOldTransactions_DirectoryReadError(t *testing.T) {
-	// Use non-existent directory to cause read error
-	invalidLogDir := "/nonexistent/tx_logs"
+	invalidLogDir := invalidNestedPath(t, "tx_logs")
 
 	config := DefaultAtomicConfig()
 	writer := NewAtomicWriter(config)
@@ -695,7 +743,7 @@ func TestTransactionManager_GenerateBackupPath_EdgeCases(t *testing.T) {
 
 func TestTransactionManager_WriteTransactionLog_Error(t *testing.T) {
 	// Use an invalid log directory to cause write errors
-	invalidLogDir := "/dev/null/invalid"
+	invalidLogDir := invalidNestedPath(t, "invalid")
 
 	config := DefaultAtomicConfig()
 	writer := NewAtomicWriter(config)
@@ -754,7 +802,7 @@ func TestGenerateFileChecksum_EdgeCases(t *testing.T) {
 }
 
 func TestGenerateFileChecksum_NonExistentFile(t *testing.T) {
-	_, err := generateFileChecksum("/nonexistent/file.txt")
+	_, err := generateFileChecksum(filepath.Join(t.TempDir(), "nonexistent", "file.txt"))
 	if err == nil {
 		t.Error("Expected error for non-existent file")
 	}
@@ -812,4 +860,16 @@ func TestTransactionManager_RollbackOperation_MissingBackupPath(t *testing.T) {
 	if !strings.Contains(err.Error(), "no backup path") {
 		t.Errorf("Expected 'no backup path' error, got: %v", err)
 	}
+}
+
+func invalidNestedPath(t *testing.T, elems ...string) string {
+	t.Helper()
+
+	blocker := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("failed to create blocking file: %v", err)
+	}
+
+	parts := append([]string{blocker}, elems...)
+	return filepath.Join(parts...)
 }

@@ -4,9 +4,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -378,12 +381,41 @@ func (sm *SafetyManager) syncFile(path string) error {
 }
 
 func (sm *SafetyManager) syncDir(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", path)
+	}
+
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		if shouldIgnoreWindowsDirSyncError(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func shouldIgnoreWindowsDirSyncError(err error) bool {
+	if runtime.GOOS != "windows" || err == nil {
+		return false
+	}
+
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		return false
+	}
+
+	// Windows directory handles commonly fail fsync with access denied even for
+	// existing directories. Keep other errors visible.
+	return strings.Contains(strings.ToLower(pathErr.Err.Error()), "access is denied")
 }
 
 // calculateFileHash computes SHA256 hash of a file

@@ -6,10 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func invalidNestedPath(t *testing.T, name string) string {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
+		t.Fatalf("Failed to create blocker file: %v", err)
+	}
+	return filepath.Join(blocker, name)
+}
 
 // TestNewSafetyManager verifies safety manager creation
 func TestNewSafetyManager(t *testing.T) {
@@ -389,10 +399,10 @@ func TestAtomicWrite(t *testing.T) {
 				CreateBackups:      true,
 				ValidateFileHashes: true,
 			},
-			filePath:    "/readonly/path/file.txt",
+			filePath:    invalidNestedPath(t, "file.txt"),
 			content:     "should fail",
 			expectError: true,
-			description: "Atomic write fails in readonly directory",
+			description: "Atomic write fails when parent path is not a directory",
 		},
 	}
 
@@ -736,7 +746,7 @@ func TestSyncFile(t *testing.T) {
 	}
 
 	// Test syncFile with nonexistent file
-	err = sm.syncFile("/nonexistent/file.txt")
+	err = sm.syncFile(filepath.Join(tempDir, "missing", "file.txt"))
 	if err == nil {
 		t.Error("syncFile should error on nonexistent file")
 	}
@@ -757,9 +767,28 @@ func TestSyncDir(t *testing.T) {
 	}
 
 	// Test syncDir with nonexistent directory
-	err = sm.syncDir("/nonexistent/directory")
+	err = sm.syncDir(filepath.Join(tempDir, "missing"))
 	if err == nil {
 		t.Error("syncDir should error on nonexistent directory")
+	}
+}
+
+func TestSyncDir_FilePath(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("content"), 0o644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	sm := NewSafetyManager(SafetyConfig{})
+
+	err := sm.syncDir(filePath)
+	if err == nil {
+		t.Fatal("syncDir should error when passed a file path")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Expected not-a-directory error, got: %v", err)
 	}
 }
 
@@ -774,15 +803,11 @@ func TestCalculateFileHash(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	if err := os.Chmod(testFile, 0o744); err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
-	}
-
 	srcInfo, err := os.Stat(testFile)
 	if err != nil {
 		t.Fatalf("Failed to stat test file: %v", err)
 	}
-	if perm := srcInfo.Mode().Perm(); perm != 0o744 {
+	if runtime.GOOS != "windows" && srcInfo.Mode().Perm() != 0o644 {
 		t.Fatalf("unexpected source permissions: %v", srcInfo.Mode())
 	}
 
@@ -811,7 +836,7 @@ func TestCalculateFileHash(t *testing.T) {
 	}
 
 	// Test calculateFileHash with nonexistent file
-	_, err = calculateFileHash("/nonexistent/file.txt")
+	_, err = calculateFileHash(filepath.Join(tempDir, "missing", "file.txt"))
 	if err == nil {
 		t.Error("calculateFileHash should error on nonexistent file")
 	}
@@ -883,7 +908,7 @@ func TestIsLockStale(t *testing.T) {
 	}
 
 	// Nonexistent lock file should be considered stale
-	if !sm.isLockStale("/nonexistent/lock") {
+	if !sm.isLockStale(filepath.Join(tempDir, "missing", "lock")) {
 		t.Error("Nonexistent lock should be considered stale")
 	}
 }
@@ -899,10 +924,6 @@ func TestCreateBackup(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	if err := os.Chmod(testFile, 0o744); err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
-	}
-
 	var (
 		srcInfo os.FileInfo
 		statErr error
@@ -912,7 +933,7 @@ func TestCreateBackup(t *testing.T) {
 	if statErr != nil {
 		t.Fatalf("Failed to stat test file: %v", statErr)
 	}
-	if perm := srcInfo.Mode().Perm(); perm != 0o744 {
+	if runtime.GOOS != "windows" && srcInfo.Mode().Perm() != 0o644 {
 		t.Fatalf("unexpected source permissions: %v", srcInfo.Mode())
 	}
 
@@ -939,8 +960,8 @@ func TestCreateBackup(t *testing.T) {
 	}
 
 	if info, err := os.Stat(backupPath); err == nil {
-		if perm := info.Mode().Perm(); perm != 0o744 {
-			t.Errorf("Backup permissions = %v, want 0744", perm)
+		if runtime.GOOS != "windows" && info.Mode().Perm() != srcInfo.Mode().Perm() {
+			t.Errorf("Backup permissions = %v, want %v", info.Mode().Perm(), srcInfo.Mode().Perm())
 		}
 	} else {
 		t.Fatalf("Failed to stat backup file: %v", err)
@@ -1025,9 +1046,9 @@ func TestAcquireOSLock(t *testing.T) {
 	}
 
 	// Test acquiring lock on readonly location (should fail)
-	_, err = sm.acquireOSLock("/readonly/location.lock")
+	_, err = sm.acquireOSLock(invalidNestedPath(t, "location.lock"))
 	if err == nil {
-		t.Error("acquireOSLock should error on readonly location")
+		t.Error("acquireOSLock should error when parent path is not a directory")
 	}
 }
 
