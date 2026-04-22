@@ -180,6 +180,31 @@ class Calculator {
 	}
 }
 
+func TestPHPProvider_Query_PropertiesWithoutDollarPrefix(t *testing.T) {
+	provider := New()
+	source := `<?php
+class Example {
+	public string $foo, $bar;
+}
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "property",
+		Name: "foo",
+	})
+	if result.Error != nil {
+		t.Fatalf("Query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("Expected 1 property match, got %d", len(result.Matches))
+	}
+
+	if result.Matches[0].Name != "foo" {
+		t.Fatalf("Expected property name 'foo', got %q", result.Matches[0].Name)
+	}
+}
+
 func TestPHPProvider_Transform_Replace(t *testing.T) {
 	provider := New()
 	source := `<?php

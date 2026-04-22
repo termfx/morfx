@@ -122,6 +122,65 @@ class Admin extends User {
 	}
 }
 
+func TestJavaScriptProvider_Query_Constructor(t *testing.T) {
+	provider := New()
+	source := `
+class Service {
+	constructor(config) {
+		this.config = config;
+	}
+
+	start() {
+		return this.config;
+	}
+}
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "constructor",
+		Name: "constructor",
+	})
+	if result.Error != nil {
+		t.Fatalf("Query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 1 {
+		t.Fatalf("Expected 1 constructor match, got %d", len(result.Matches))
+	}
+
+	if result.Matches[0].Name != "constructor" {
+		t.Fatalf("Expected constructor name, got %q", result.Matches[0].Name)
+	}
+}
+
+func TestJavaScriptProvider_Query_DedupesExpandedVariables(t *testing.T) {
+	provider := New()
+	source := `
+const alpha = 1, beta = 2;
+`
+
+	result := provider.Query(source, core.AgentQuery{
+		Type: "variable",
+		Name: "*",
+	})
+	if result.Error != nil {
+		t.Fatalf("Query failed: %v", result.Error)
+	}
+
+	if len(result.Matches) != 2 {
+		t.Fatalf("Expected 2 variable matches, got %d", len(result.Matches))
+	}
+
+	found := map[string]bool{}
+	for _, match := range result.Matches {
+		found[match.Name] = true
+	}
+
+	if !found["alpha"] || !found["beta"] {
+		t.Fatalf("Expected alpha and beta matches, got %#v", found)
+	}
+}
+
 func TestJavaScriptProvider_Transform_Replace(t *testing.T) {
 	provider := New()
 	source := `

@@ -88,8 +88,8 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 			return source[nameNode.StartByte():nameNode.EndByte()]
 		}
 	case "method_definition":
-		if keyNode := node.ChildByFieldName("key"); keyNode != nil {
-			return source[keyNode.StartByte():keyNode.EndByte()]
+		if nameNode := c.nameFieldNode(node, "name", "key"); nameNode != nil {
+			return source[nameNode.StartByte():nameNode.EndByte()]
 		}
 	case "field_definition":
 		for i := 0; i < int(node.ChildCount()); i++ {
@@ -99,16 +99,16 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 			}
 		}
 	case "variable_declarator":
-		if idNode := node.ChildByFieldName("id"); idNode != nil {
-			return source[idNode.StartByte():idNode.EndByte()]
+		if nameNode := c.nameFieldNode(node, "name", "id"); nameNode != nil {
+			return source[nameNode.StartByte():nameNode.EndByte()]
 		}
-	case "lexical_declaration":
+	case "variable_declaration", "lexical_declaration":
 		// Find first variable declarator
 		for i := 0; i < int(node.ChildCount()); i++ {
 			child := node.Child(i)
 			if child.Type() == "variable_declarator" {
-				if idNode := child.ChildByFieldName("id"); idNode != nil {
-					return source[idNode.StartByte():idNode.EndByte()]
+				if nameNode := c.nameFieldNode(child, "name", "id"); nameNode != nil {
+					return source[nameNode.StartByte():nameNode.EndByte()]
 				}
 			}
 		}
@@ -208,7 +208,7 @@ func (c *Config) expandVariableDeclaration(node *sitter.Node, source string, que
 func (c *Config) expandVariableDeclarator(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	var matches []base.Target
 
-	idNode := node.ChildByFieldName("id")
+	idNode := c.nameFieldNode(node, "name", "id")
 	if idNode == nil {
 		return matches
 	}
@@ -322,7 +322,7 @@ func (c *Config) expandObjectPattern(node *sitter.Node, source string, query cor
 func (c *Config) getArrowFunctionName(node *sitter.Node, source string) string {
 	parent := node.Parent()
 	if parent != nil && parent.Type() == "variable_declarator" {
-		if idNode := parent.ChildByFieldName("id"); idNode != nil && idNode.Type() == "identifier" {
+		if idNode := c.nameFieldNode(parent, "name", "id"); idNode != nil && idNode.Type() == "identifier" {
 			return source[idNode.StartByte():idNode.EndByte()]
 		}
 	}
@@ -340,4 +340,13 @@ func (c *Config) getArrowFunctionName(node *sitter.Node, source string) string {
 	}
 
 	return "anonymous"
+}
+
+func (c *Config) nameFieldNode(node *sitter.Node, fields ...string) *sitter.Node {
+	for _, field := range fields {
+		if fieldNode := node.ChildByFieldName(field); fieldNode != nil {
+			return fieldNode
+		}
+	}
+	return nil
 }

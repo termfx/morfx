@@ -70,7 +70,39 @@ func TestGetArrowFunctionName(t *testing.T) {
 	}
 
 	name := config.getArrowFunctionName(arrowFunction, source)
-	if name != "anonymous" {
-		t.Errorf("Expected name 'anonymous', got '%s'", name)
+	if name != "test" {
+		t.Errorf("Expected name 'test', got '%s'", name)
+	}
+}
+
+func TestExtractNodeNameMethodDefinitionUsesNameField(t *testing.T) {
+	config := &Config{}
+	source := "class Example { constructor() {} }"
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(config.GetLanguage())
+	tree := parser.Parse(nil, []byte(source))
+	defer tree.Close()
+
+	var method *sitter.Node
+	var findMethod func(*sitter.Node)
+	findMethod = func(node *sitter.Node) {
+		if node.Type() == "method_definition" {
+			method = node
+			return
+		}
+		for i := 0; i < int(node.ChildCount()); i++ {
+			findMethod(node.Child(i))
+		}
+	}
+	findMethod(tree.RootNode())
+
+	if method == nil {
+		t.Skip("Could not find method_definition")
+	}
+
+	name := config.ExtractNodeName(method, source)
+	if name != "constructor" {
+		t.Errorf("Expected method name 'constructor', got '%s'", name)
 	}
 }

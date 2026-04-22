@@ -378,11 +378,8 @@ func (c *phpPropertyConfig) MapQueryTypeToNodeTypes(queryType string) []string {
 }
 
 func (c *phpPropertyConfig) ExtractNodeName(node *sitter.Node, source string) string {
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "variable_name" {
-			return strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
-		}
+	if variableNode := c.firstVariableNode(node); variableNode != nil {
+		return strings.TrimPrefix(source[variableNode.StartByte():variableNode.EndByte()], "$")
 	}
 	return ""
 }
@@ -397,14 +394,42 @@ func (c *phpPropertyConfig) SupportedQueryTypes() []string {
 
 func (c *phpPropertyConfig) ExpandMatches(node *sitter.Node, source string, query core.AgentQuery) []Target {
 	var targets []Target
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "variable_name" {
-			name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
-			targets = append(targets, NewTarget(child, query.Type, name))
-		}
+	for _, child := range c.variableNodes(node) {
+		name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+		targets = append(targets, NewTarget(child, query.Type, name))
 	}
 	return targets
+}
+
+func (c *phpPropertyConfig) firstVariableNode(node *sitter.Node) *sitter.Node {
+	nodes := c.variableNodes(node)
+	if len(nodes) == 0 {
+		return nil
+	}
+	return nodes[0]
+}
+
+func (c *phpPropertyConfig) variableNodes(node *sitter.Node) []*sitter.Node {
+	if node == nil {
+		return nil
+	}
+
+	var nodes []*sitter.Node
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil {
+			return
+		}
+		if current.Type() == "variable_name" {
+			nodes = append(nodes, current)
+			return
+		}
+		for i := 0; i < int(current.ChildCount()); i++ {
+			walk(current.Child(i))
+		}
+	}
+	walk(node)
+	return nodes
 }
 
 func (c *jsConstructorConfig) Language() string {
@@ -429,7 +454,7 @@ func (c *jsConstructorConfig) MapQueryTypeToNodeTypes(queryType string) []string
 }
 
 func (c *jsConstructorConfig) ExtractNodeName(node *sitter.Node, source string) string {
-	if keyNode := node.ChildByFieldName("key"); keyNode != nil {
+	if keyNode := childByFieldNames(node, "name", "key"); keyNode != nil {
 		return source[keyNode.StartByte():keyNode.EndByte()]
 	}
 	return ""
@@ -586,7 +611,7 @@ func (c *jsOverlapVariableConfig) ExtractNodeName(node *sitter.Node, source stri
 			}
 		}
 	case "variable_declarator":
-		if idNode := node.ChildByFieldName("id"); idNode != nil {
+		if idNode := childByFieldNames(node, "name", "id"); idNode != nil {
 			return source[idNode.StartByte():idNode.EndByte()]
 		}
 	}
@@ -614,7 +639,7 @@ func (c *jsOverlapVariableConfig) ExpandMatches(node *sitter.Node, source string
 		}
 		return targets
 	case "variable_declarator":
-		if idNode := node.ChildByFieldName("id"); idNode != nil {
+		if idNode := childByFieldNames(node, "name", "id"); idNode != nil {
 			name := source[idNode.StartByte():idNode.EndByte()]
 			return []Target{NewTarget(idNode, query.Type, name)}
 		}
@@ -770,6 +795,18 @@ func testMemberKeywordBeforeName(node *sitter.Node, source, keyword string) bool
 	}
 
 	return false
+}
+
+func childByFieldNames(node *sitter.Node, names ...string) *sitter.Node {
+	if node == nil {
+		return nil
+	}
+	for _, name := range names {
+		if child := node.ChildByFieldName(name); child != nil {
+			return child
+		}
+	}
+	return nil
 }
 
 func newTestProvider() *Provider {

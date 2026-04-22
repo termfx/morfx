@@ -111,12 +111,9 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		return "anonymous"
 	case "property_declaration":
 		// Find first property name
-		for i := 0; i < int(node.ChildCount()); i++ {
-			child := node.Child(i)
-			if child.Type() == "variable_name" {
-				name := source[child.StartByte():child.EndByte()]
-				return strings.TrimPrefix(name, "$") // Remove $ prefix
-			}
+		for _, child := range c.propertyVariableNodes(node) {
+			name := source[child.StartByte():child.EndByte()]
+			return strings.TrimPrefix(name, "$") // Remove $ prefix
 		}
 	case "variable_name":
 		name := source[node.StartByte():node.EndByte()]
@@ -299,15 +296,35 @@ func (c *Config) ValidateQueryNode(node *sitter.Node, source, queryType string) 
 func (c *Config) expandPropertyDeclaration(node *sitter.Node, source string, query core.AgentQuery) []base.Target {
 	var matches []base.Target
 
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "variable_name" && strings.HasPrefix(source[child.StartByte():child.EndByte()], "$") {
-			name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
-			matches = append(matches, base.NewTarget(child, query.Type, name))
-		}
+	for _, child := range c.propertyVariableNodes(node) {
+		name := strings.TrimPrefix(source[child.StartByte():child.EndByte()], "$")
+		matches = append(matches, base.NewTarget(child, query.Type, name))
 	}
 
 	return matches
+}
+
+func (c *Config) propertyVariableNodes(node *sitter.Node) []*sitter.Node {
+	if node == nil {
+		return nil
+	}
+
+	var nodes []*sitter.Node
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil {
+			return
+		}
+		if current.Type() == "variable_name" {
+			nodes = append(nodes, current)
+			return
+		}
+		for i := 0; i < int(current.ChildCount()); i++ {
+			walk(current.Child(i))
+		}
+	}
+	walk(node)
+	return nodes
 }
 
 func (c *Config) variableTargetNode(node *sitter.Node) *sitter.Node {
