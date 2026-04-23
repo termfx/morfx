@@ -1,0 +1,161 @@
+project: morfx
+description: Real Morfx automation pipeline orchestrated by TFX
+lanes:
+  - preview
+  - canary
+  - production
+working_dir: .
+default_flow: ci
+
+before_all:
+  - id: toolchain
+    title: Print Go toolchain
+    command:
+      - go
+      - version
+
+flows:
+  - name: ci
+    description: Fast verification for day-to-day Morfx development
+    steps:
+      - id: build
+        title: Build all packages
+        command:
+          - go
+          - build
+          - ./...
+
+      - id: test
+        title: Run repository tests
+        command:
+          - go
+          - test
+          - -timeout=120s
+          - ./...
+
+      - id: race
+        title: Run provider race detector
+        command:
+          - go
+          - test
+          - -race
+          - -timeout=120s
+          - ./providers/...
+
+  - name: ci-pr
+    description: Fast TFX smoke flow for pull-request automation
+    default_lane: preview
+    steps:
+      - id: toolcmd-tests
+        title: Run standalone tool command tests
+        command:
+          - go
+          - test
+          - ./internal/toolcmd
+
+      - id: coverage-tools-tests
+        title: Run coverage tool tests
+        command:
+          - go
+          - test
+          - ./tools/coverage-check
+          - ./tools/coverage-report
+
+  - name: standalone
+    description: Dogfood the standalone Morfx binaries through fixture smoke checks
+    default_lane: canary
+    steps:
+      - id: build-standalone
+        title: Build standalone binaries
+        command:
+          - make
+          - build-standalone
+        artifacts:
+          - name: morfx-binary
+            path: bin/morfx
+            description: Built Morfx CLI
+          - name: query-binary
+            path: bin/query
+            description: Built standalone query tool
+          - name: replace-binary
+            path: bin/replace
+            description: Built standalone replace tool
+          - name: file-query-binary
+            path: bin/file_query
+            description: Built standalone file_query tool
+
+      - id: smoke
+        title: Run standalone fixture smoke checks
+        command:
+          - make
+          - smoke-standalone
+        artifacts:
+          - name: dogfood-artifacts
+            path: artifacts/dogfood
+            description: Captured standalone smoke logs and fixture outputs
+
+  - name: dogfood-tfx
+    description: Exercise standalone Morfx binaries against a local TFX checkout
+    default_lane: canary
+    steps:
+      - id: dogfood-external
+        title: Run external dogfood against TFX
+        command:
+          - make
+          - dogfood-tfx
+        artifacts:
+          - name: dogfood-tfx-artifacts
+            path: artifacts/dogfood-tfx
+            description: Query and replace outputs captured while targeting the local TFX repo
+
+  - name: quality
+    description: Strict local verification path
+    default_lane: canary
+    steps:
+      - id: verify
+        title: Run strict verification
+        command:
+          - make
+          - verify
+        artifacts:
+          - name: coverage
+            path: coverage.out
+            description: Coverage profile written by the repository test target
+            optional: true
+          - name: dogfood-artifacts
+            path: artifacts/dogfood
+            description: Standalone smoke outputs
+            optional: true
+
+  - name: release
+    description: Build host release artifacts and validate release readiness
+    default_lane: canary
+    require_approval: true
+    steps:
+      - id: verify
+        title: Run strict verification
+        lanes:
+          - canary
+          - production
+        command:
+          - make
+          - verify
+
+      - id: package
+        title: Package host release artifacts
+        lanes:
+          - canary
+          - production
+        command:
+          - make
+          - release-artifacts
+        artifacts:
+          - name: release-dist
+            path: dist
+            description: Host release bundle with Morfx and standalone tools
+    after_all:
+      - id: packaged-version
+        title: Validate packaged Morfx version
+        command:
+          - ./dist/morfx
+          - --version

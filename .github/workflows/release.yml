@@ -1,0 +1,242 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish or republish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Run repository verification
+        run: |
+          make verify
+
+  verify-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install Zig toolchain
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '0.16.0'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'zig'
+          Invoke-WebRequest -Uri "https://ziglang.org/download/$version/zig-x86_64-windows-$version.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $zigDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+          $zigDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Run Windows verification
+        shell: pwsh
+        run: |
+          .\tools\scripts\verify-windows.ps1
+
+  build:
+    needs:
+      - verify
+      - verify-windows
+    name: Build release archives
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            zig_target: x86_64-windows-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install Zig toolchain
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '0.16.0'
+          $zipPath = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'zig'
+          Invoke-WebRequest -Uri "https://ziglang.org/download/$version/zig-x86_64-windows-$version.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $zigDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+          $zigDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CC=zig cc -target ${{ matrix.zig_target }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          COMMIT="${GITHUB_SHA::7}"
+          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ARCHIVE_DIR="release/morfx_${VERSION#v}_${GOOS}_${GOARCH}"
+          mkdir -p "$ARCHIVE_DIR"
+
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then
+            EXT=".exe"
+          fi
+
+          go build -ldflags "-X github.com/oxhq/morfx/internal/buildinfo.Version=${VERSION} -X github.com/oxhq/morfx/internal/buildinfo.Commit=${COMMIT} -X github.com/oxhq/morfx/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+            -o "$ARCHIVE_DIR/morfx${EXT}" ./cmd/morfx
+
+          for tool in query replace delete insert_before insert_after append file_query file_replace file_delete apply; do
+            go build -o "$ARCHIVE_DIR/${tool}${EXT}" "./cmd/${tool}"
+          done
+
+          for asset in README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE tfx.yaml; do
+            if [ -f "$asset" ]; then
+              cp "$asset" "$ARCHIVE_DIR"/
+            fi
+          done
+
+      - name: Run standalone smoke
+        if: matrix.goos != 'windows'
+        shell: bash
+        env:
+          MORFX_BIN_DIR: ${{ github.workspace }}/release/morfx_${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          MORFX_ARTIFACT_DIR: ${{ github.workspace }}/release/smoke-${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          export MORFX_BIN_DIR="${GITHUB_WORKSPACE}/release/morfx_${VERSION#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tools/scripts/smoke-standalone.sh
+
+      - name: Run standalone smoke
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        env:
+          MORFX_BIN_DIR: ${{ github.workspace }}\release\morfx_${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          MORFX_ARTIFACT_DIR: ${{ github.workspace }}\release\smoke-${{ matrix.goos }}-${{ matrix.goarch }}
+        run: |
+          $version = "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}".TrimStart('v')
+          $env:MORFX_BIN_DIR = Join-Path $env:GITHUB_WORKSPACE "release\morfx_${version}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          .\tools\scripts\smoke-standalone.ps1
+
+      - name: Package archive
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          ARCHIVE_DIR="release/morfx_${VERSION#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tar -C release -czf "${ARCHIVE_DIR}.tar.gz" "$(basename "$ARCHIVE_DIR")"
+
+      - name: Package archive
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          $version = "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}".TrimStart('v')
+          $archiveDir = Join-Path $env:GITHUB_WORKSPACE "release\morfx_${version}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          $zipPath = "$archiveDir.zip"
+          Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $archiveDir "*") -DestinationPath $zipPath
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: morfx-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            release/*.tar.gz
+            release/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v5
+        with:
+          merge-multiple: true
+          path: release
+
+      - name: Prepare checksums and release notes
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          (
+            cd release
+            shopt -s nullglob
+            archives=( *.tar.gz *.zip )
+            if [ "${#archives[@]}" -eq 0 ]; then
+              echo "no release archives found" >&2
+              exit 1
+            fi
+            sha256sum "${archives[@]}" > SHA256SUMS
+          )
+          NOTES_FILE="docs/release-notes-${TAG}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            cp "$NOTES_FILE" release/RELEASE_NOTES.md
+          else
+            cat > release/RELEASE_NOTES.md <<EOF
+          # Morfx ${TAG}
+
+          This release bundles Morfx from tag ${TAG}.
+          EOF
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          title="Morfx ${TAG}"
+          if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GH_REPO" --notes-file release/RELEASE_NOTES.md
+            gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS \
+              --title "$title" \
+              --notes-file release/RELEASE_NOTES.md
+          fi

@@ -1,0 +1,37 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+
+# Go
+go.work
+go.work.sum
+*.coverprofile
+coverage/
+dist/
+artifacts/
+
+# IDE / editor
+*.swp
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Morfx runtime
+.morfx/
+.env
+morfx.db
+
+# Dev tools
+.claude/
+.kilocode/
+.gocache/
+.testing/
+.workflows/
+mcp.test
