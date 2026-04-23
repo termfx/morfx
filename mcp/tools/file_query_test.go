@@ -226,13 +226,13 @@ func TestFileQueryTool_PatternMatching(t *testing.T) {
 		},
 		{
 			name:            "recursive_pattern",
-			includePatterns: []string{"*.go"}, // Use simple pattern since ** doesn't work yet
-			expectedCount:   4,                // all .go files including cmd/app/main.go
+			includePatterns: []string{"*.go"},
+			expectedCount:   4, // all .go files including cmd/app/main.go
 		},
 		{
 			name:            "specific_directory",
-			includePatterns: []string{"cmd/*/*.go"}, // Pattern doesn't work with current implementation
-			expectedCount:   0,                      // No matches found with current file query implementation
+			includePatterns: []string{"cmd/*/*.go"},
+			expectedCount:   1, // cmd/app/main.go
 		},
 	}
 
