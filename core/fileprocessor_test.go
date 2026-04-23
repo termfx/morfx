@@ -500,9 +500,7 @@ func TestFileProcessor_TransformFiles_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	if err := os.Chmod(testFile, 0o751); err != nil {
-		t.Fatalf("Failed to set file permissions: %v", err)
-	}
+	setUnixModeIfSupported(t, testFile, 0o751)
 	if _, err := os.Stat(testFile); err != nil {
 		t.Fatalf("Failed to stat test file: %v", err)
 	}
@@ -710,9 +708,7 @@ func TestFileProcessor_TransformFiles_WithBackup(t *testing.T) {
 		}
 
 		t.Logf("backup permissions: %v", info.Mode())
-		if perm := info.Mode().Perm(); perm != 0o751 {
-			t.Errorf("Backup permissions = %v, want 0751", perm)
-		}
+		assertUnixModeIfSupported(t, backupFile, 0o751)
 	}
 
 	// Verify original file was modified

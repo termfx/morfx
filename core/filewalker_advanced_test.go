@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -212,11 +213,10 @@ func TestFileWalker_Walk_PermissionDenied(t *testing.T) {
 	}
 
 	// Make directory unreadable
-	err = os.Chmod(restrictedDir, 0o000)
-	if err != nil {
-		t.Fatalf("Failed to make directory unreadable: %v", err)
-	}
-	defer os.Chmod(restrictedDir, 0o755) // Restore for cleanup
+	setUnixModeIfSupported(t, restrictedDir, 0o000)
+	defer func() {
+		_ = os.Chmod(restrictedDir, 0o755)
+	}() // Restore for cleanup
 
 	ctx := context.Background()
 	scope := FileScope{
@@ -439,11 +439,10 @@ func TestFileWalker_FastScan_WithErrors(t *testing.T) {
 		t.Fatalf("Failed to create file in restricted directory: %v", err)
 	}
 
-	err = os.Chmod(restrictedDir, 0o000)
-	if err != nil {
-		t.Fatalf("Failed to make directory unreadable: %v", err)
-	}
-	defer os.Chmod(restrictedDir, 0o755)
+	setUnixModeIfSupported(t, restrictedDir, 0o000)
+	defer func() {
+		_ = os.Chmod(restrictedDir, 0o755)
+	}()
 
 	ctx := context.Background()
 	scope := FileScope{
@@ -456,9 +455,47 @@ func TestFileWalker_FastScan_WithErrors(t *testing.T) {
 		t.Fatalf("FastScan failed: %v", err)
 	}
 
-	// Should get some files despite errors (FastScan skips errors)
-	if len(files) != 3 {
-		t.Errorf("Expected 3 files, got %d", len(files))
+	// Should get the valid files even if the restricted directory is unreadable.
+	expectedFiles := []string{
+		filepath.Join(tempDir, "test0.go"),
+		filepath.Join(tempDir, "test1.go"),
+		filepath.Join(tempDir, "test2.go"),
+	}
+	allowedFiles := map[string]struct{}{}
+	for _, expected := range expectedFiles {
+		allowedFiles[filepath.Clean(expected)] = struct{}{}
+		if !containsFilePath(files, expected) {
+			t.Errorf("Expected FastScan to return %s", expected)
+		}
+	}
+	restrictedFile := filepath.Join(restrictedDir, "test.go")
+	allowedFiles[filepath.Clean(restrictedFile)] = struct{}{}
+
+	seen := map[string]int{}
+	for _, file := range files {
+		cleaned := filepath.Clean(file)
+		seen[cleaned]++
+		if _, ok := allowedFiles[cleaned]; !ok {
+			t.Errorf("FastScan returned unexpected file: %s", file)
+		}
+	}
+	for file, count := range seen {
+		if count != 1 {
+			t.Errorf("FastScan returned duplicate file %s %d times", file, count)
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		if len(files) != len(expectedFiles) && len(files) != len(expectedFiles)+1 {
+			t.Errorf("Expected 3 or 4 files on Windows, got %d", len(files))
+		}
+	} else {
+		if containsFilePath(files, restrictedFile) {
+			t.Errorf("FastScan should skip inaccessible file: %s", restrictedFile)
+		}
+		if len(files) != len(expectedFiles) {
+			t.Errorf("Expected %d files, got %d", len(expectedFiles), len(files))
+		}
 	}
 
 	// Verify all returned paths are valid

@@ -150,9 +150,10 @@ func (fw *FileWalker) scanDirectory(
 		}
 
 		fullPath := filepath.Join(dirPath, entry.Name())
+		matchPath := fw.scopeRelativePath(scope.Path, fullPath)
 
 		// Skip excluded patterns
-		if fw.isExcluded(fullPath, scope.Exclude) {
+		if fw.isExcluded(matchPath, scope.Exclude) {
 			continue
 		}
 
@@ -198,7 +199,7 @@ func (fw *FileWalker) scanDirectory(
 		}
 
 		// Check if file matches include patterns
-		if fw.isIncluded(fullPath, scope.Include) {
+		if fw.isIncluded(matchPath, scope.Include) {
 			if scope.MaxFiles > 0 && *processed >= scope.MaxFiles {
 				return
 			}
@@ -210,6 +211,17 @@ func (fw *FileWalker) scanDirectory(
 			}
 		}
 	}
+}
+
+// scopeRelativePath returns the path to match against include/exclude glob patterns.
+// Matching relative paths keeps glob semantics stable across Windows and Unix.
+func (fw *FileWalker) scopeRelativePath(rootPath, fullPath string) string {
+	relPath, err := filepath.Rel(rootPath, fullPath)
+	if err != nil {
+		return filepath.ToSlash(fullPath)
+	}
+
+	return filepath.ToSlash(relPath)
 }
 
 // processFile analyzes a single file and creates WalkResult
@@ -310,20 +322,53 @@ func (fw *FileWalker) isExcluded(path string, patterns []string) bool {
 
 // matchPattern performs robust glob-style pattern matching with ** support
 func (fw *FileWalker) matchPattern(path, pattern string) bool {
-	// Direct match with doublestar
-	if matched, err := doublestar.PathMatch(pattern, path); err == nil && matched {
-		return true
-	}
+	normalizedPath := filepath.ToSlash(path)
+	normalizedPattern := filepath.ToSlash(pattern)
 
-	// Try basename for simple patterns without path separators
-	if !strings.Contains(pattern, "/") {
-		basename := filepath.Base(path)
-		if matched, err := doublestar.PathMatch(pattern, basename); err == nil && matched {
+	for _, candidatePattern := range fw.globPatternVariants(normalizedPattern) {
+		if doublestar.MatchUnvalidated(candidatePattern, normalizedPath) {
 			return true
+		}
+
+		// Keep basename matching for simple patterns like *.go when the path is nested.
+		if !strings.Contains(candidatePattern, "/") {
+			basename := filepath.Base(normalizedPath)
+			if doublestar.MatchUnvalidated(candidatePattern, basename) {
+				return true
+			}
 		}
 	}
 
 	return false
+}
+
+// globPatternVariants expands patterns that use **/ so they also match zero directories.
+func (fw *FileWalker) globPatternVariants(pattern string) []string {
+	variants := make(map[string]struct{})
+
+	var expand func(prefix, remainder string)
+	expand = func(prefix, remainder string) {
+		idx := strings.Index(remainder, "**/")
+		if idx < 0 {
+			variants[prefix+remainder] = struct{}{}
+			return
+		}
+
+		// Option 1: consume **/ as zero directories.
+		expand(prefix+remainder[:idx], remainder[idx+3:])
+
+		// Option 2: keep **/ so doublestar can match one or more directories.
+		expand(prefix+remainder[:idx+3], remainder[idx+3:])
+	}
+
+	expand("", pattern)
+
+	out := make([]string, 0, len(variants))
+	for variant := range variants {
+		out = append(out, variant)
+	}
+
+	return out
 }
 
 // validateScope validates FileScope parameters

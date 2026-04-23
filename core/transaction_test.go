@@ -101,9 +101,7 @@ func TestTransactionManager_AddOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
-	if err := os.Chmod(testFile, 0o705); err != nil {
-		t.Fatalf("Failed to set test file permissions: %v", err)
-	}
+	setUnixModeIfSupported(t, testFile, 0o705)
 
 	// Add modify operation
 	op, err := manager.AddOperation("modify", testFile)
@@ -135,12 +133,10 @@ func TestTransactionManager_AddOperation(t *testing.T) {
 	}
 
 	// Verify backup file was created and retains permissions
-	if info, err := os.Stat(op.BackupPath); os.IsNotExist(err) {
+	if _, err := os.Stat(op.BackupPath); os.IsNotExist(err) {
 		t.Error("Backup file was not created")
 	} else if err == nil {
-		if perm := info.Mode().Perm(); perm != 0o705 {
-			t.Errorf("Backup permissions = %v, want 0705", perm)
-		}
+		assertUnixModeIfSupported(t, op.BackupPath, 0o705)
 	}
 }
 

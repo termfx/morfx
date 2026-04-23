@@ -3,10 +3,20 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func invalidAtomicPath(t *testing.T, name string) string {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
+		t.Fatalf("Failed to create blocker: %v", err)
+	}
+	return filepath.Join(blocker, name)
+}
 
 func TestDefaultAtomicConfig(t *testing.T) {
 	config := DefaultAtomicConfig()
@@ -160,15 +170,11 @@ func TestAtomicWriter_WriteFile_PermissionsPreserved(t *testing.T) {
 	}
 
 	// Verify permissions were preserved
-	info, err := os.Stat(testFile)
-	if err != nil {
+	if _, err := os.Stat(testFile); err != nil {
 		t.Fatalf("Failed to stat file: %v", err)
 	}
 
-	expectedMode := os.FileMode(0o600)
-	if info.Mode().Perm() != expectedMode {
-		t.Errorf("Expected permissions %v, got %v", expectedMode, info.Mode().Perm())
-	}
+	assertUnixModeIfSupported(t, testFile, 0o600)
 }
 
 func TestAtomicWriter_WriteFile_ConcurrentAccess(t *testing.T) {
@@ -206,7 +212,7 @@ func TestAtomicWriter_WriteFile_InvalidPath(t *testing.T) {
 	writer := NewAtomicWriter(config)
 
 	// Try to write to an invalid path
-	invalidPath := "/nonexistent/directory/file.txt"
+	invalidPath := invalidAtomicPath(t, "file.txt")
 
 	err := writer.WriteFile(invalidPath, "content")
 	if err == nil {
@@ -215,23 +221,24 @@ func TestAtomicWriter_WriteFile_InvalidPath(t *testing.T) {
 }
 
 func TestAtomicWriter_WriteFile_ReadOnlyDirectory(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Make directory read-only
-	err := os.Chmod(tempDir, 0o444)
-	if err != nil {
-		t.Fatalf("Failed to make directory read-only: %v", err)
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directory permissions do not reliably map to POSIX read-only directories")
 	}
-	defer os.Chmod(tempDir, 0o755) // Restore permissions for cleanup
+
+	tempDir := t.TempDir()
+	setUnixModeIfSupported(t, tempDir, 0o444)
+	defer func() {
+		_ = os.Chmod(tempDir, 0o755)
+	}()
 
 	testFile := filepath.Join(tempDir, "readonly.txt")
 
 	config := DefaultAtomicConfig()
 	writer := NewAtomicWriter(config)
 
-	err = writer.WriteFile(testFile, "content")
+	err := writer.WriteFile(testFile, "content")
 	if err == nil {
-		t.Error("Expected error when writing to read-only directory")
+		t.Error("Expected error when parent path is not a directory")
 	}
 }
 
