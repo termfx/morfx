@@ -50,6 +50,7 @@ jobs:
 
   tfx:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -60,18 +61,30 @@ jobs:
       - name: Install TFX
         run: go install github.com/oxhq/tfx/cmd/tfx@v0.1.1
 
-      - name: Run TFX standalone flow
+      - name: Run TFX PR flow
         run: |
-          "$(go env GOPATH)/bin/tfx" --flow standalone --run --quiet
+          "$(go env GOPATH)/bin/tfx" --flow ci-pr --run --quiet
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
 
-      - name: Run strict lint
-        run: make lint-strict
+      - name: Determine lint base revision
+        id: lint-base
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "rev=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "rev=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run CI lint gate
+        run: make lint-ci LINT_BASE_REV="${{ steps.lint-base.outputs.rev }}"

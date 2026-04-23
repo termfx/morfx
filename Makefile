@@ -30,6 +30,7 @@ GOFUMPT_VERSION = latest
 GOLINES_VERSION = latest
 GOTESTSUM_VERSION = latest
 GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+LINT_BASE_REV ?= HEAD~
 
 # Colors for output
 RED = \033[0;31m
@@ -66,6 +67,23 @@ lint:
 lint-strict:
 	@echo "$(YELLOW)Running strict lint (no auto-fix)...$(NC)"
 	@$(GOLANGCI_LINT) run --config .golangci.yml ./...
+
+## lint-ci: Run the blocking CI lint gate
+.PHONY: lint-ci
+lint-ci:
+	@echo "$(YELLOW)Running CI lint gate...$(NC)"
+	@changed_files="$$(git diff --name-only $(LINT_BASE_REV) -- '*.go')"; \
+	if [ -n "$$changed_files" ]; then \
+		unformatted="$$(gofmt -l $$changed_files)"; \
+		if [ -n "$$unformatted" ]; then \
+			printf '%s\n' "$$unformatted"; \
+			exit 1; \
+		fi; \
+	fi
+	@$(GOLANGCI_LINT) run --config .golangci.yml \
+		--enable-only errcheck,errorlint,govet,ineffassign,staticcheck,unused \
+		--tests=false \
+		--new-from-rev=$(LINT_BASE_REV) ./...
 
 ## modernize: Auto-fix and modernize entire codebase
 .PHONY: modernize

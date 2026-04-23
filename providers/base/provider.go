@@ -89,9 +89,14 @@ func (p *Provider) SupportedQueryTypes() []string {
 
 // borrowParser retrieves a parser instance from the pool.
 func (p *Provider) borrowParser() *parserAdapter {
-	parser := p.pool.Get().(*parserAdapter)
+	parser, ok := p.pool.Get().(*parserAdapter)
+	if !ok || parser == nil {
+		parser = newParserAdapter(p.config.GetLanguage())
+	}
+
 	p.stats.borrowCount.Add(1)
 	p.stats.active.Add(1)
+
 	return parser
 }
 

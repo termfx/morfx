@@ -110,7 +110,9 @@ func main() {
 
 	wroteFile, err := toolcmd.WriteModifiedSource(src.Path, src.FromFile, src.Code, result.Modified, src.Perm)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to write modified file", err)
+		if writeErr := toolenv.WriteError(os.Stdout, "failed to write modified file", err); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to write error output: %v\n", writeErr)
+		}
 		os.Exit(1)
 	}
 

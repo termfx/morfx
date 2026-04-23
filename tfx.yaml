@@ -42,6 +42,25 @@ flows:
           - -timeout=120s
           - ./providers/...
 
+  - name: ci-pr
+    description: Fast TFX smoke flow for pull-request automation
+    default_lane: preview
+    steps:
+      - id: toolcmd-tests
+        title: Run standalone tool command tests
+        command:
+          - go
+          - test
+          - ./internal/toolcmd
+
+      - id: coverage-tools-tests
+        title: Run coverage tool tests
+        command:
+          - go
+          - test
+          - ./tools/coverage-check
+          - ./tools/coverage-report
+
   - name: standalone
     description: Dogfood the standalone Morfx binaries through fixture smoke checks
     default_lane: canary
