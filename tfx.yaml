@@ -83,6 +83,9 @@ flows:
           - name: file-query-binary
             path: bin/file_query
             description: Built standalone file_query tool
+          - name: recipe-binary
+            path: bin/recipe
+            description: Built standalone recipe tool
 
       - id: smoke
         title: Run standalone fixture smoke checks

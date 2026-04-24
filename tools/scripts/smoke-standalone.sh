@@ -11,7 +11,7 @@ cd "$ROOT_DIR"
 mkdir -p "$ARTIFACT_DIR"
 rm -f "$ARTIFACT_DIR"/*.go "$ARTIFACT_DIR"/*.json "$ARTIFACT_DIR"/*.txt
 
-for bin in morfx query replace file_query apply; do
+for bin in morfx query replace file_query apply recipe; do
 	if [[ ! -x "$BIN_DIR/$bin" ]]; then
 		echo "missing binary: $BIN_DIR/$bin" >&2
 		exit 1
@@ -20,6 +20,7 @@ done
 
 "$BIN_DIR/morfx" --help > "$ARTIFACT_DIR/morfx-help.txt"
 "$BIN_DIR/apply" --help > "$ARTIFACT_DIR/apply-help.txt"
+"$BIN_DIR/recipe" --help > "$ARTIFACT_DIR/recipe-help.txt"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/morfx-standalone.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -52,6 +53,17 @@ EOF
 "$BIN_DIR/file_query" < "$TMP_DIR/file_query.json" > "$ARTIFACT_DIR/file_query.json"
 grep -q '"files"' "$ARTIFACT_DIR/file_query.json"
 grep -q 'HelloUser' "$ARTIFACT_DIR/file_query.json"
+
+cat > "$TMP_DIR/recipe.json" <<EOF
+{"name":"replace-hello-recipe","dry_run":true,"min_confidence":0.85,"steps":[{"name":"replace hello function","method":"replace","scope":{"path":"$TMP_DIR","include":["**/*.go"],"language":"go","max_files":10},"target":{"type":"function","name":"HelloUser"},"replacement":"func HelloUser() string { return \"recipe\" }"}]}
+EOF
+"$BIN_DIR/recipe" < "$TMP_DIR/recipe.json" > "$ARTIFACT_DIR/recipe.json"
+grep -q '"steps_run"' "$ARTIFACT_DIR/recipe.json"
+grep -q 'replace hello function' "$ARTIFACT_DIR/recipe.json"
+if grep -q 'recipe' "$SAMPLE_FILE"; then
+	echo "recipe dry-run mutated the sample file" >&2
+	exit 1
+fi
 
 cp "$SAMPLE_FILE" "$ARTIFACT_DIR/sample.after.txt"
 

@@ -87,6 +87,7 @@ func RegisterAll(server types.ServerInterface) {
 	Registry.Register("insert_before", NewInsertBeforeTool(server))
 	Registry.Register("insert_after", NewInsertAfterTool(server))
 	Registry.Register("append", NewAppendTool(server))
+	Registry.Register("recipe", NewRecipeTool(server))
 
 	// Staging tools
 	Registry.Register("apply", NewApplyTool(server))

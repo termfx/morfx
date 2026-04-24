@@ -21,7 +21,7 @@ func TestGetToolDefinitions(t *testing.T) {
 	expectedTools := []string{
 		"query", "file_query", "replace", "file_replace",
 		"delete", "file_delete", "insert_before", "insert_after",
-		"apply", "append",
+		"apply", "append", "recipe",
 	}
 
 	if len(tools) != len(expectedTools) {
@@ -302,7 +302,7 @@ func TestRegisterBuiltinTools(t *testing.T) {
 	expectedTools := []string{
 		"query", "file_query", "replace", "file_replace",
 		"delete", "file_delete", "insert_before", "insert_after",
-		"apply", "append",
+		"apply", "append", "recipe",
 	}
 
 	registered := server.toolRegistry.Names()
@@ -430,10 +430,12 @@ func TestToolSchemaValidation(t *testing.T) {
 			}
 
 			// Check that tools have appropriate parameters
-			// File tools (file_*) have 'scope' parameter instead of 'language'
-			// Other tools should have 'language' parameter (except apply)
+			// File tools (file_*) and recipe have 'scope' nested in the payload
+			// instead of top-level 'language'. Other tools should have 'language'
+			// parameter except apply.
 			isFileTool := strings.HasPrefix(tool.Name, "file_")
-			if tool.Name != "apply" && !isFileTool {
+			isWorkflowTool := tool.Name == "apply" || tool.Name == "recipe"
+			if !isWorkflowTool && !isFileTool {
 				if _, hasLanguage := propertiesMap["language"]; !hasLanguage {
 					t.Error("Non-file tool should have 'language' parameter")
 				}
@@ -470,7 +472,7 @@ func TestToolSchemaValidation(t *testing.T) {
 					t.Error("File tool should have 'scope' parameter")
 				}
 				// File tools don't require language parameter at top level
-			} else if tool.Name != "apply" {
+			} else if tool.Name != "apply" && tool.Name != "recipe" {
 				// Non-file tools typically need language parameter
 				if _, hasLanguage := propertiesMap["language"]; !hasLanguage {
 					t.Logf("Tool %s missing 'language' parameter (might be expected)", tool.Name)

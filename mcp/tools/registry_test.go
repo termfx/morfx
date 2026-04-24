@@ -25,7 +25,7 @@ func TestRegistry_Init(t *testing.T) {
 		"replace", "file_replace",
 		"delete", "file_delete",
 		"insert_before", "insert_after",
-		"append", "apply",
+		"append", "apply", "recipe",
 	}
 
 	for _, name := range expectedTools {

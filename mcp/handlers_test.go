@@ -160,7 +160,7 @@ func TestHandleListTools(t *testing.T) {
 	expectedTools := []string{
 		"query", "file_query", "replace", "file_replace",
 		"delete", "file_delete", "insert_before", "insert_after",
-		"apply", "append",
+		"apply", "append", "recipe",
 	}
 
 	if len(tools) != len(expectedTools) {

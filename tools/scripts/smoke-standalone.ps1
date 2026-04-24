@@ -66,7 +66,7 @@ $binDir = if ($env:MORFX_BIN_DIR) { $env:MORFX_BIN_DIR } else { Join-Path $rootD
 New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 Get-ChildItem -Path $artifactDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in ".go", ".json", ".txt" } | Remove-Item -Force
 
-$requiredBins = @("morfx", "query", "replace", "file_query", "apply")
+$requiredBins = @("morfx", "query", "replace", "file_query", "apply", "recipe")
 foreach ($bin in $requiredBins) {
 	$path = Join-Path $binDir "$bin.exe"
 	if (-not (Test-Path $path)) {
@@ -76,6 +76,7 @@ foreach ($bin in $requiredBins) {
 
 Write-Utf8NoBom -Path (Join-Path $artifactDir "morfx-help.txt") -Content ((Invoke-CapturedNativeCommand -ExePath (Join-Path $binDir "morfx.exe") -ArgumentList @("--help") -Description "morfx --help") -join [Environment]::NewLine)
 Write-Utf8NoBom -Path (Join-Path $artifactDir "apply-help.txt") -Content ((Invoke-CapturedNativeCommand -ExePath (Join-Path $binDir "apply.exe") -ArgumentList @("--help") -Description "apply --help") -join [Environment]::NewLine)
+Write-Utf8NoBom -Path (Join-Path $artifactDir "recipe-help.txt") -Content ((Invoke-CapturedNativeCommand -ExePath (Join-Path $binDir "recipe.exe") -ArgumentList @("--help") -Description "recipe --help") -join [Environment]::NewLine)
 
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("morfx-standalone-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
@@ -141,6 +142,40 @@ func HelloUser() string {
 	$fileQueryOutput = Get-Content (Join-Path $artifactDir "file_query.json") -Raw
 	if ($fileQueryOutput -notmatch '"files"' -or $fileQueryOutput -notmatch 'HelloUser') {
 		throw "file_query smoke check failed"
+	}
+
+	$recipePayload = @{
+		name = "replace-hello-recipe"
+		dry_run = $true
+		min_confidence = 0.85
+		steps = @(
+			@{
+				name = "replace hello function"
+				method = "replace"
+				scope = @{
+					path = $tmpDir
+					include = @("**/*.go")
+					language = "go"
+					max_files = 10
+				}
+				target = @{
+					type = "function"
+					name = "HelloUser"
+				}
+				replacement = 'func HelloUser() string { return "recipe" }'
+			}
+		)
+	} | ConvertTo-Json -Compress -Depth 10
+	$recipeJson = Join-Path $tmpDir "recipe.json"
+	Write-Utf8NoBom -Path $recipeJson -Content $recipePayload
+	Invoke-JsonTool -ExePath (Join-Path $binDir "recipe.exe") -InputPath $recipeJson -OutputPath (Join-Path $artifactDir "recipe.json")
+	$recipeOutput = Get-Content (Join-Path $artifactDir "recipe.json") -Raw
+	if ($recipeOutput -notmatch '"steps_run"' -or $recipeOutput -notmatch 'replace hello function') {
+		throw "recipe smoke check failed"
+	}
+	$sampleAfterRecipe = Get-Content $sampleFile -Raw
+	if ($sampleAfterRecipe -match 'recipe') {
+		throw "recipe dry-run mutated the sample file"
 	}
 
 	Copy-Item -Path $sampleFile -Destination (Join-Path $artifactDir "sample.after.txt") -Force

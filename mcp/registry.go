@@ -132,6 +132,8 @@ func classifyToolCategory(name string) string {
 		return "analysis"
 	case name == "apply":
 		return "staging"
+	case name == "recipe":
+		return "workflow"
 	default:
 		return "code-transform"
 	}
@@ -141,7 +143,7 @@ func toolKind(category string) string {
 	switch category {
 	case "analysis":
 		return "analysis"
-	case "staging":
+	case "staging", "workflow":
 		return "workflow"
 	default:
 		return "transformation"
@@ -174,6 +176,7 @@ var builtinProgressTools = map[string]struct{}{
 	"insert_after":  {},
 	"insert_before": {},
 	"query":         {},
+	"recipe":        {},
 	"replace":       {},
 }
 

@@ -127,7 +127,7 @@ jobs:
           go build -ldflags "-X github.com/oxhq/morfx/internal/buildinfo.Version=${VERSION} -X github.com/oxhq/morfx/internal/buildinfo.Commit=${COMMIT} -X github.com/oxhq/morfx/internal/buildinfo.BuildTime=${BUILD_TIME}" \
             -o "$ARCHIVE_DIR/morfx${EXT}" ./cmd/morfx
 
-          for tool in query replace delete insert_before insert_after append file_query file_replace file_delete apply; do
+          for tool in query replace delete insert_before insert_after append file_query file_replace file_delete apply recipe; do
             go build -o "$ARCHIVE_DIR/${tool}${EXT}" "./cmd/${tool}"
           done
 

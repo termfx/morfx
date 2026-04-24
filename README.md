@@ -7,7 +7,7 @@
 Morfx gives AI agents a deterministic way to query and rewrite code by AST node
 instead of raw text. It ships as `morfx mcp` for MCP clients such as Claude
 Desktop and Codex, and as standalone JSON tools such as `query`, `replace`,
-`file_query`, and `apply` for direct local automation.
+`file_query`, `recipe`, and `apply` for direct local automation.
 
 ## 30-Second Quick Win
 
@@ -23,7 +23,7 @@ JSON
 
 You get JSON back with the matched node, confidence details, and file metadata.
 The same engine is what `morfx mcp` exposes to MCP clients when you ask an
-agent to replace, delete, insert, or stage a change safely.
+agent to replace, delete, insert, run a recipe, or stage a change safely.
 
 ## Why
 
@@ -39,6 +39,7 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 - **Stage / Apply / Rollback** — Two-phase commit with SQLite audit trail
 - **Confidence scoring** — Every transform gets a score with explainable factors
 - **Multi-language** — Go, JavaScript, TypeScript, PHP, Python via tree-sitter
+- **Recipes / Rules** - Named repeatable transformations composed from the same safe primitives
 
 ## Modes
 
@@ -47,7 +48,7 @@ automation or repeatable local workflows. Morfx ships in three operational
 shapes:
 
 - **`morfx mcp`** for MCP-compatible AI clients such as Claude Desktop or Codex
-- **Standalone binaries** such as `query`, `replace`, `file_query`, and `apply`
+- **Standalone binaries** such as `query`, `replace`, `file_query`, `recipe`, and `apply`
   for direct local automation
 - **A TFX-orchestrated runtime** for repeatable flows such as smoke checks,
   dogfooding, quality gates, and release packaging
@@ -187,6 +188,7 @@ read one JSON response from stdout.
 | `insert_before` | Insert code before a matched element |
 | `insert_after` | Insert code after a matched element |
 | `append` | Smart-place code at end of file or scope |
+| `recipe` | Run a named repeatable transformation with confidence gates |
 | `apply` | Apply a staged transformation |
 
 Build them locally with:
@@ -226,6 +228,45 @@ These are the JSON payloads your AI agent sends. You don't type these — your a
   "target": {"type": "function", "name": "DeleteUser"},
   "content": "// DeleteUser removes a user permanently. Use with caution."
 }
+```
+
+## Recipes and rules
+
+Use `recipe` when a transformation should be repeatable instead of copied as an
+ad-hoc shell snippet. A recipe is a named set of rules. Each rule maps directly
+to an existing Morfx primitive: `replace`, `delete`, `insert_before`,
+`insert_after`, or `append`.
+
+Apply-mode recipes always run a dry-run preflight first. Morfx only mutates files
+after the step meets its `min_confidence` gate.
+
+Recipes are available both as the MCP `recipe` tool and as the standalone
+`recipe` JSON binary.
+
+```json
+{
+  "name": "replace-legacy-handlers",
+  "dry_run": true,
+  "min_confidence": 0.85,
+  "steps": [
+    {
+      "name": "replace legacy handlers",
+      "method": "replace",
+      "scope": {
+        "path": ".",
+        "include": ["**/*.go"],
+        "language": "go",
+        "max_files": 100
+      },
+      "target": {"type": "function", "name": "Legacy*"},
+      "replacement": "func Replacement() {}"
+    }
+  ]
+}
+```
+
+```bash
+cat recipe.json | ./bin/recipe
 ```
 
 ## Confidence scoring

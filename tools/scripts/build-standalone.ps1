@@ -16,7 +16,7 @@ function Invoke-NativeCommand {
 
 $rootDir = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $binDir = Join-Path $rootDir "bin"
-$tools = @("query", "replace", "delete", "insert_before", "insert_after", "append", "file_query", "file_replace", "file_delete", "apply")
+$tools = @("query", "replace", "delete", "insert_before", "insert_after", "append", "file_query", "file_replace", "file_delete", "apply", "recipe")
 
 Push-Location $rootDir
 try {

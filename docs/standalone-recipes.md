@@ -68,6 +68,40 @@ cat <<'JSON' | ./bin/apply
 JSON
 ```
 
+### Run a repeatable recipe
+
+Use `recipe` when you want a named transformation that can be checked into a
+repo, reused by an agent, or wrapped by TFX.
+
+```bash
+cat <<'JSON' | ./bin/recipe
+{
+  "name": "replace-legacy-handlers",
+  "dry_run": true,
+  "min_confidence": 0.85,
+  "steps": [
+    {
+      "name": "replace legacy handlers",
+      "method": "replace",
+      "scope": {
+        "path": ".",
+        "include": ["**/*.go"],
+        "exclude": ["vendor/**"],
+        "language": "go",
+        "max_files": 100
+      },
+      "target": {"type": "function", "name": "Legacy*"},
+      "replacement": "func Replacement() {}"
+    }
+  ]
+}
+JSON
+```
+
+Set `dry_run` to `false` only after reviewing the result. Apply-mode recipes
+still preflight first and stop before mutation when a step falls below
+`min_confidence`.
+
 ## Local automation patterns
 
 ### Preflight a refactor
@@ -147,5 +181,6 @@ bundle before cutting a tag.
 
 - Query first, mutate second.
 - Prefer `file_query` and `file_replace` for tree-wide work.
+- Prefer `recipe` when the same transformation will be reused.
 - Keep shell recipes explicit about `path`, `scope`, and `language`.
 - Use TFX when the same sequence needs to be repeatable across runs.

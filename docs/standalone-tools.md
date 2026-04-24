@@ -6,7 +6,7 @@ information summarised below.
 
 These are not flag-first CLIs. In normal use, the only flags you should expect
 to reach for are help flags and the occasional tool-specific control flag such
-as `apply --db ...`. The actual query or transform payload still travels over
+as `apply --db ...`. The actual query, transform, or recipe payload still travels over
 stdin/stdout as JSON.
 
 Build all standalone binaries locally with:
@@ -177,6 +177,51 @@ For more practical shell recipes and the external TFX dogfood path, see
 ## `file_delete`
 - **Purpose:** Delete matches across multiple files. Shares the same input and
   output contract as `file_replace` minus the `replacement` field.
+
+## `recipe`
+- **Purpose:** Run a named repeatable transformation made from existing Morfx
+  primitives.
+- **Input:**
+  ```json
+  {
+    "name": "replace-legacy-handlers",
+    "description": "Optional human-readable note",
+    "dry_run": true,
+    "min_confidence": 0.85,
+    "steps": [
+      {
+        "name": "replace legacy handlers",
+        "method": "replace",
+        "scope": {
+          "path": ".",
+          "include": ["**/*.go"],
+          "language": "go"
+        },
+        "target": {"type": "function", "name": "Legacy*"},
+        "replacement": "func Replacement() {}"
+      }
+    ]
+  }
+  ```
+- **Output:**
+  ```json
+  {
+    "content": [{"type": "text", "text": "summary"}],
+    "name": "replace-legacy-handlers",
+    "dry_run": true,
+    "steps_run": 1,
+    "files_scanned": 10,
+    "files_modified": 2,
+    "matches": 2,
+    "transaction_ids": [],
+    "steps": [/* core.RecipeStepResult */]
+  }
+  ```
+
+Supported step methods are `replace`, `delete`, `insert_before`,
+`insert_after`, and `append`. Apply-mode recipes run a dry-run preflight first
+and only mutate files after each step meets its confidence gate. The same
+payload shape is also exposed through the MCP `recipe` tool.
 
 ## `apply`
 - **Purpose:** Apply staged transformations stored in the Morfx database.
