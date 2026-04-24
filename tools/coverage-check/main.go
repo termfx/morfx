@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // ComponentThresholds defines coverage requirements per component
@@ -135,7 +137,7 @@ type PackageCoverage struct {
 }
 
 func parseCoverageFile(filename string) ([]PackageCoverage, error) {
-	file, err := os.Open(filename)
+	file, err := securefs.Open(filename)
 	if err != nil {
 		return nil, err
 	}

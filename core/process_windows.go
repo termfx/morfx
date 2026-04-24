@@ -40,6 +40,7 @@ func isProcessAlive(pid int) bool {
 
 	// Check if process is still active
 	var exitCode uint32
+	// #nosec G103 -- Windows syscall requires passing a pointer to receive the process exit code.
 	ret, _, _ := procGetExitCodeProcess.Call(
 		handle,
 		uintptr(unsafe.Pointer(&exitCode)),

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // SafetyManager handles all safety-related operations
@@ -169,7 +171,7 @@ func (sm *SafetyManager) AtomicWrite(path, content string) (*AtomicWriteHandle, 
 	}
 
 	// Write to temporary file
-	if err := os.WriteFile(tmpPath, []byte(content), mode); err != nil {
+	if err := securefs.WriteFile(tmpPath, []byte(content), mode); err != nil {
 		sm.cleanupFailedWrite(tmpPath, backupPath)
 		return nil, WrapError(AtomicWriteFailed, "Failed to write temporary file", err)
 	}
@@ -191,7 +193,9 @@ func (sm *SafetyManager) AtomicWrite(path, content string) (*AtomicWriteHandle, 
 	if err := os.Rename(tmpPath, path); err != nil {
 		sm.cleanupFailedWrite(tmpPath, backupPath)
 		if txID != "" {
-			sm.txLog.FailTransaction(txID, err)
+			if failErr := sm.txLog.FailTransaction(txID, err); failErr != nil {
+				err = fmt.Errorf("%w; failed to record transaction failure: %w", err, failErr)
+			}
 		}
 		return nil, WrapError(AtomicWriteFailed, "Failed to rename temporary file", err)
 	}
@@ -293,7 +297,7 @@ func (sm *SafetyManager) acquireOSLock(path string) (*fileLock, error) {
 
 	deadline := time.Now().Add(sm.config.LockTimeout)
 	for time.Now().Before(deadline) {
-		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		file, err := securefs.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			// Successfully created lock file
 			lock := &fileLock{
@@ -303,15 +307,25 @@ func (sm *SafetyManager) acquireOSLock(path string) (*fileLock, error) {
 			}
 
 			// Write PID to lock file
-			fmt.Fprintf(file, "%d\n", os.Getpid())
-			file.Sync()
+			if _, err := fmt.Fprintf(file, "%d\n", os.Getpid()); err != nil {
+				if releaseErr := lock.release(); releaseErr != nil {
+					err = fmt.Errorf("%w; failed to release lock: %w", err, releaseErr)
+				}
+				return nil, WrapError(FileSystemError, "Failed to write lock file", err)
+			}
+			if err := file.Sync(); err != nil {
+				if releaseErr := lock.release(); releaseErr != nil {
+					err = fmt.Errorf("%w; failed to release lock: %w", err, releaseErr)
+				}
+				return nil, WrapError(FileSystemError, "Failed to sync lock file", err)
+			}
 
 			return lock, nil
 		}
 
 		// Check if lock is stale
 		if sm.isLockStale(lockPath) {
-			os.Remove(lockPath) // Remove stale lock
+			securefs.RemoveBestEffort(lockPath) // Remove stale lock
 			continue
 		}
 
@@ -325,7 +339,7 @@ func (sm *SafetyManager) acquireOSLock(path string) (*fileLock, error) {
 
 // isLockStale checks if a lock file is stale (process no longer exists)
 func (sm *SafetyManager) isLockStale(lockPath string) bool {
-	content, err := os.ReadFile(lockPath)
+	content, err := securefs.ReadFile(lockPath)
 	if err != nil {
 		return true // Can't read = stale
 	}
@@ -349,7 +363,7 @@ func (sm *SafetyManager) createBackup(src, dst string) error {
 		return err
 	}
 
-	content, err := os.ReadFile(src)
+	content, err := securefs.ReadFile(src)
 	if err != nil {
 		return err
 	}
@@ -358,21 +372,21 @@ func (sm *SafetyManager) createBackup(src, dst string) error {
 	if mode == 0 {
 		mode = 0o644
 	}
-	if err := os.WriteFile(dst, content, mode); err != nil {
+	if err := securefs.WriteFile(dst, content, mode); err != nil {
 		return err
 	}
 	return os.Chmod(dst, mode)
 }
 
 func (sm *SafetyManager) cleanupFailedWrite(tmpPath, backupPath string) {
-	os.Remove(tmpPath)
+	securefs.RemoveBestEffort(tmpPath)
 	if backupPath != "" {
-		os.Remove(backupPath)
+		securefs.RemoveBestEffort(backupPath)
 	}
 }
 
 func (sm *SafetyManager) syncFile(path string) error {
-	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	file, err := securefs.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
@@ -389,7 +403,7 @@ func (sm *SafetyManager) syncDir(path string) error {
 		return fmt.Errorf("not a directory: %s", path)
 	}
 
-	dir, err := os.Open(path)
+	dir, err := securefs.Open(path)
 	if err != nil {
 		return err
 	}
@@ -420,7 +434,7 @@ func shouldIgnoreWindowsDirSyncError(err error) bool {
 
 // calculateFileHash computes SHA256 hash of a file
 func calculateFileHash(path string) (string, error) {
-	content, err := os.ReadFile(path)
+	content, err := securefs.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -476,8 +490,14 @@ type fileLock struct {
 
 func (fl *fileLock) release() error {
 	if fl.file != nil {
-		fl.file.Close()
-		return os.Remove(fl.path)
+		closeErr := fl.file.Close()
+		removeErr := os.Remove(fl.path)
+		if closeErr != nil {
+			return closeErr
+		}
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return removeErr
+		}
 	}
 	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // FileLock represents a file lock for concurrent access control
@@ -51,12 +53,16 @@ func NewAtomicWriter(config AtomicWriteConfig) *AtomicWriter {
 }
 
 // WriteFile atomically writes content to file with optional locking
-func (aw *AtomicWriter) WriteFile(path, content string) error {
+func (aw *AtomicWriter) WriteFile(path, content string) (err error) {
 	// Acquire exclusive lock
 	if err := aw.acquireLock(path); err != nil {
 		return fmt.Errorf("failed to acquire lock for %s: %w", path, err)
 	}
-	defer aw.releaseLock(path)
+	defer func() {
+		if releaseErr := aw.releaseLock(path); releaseErr != nil && err == nil {
+			err = releaseErr
+		}
+	}()
 
 	// Get original file info
 	originalInfo, err := os.Stat(path)
@@ -76,7 +82,7 @@ func (aw *AtomicWriter) WriteFile(path, content string) error {
 
 	// Write to temporary file first
 	tempPath := path + aw.config.TempSuffix
-	tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
+	tempFile, err := securefs.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -84,25 +90,28 @@ func (aw *AtomicWriter) WriteFile(path, content string) error {
 	// Write content
 	_, err = tempFile.WriteString(content)
 	if err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
+		securefs.CloseBestEffort(tempFile)
+		securefs.RemoveBestEffort(tempPath)
 		return fmt.Errorf("failed to write content: %w", err)
 	}
 
 	// Force sync if requested
 	if aw.config.UseFsync {
 		if err := tempFile.Sync(); err != nil {
-			tempFile.Close()
-			os.Remove(tempPath)
+			securefs.CloseBestEffort(tempFile)
+			securefs.RemoveBestEffort(tempPath)
 			return fmt.Errorf("failed to sync: %w", err)
 		}
 	}
 
-	tempFile.Close()
+	if err := tempFile.Close(); err != nil {
+		securefs.RemoveBestEffort(tempPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
 
 	// Atomic rename (the critical atomic operation)
 	if err := os.Rename(tempPath, path); err != nil {
-		os.Remove(tempPath)
+		securefs.RemoveBestEffort(tempPath)
 		return fmt.Errorf("failed to atomic rename: %w", err)
 	}
 
@@ -135,7 +144,7 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 
 	deadline := time.Now().Add(aw.config.LockTimeout)
 	for {
-		lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		lockFile, err := securefs.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			lock.mu.Lock()
 			lock.file = lockFile
@@ -143,15 +152,25 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 			lock.mu.Unlock()
 
 			// Write PID to lock file for debugging
-			fmt.Fprintf(lockFile, "%d\n", os.Getpid())
-			lockFile.Sync()
+			if _, err := fmt.Fprintf(lockFile, "%d\n", os.Getpid()); err != nil {
+				if releaseErr := aw.releaseLock(path); releaseErr != nil {
+					return fmt.Errorf("failed to write lock file: %w; failed to release lock: %w", err, releaseErr)
+				}
+				return fmt.Errorf("failed to write lock file: %w", err)
+			}
+			if err := lockFile.Sync(); err != nil {
+				if releaseErr := aw.releaseLock(path); releaseErr != nil {
+					return fmt.Errorf("failed to sync lock file: %w; failed to release lock: %w", err, releaseErr)
+				}
+				return fmt.Errorf("failed to sync lock file: %w", err)
+			}
 
 			return nil
 		}
 
 		if os.IsExist(err) {
 			if aw.isLockStale(lockPath) {
-				os.Remove(lockPath)
+				securefs.RemoveBestEffort(lockPath)
 				continue
 			}
 			if time.Now().After(deadline) {
@@ -177,12 +196,21 @@ func (aw *AtomicWriter) releaseLock(path string) error {
 	}
 
 	lock.mu.Lock()
+	var releaseErr error
 	if lock.locked {
-		lock.file.Close()
-		os.Remove(lock.path)
+		var closeErr error
+		if lock.file != nil {
+			closeErr = lock.file.Close()
+		}
+		removeErr := os.Remove(lock.path)
 		lock.locked = false
 		lock.file = nil
 		lock.cond.Broadcast()
+		if closeErr != nil {
+			releaseErr = fmt.Errorf("failed to close lock file: %w", closeErr)
+		} else if removeErr != nil && !os.IsNotExist(removeErr) {
+			releaseErr = fmt.Errorf("failed to remove lock file: %w", removeErr)
+		}
 	}
 	lock.refCnt--
 	remove := lock.refCnt == 0
@@ -199,12 +227,12 @@ func (aw *AtomicWriter) releaseLock(path string) error {
 		}
 		aw.mu.Unlock()
 	}
-	return nil
+	return releaseErr
 }
 
 // isLockStale checks if a lock file is from a dead process (cross-platform)
 func (aw *AtomicWriter) isLockStale(lockPath string) bool {
-	content, err := os.ReadFile(lockPath)
+	content, err := securefs.ReadFile(lockPath)
 	if err != nil {
 		return true // Can't read, assume stale
 	}
@@ -225,7 +253,7 @@ func (aw *AtomicWriter) createBackup(originalPath, backupPath string) error {
 		return err
 	}
 
-	content, err := os.ReadFile(originalPath)
+	content, err := securefs.ReadFile(originalPath)
 	if err != nil {
 		return err
 	}
@@ -239,7 +267,7 @@ func (aw *AtomicWriter) createBackup(originalPath, backupPath string) error {
 		perm = 0o644
 	}
 
-	if err := os.WriteFile(backupPath, content, perm); err != nil {
+	if err := securefs.WriteFile(backupPath, content, perm); err != nil {
 		return err
 	}
 	return os.Chmod(backupPath, perm)
@@ -255,7 +283,7 @@ func (aw *AtomicWriter) Cleanup() {
 	aw.mu.RUnlock()
 
 	for _, path := range paths {
-		aw.releaseLock(path)
+		securefs.IgnoreError(aw.releaseLock(path))
 	}
 }
 

@@ -2,10 +2,10 @@ package runtime
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/internal/securefs"
 	"github.com/oxhq/morfx/providers"
 	"github.com/oxhq/morfx/providers/golang"
 	"github.com/oxhq/morfx/providers/javascript"
@@ -34,7 +34,7 @@ func Build(cfg Config) (*Runtime, error) {
 
 	logDir := strings.TrimSpace(cfg.TransactionLogDir)
 	if logDir != "" {
-		if err := os.MkdirAll(logDir, 0o755); err != nil {
+		if err := securefs.MkdirAll(logDir, 0o700); err != nil {
 			return nil, fmt.Errorf("create transaction log directory: %w", err)
 		}
 		fileProcessor.SetTransactionLogDir(logDir)

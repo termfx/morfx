@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/oxhq/morfx/internal/securefs"
 	"github.com/oxhq/morfx/models"
 )
 
@@ -21,7 +22,7 @@ func Connect(dsn string, debug bool) (*gorm.DB, error) {
 	// Ensure directory exists for file-based SQLite
 	if !isURL(dsn) {
 		dir := filepath.Dir(dsn)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := securefs.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
 		}
 	}
@@ -76,14 +77,16 @@ func Connect(dsn string, debug bool) (*gorm.DB, error) {
 	db, err := gorm.Open(dialector, config)
 	if err != nil {
 		if conn != nil {
-			conn.Close()
+			_ = conn.Close()
 		}
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 
 	// Enable foreign keys for SQLite
 	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.Exec("PRAGMA foreign_keys = ON")
+		if _, err := sqlDB.Exec("PRAGMA foreign_keys = ON"); err != nil {
+			return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+		}
 	}
 
 	// Run migrations

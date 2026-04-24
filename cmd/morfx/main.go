@@ -129,10 +129,5 @@ func resetFlags() {
 
 // setupTestEnvironment sets up a test environment for integration tests
 func setupTestEnvironment(t *testing.T) string {
-	// Create temporary directory for test database
-	tmpDir := "/tmp/morfx-test-" + fmt.Sprintf("%d", os.Getpid())
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		t.Fatalf("Failed to create test directory: %v", err)
-	}
-	return tmpDir
+	return t.TempDir()
 }

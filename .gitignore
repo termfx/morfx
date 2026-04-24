@@ -14,6 +14,10 @@ go.work.sum
 coverage/
 dist/
 artifacts/
+gosec
+gosec.sarif
+security-report*
+test-report*
 
 # IDE / editor
 *.swp

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/oxhq/morfx/internal/buildinfo"
 	"github.com/oxhq/morfx/mcp/types"
@@ -160,8 +161,10 @@ func (s *StdioServer) handleInitialize(ctx context.Context, req Request) Respons
 // handleInitialized confirms initialization complete
 func (s *StdioServer) handleInitialized(ctx context.Context, req Request) Response {
 	s.debugLog("Initialization complete")
-	go func() {
-		resp, err := s.RequestRoots(context.Background(), map[string]any{}, Meta{})
+	rootCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	go func(ctx context.Context, cancel context.CancelFunc) {
+		defer cancel()
+		resp, err := s.RequestRoots(ctx, map[string]any{}, Meta{})
 		if err != nil {
 			s.debugLog("roots/list request failed: %v", err)
 			return
@@ -185,7 +188,7 @@ func (s *StdioServer) handleInitialized(ctx context.Context, req Request) Respon
 		if len(roots) > 0 {
 			s.sessionState.SetClientRoots(roots)
 		}
-	}()
+	}(rootCtx, cancel)
 	if req.ID == nil {
 		return Response{}
 	}

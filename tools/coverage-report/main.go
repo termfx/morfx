@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 func main() {
@@ -17,7 +19,7 @@ func main() {
 
 	report := generateMarkdownReport()
 
-	err := os.WriteFile(reportFile, []byte(report), 0o644)
+	err := securefs.WriteFile(reportFile, []byte(report), 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing report: %v\n", err)
 		os.Exit(1)

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // Config holds the MCP server configuration
@@ -107,11 +109,11 @@ func DefaultConfig() Config {
 func isDirectoryWritable(path string) bool {
 	// Try to create a temporary file
 	testFile := filepath.Join(path, ".write_test")
-	file, err := os.Create(testFile)
+	file, err := securefs.Create(testFile)
 	if err != nil {
 		return false
 	}
-	file.Close()
-	os.Remove(testFile)
-	return true
+	closeErr := file.Close()
+	removeErr := os.Remove(testFile)
+	return closeErr == nil && (removeErr == nil || os.IsNotExist(removeErr))
 }

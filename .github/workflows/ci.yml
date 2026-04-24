@@ -65,6 +65,29 @@ jobs:
         run: |
           "$(go env GOPATH)/bin/tfx" --flow ci-pr --run --quiet
 
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Generate gosec SARIF
+        run: make sec-sarif
+
+      - name: Upload gosec SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec.sarif
+
+      - name: Run gosec security audit
+        run: make sec
+
   lint:
     runs-on: ubuntu-latest
     steps:

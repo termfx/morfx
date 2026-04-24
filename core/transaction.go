@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // TransactionOperation represents a single operation in a transaction
@@ -43,7 +45,7 @@ type TransactionManager struct {
 
 // NewTransactionManager creates a new transaction manager
 func NewTransactionManager(logDir string, atomicWriter *AtomicWriter) *TransactionManager {
-	os.MkdirAll(logDir, 0o755)
+	securefs.IgnoreError(securefs.MkdirAll(logDir, 0o700))
 
 	return &TransactionManager{
 		logDir:       logDir,
@@ -236,7 +238,7 @@ func (tm *TransactionManager) rollbackOperation(op TransactionOperation) error {
 			return fmt.Errorf("backup file not found: %s", op.BackupPath)
 		}
 
-		content, err := os.ReadFile(op.BackupPath)
+		content, err := securefs.ReadFile(op.BackupPath)
 		if err != nil {
 			return fmt.Errorf("failed to read backup: %w", err)
 		}
@@ -263,7 +265,7 @@ func (tm *TransactionManager) rollbackOperation(op TransactionOperation) error {
 func (tm *TransactionManager) LoadTransaction(txID string) (*TransactionLog, error) {
 	logPath := filepath.Join(tm.logDir, txID+".json")
 
-	data, err := os.ReadFile(logPath)
+	data, err := securefs.ReadFile(logPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read transaction log: %w", err)
 	}
@@ -321,12 +323,12 @@ func (tm *TransactionManager) CleanupOldTransactions(olderThan time.Duration) er
 			// Remove all completed transactions when olderThan <= 0.
 			if tx.Status != "pending" && (olderThan <= 0 || tx.Completed.Before(cutoff)) {
 				logPath := filepath.Join(tm.logDir, file.Name())
-				os.Remove(logPath)
+				securefs.RemoveBestEffort(logPath)
 
 				// Also remove backup files for this transaction
 				for _, op := range tx.Operations {
 					if op.BackupPath != "" {
-						os.Remove(op.BackupPath)
+						securefs.RemoveBestEffort(op.BackupPath)
 					}
 				}
 			}
@@ -344,7 +346,7 @@ func (tm *TransactionManager) writeTransactionLog(tx *TransactionLog) error {
 	}
 
 	logPath := filepath.Join(tm.logDir, tx.ID+".json")
-	return os.WriteFile(logPath, data, 0o644)
+	return securefs.WriteFile(logPath, data, 0o600)
 }
 
 // generateBackupPath creates a unique backup path
@@ -370,7 +372,7 @@ func (tm *TransactionManager) createBackup(originalPath, backupPath string) erro
 		return err
 	}
 
-	content, err := os.ReadFile(originalPath)
+	content, err := securefs.ReadFile(originalPath)
 	if err != nil {
 		return err
 	}
@@ -380,7 +382,7 @@ func (tm *TransactionManager) createBackup(originalPath, backupPath string) erro
 		mode = 0o644
 	}
 
-	if err := os.WriteFile(backupPath, content, mode); err != nil {
+	if err := securefs.WriteFile(backupPath, content, mode); err != nil {
 		return err
 	}
 	return os.Chmod(backupPath, mode)
@@ -388,7 +390,7 @@ func (tm *TransactionManager) createBackup(originalPath, backupPath string) erro
 
 // generateFileChecksum creates SHA256 hash of file content
 func generateFileChecksum(filePath string) (string, error) {
-	content, err := os.ReadFile(filePath)
+	content, err := securefs.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}

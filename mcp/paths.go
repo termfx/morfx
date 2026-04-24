@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 func defaultStateDir() string {
@@ -79,7 +81,7 @@ func ensureWritableDir(path string) bool {
 		return false
 	}
 
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := securefs.MkdirAll(path, 0o700); err != nil {
 		return false
 	}
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // ProviderRegistry interface for provider lookup
@@ -148,7 +150,7 @@ func (fp *FileProcessor) TransformFiles(ctx context.Context, op FileTransformOp)
 		// Ensure cleanup on any error
 		defer func() {
 			if txActive && txManager != nil {
-				txManager.RollbackTransaction()
+				securefs.IgnoreError(txManager.RollbackTransaction())
 			}
 		}()
 	}
@@ -297,7 +299,7 @@ func (fp *FileProcessor) queryWorker(
 // queryFile searches for matches in a single file
 func (fp *FileProcessor) queryFile(walkResult WalkResult, query AgentQuery) []FileMatch {
 	// Read file content
-	content, err := os.ReadFile(walkResult.Path)
+	content, err := securefs.ReadFile(walkResult.Path)
 	if err != nil {
 		return nil
 	}
@@ -354,7 +356,7 @@ func (fp *FileProcessor) transformFile(
 	}
 
 	// Read file content
-	content, err := os.ReadFile(walkResult.Path)
+	content, err := securefs.ReadFile(walkResult.Path)
 	if err != nil {
 		detail.Error = fmt.Sprintf("failed to read file: %v", err)
 		return detail
@@ -426,7 +428,9 @@ func (fp *FileProcessor) transformFile(
 
 			// Mark operation as failed in transaction
 			if fp.safetyEnabled && tx != nil && txManager != nil {
-				txManager.CompleteOperation(walkResult.Path, writeErr)
+				if completeErr := txManager.CompleteOperation(walkResult.Path, writeErr); completeErr != nil {
+					detail.Error = fmt.Sprintf("%s; failed to record transaction error: %v", detail.Error, completeErr)
+				}
 			}
 			return detail
 		}
@@ -450,7 +454,7 @@ func (fp *FileProcessor) createBackup(originalPath, backupPath string) error {
 		return err
 	}
 
-	content, err := os.ReadFile(originalPath)
+	content, err := securefs.ReadFile(originalPath)
 	if err != nil {
 		return err
 	}
@@ -460,7 +464,7 @@ func (fp *FileProcessor) createBackup(originalPath, backupPath string) error {
 		mode = 0o644
 	}
 
-	if err := os.WriteFile(backupPath, content, mode); err != nil {
+	if err := securefs.WriteFile(backupPath, content, mode); err != nil {
 		return err
 	}
 	return os.Chmod(backupPath, mode)
@@ -472,7 +476,7 @@ func (fp *FileProcessor) writeFile(path, content string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			if err := securefs.WriteFile(path, []byte(content), 0o644); err != nil {
 				return err
 			}
 			return nil
@@ -485,7 +489,7 @@ func (fp *FileProcessor) writeFile(path, content string) error {
 	if perm == 0 {
 		perm = 0o644
 	}
-	if err := os.WriteFile(path, []byte(content), perm); err != nil {
+	if err := securefs.WriteFile(path, []byte(content), perm); err != nil {
 		return err
 	}
 	return os.Chmod(path, perm)
@@ -595,7 +599,7 @@ func (fp *FileProcessor) ValidateChanges(details []FileTransformDetail) error {
 
 // GenerateChecksum creates SHA256 hash of file content for integrity checking
 func (fp *FileProcessor) GenerateChecksum(filePath string) (string, error) {
-	content, err := os.ReadFile(filePath)
+	content, err := securefs.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}

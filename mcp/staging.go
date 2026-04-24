@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/oxhq/morfx/internal/securefs"
 	"github.com/oxhq/morfx/models"
 )
 
@@ -238,7 +239,7 @@ func (sm *StagingManager) prepareStageWrite(stage *models.Stage) (*fileWriteGuar
 		return nil, fmt.Errorf("stage %s has no modified content", stage.ID)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := securefs.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
@@ -293,13 +294,13 @@ func (sm *StagingManager) prepareStageWrite(stage *models.Stage) (*fileWriteGuar
 
 	if info, err := os.Stat(path); err == nil {
 		filePerm = info.Mode().Perm()
-		if data, readErr := os.ReadFile(path); readErr == nil {
+		if data, readErr := securefs.ReadFile(path); readErr == nil {
 			originalBytes = data
 			originalExists = true
 		}
 	}
 
-	if err := os.WriteFile(path, []byte(stage.Modified), filePerm); err != nil {
+	if err := securefs.WriteFile(path, []byte(stage.Modified), filePerm); err != nil {
 		return nil, err
 	}
 
@@ -307,7 +308,7 @@ func (sm *StagingManager) prepareStageWrite(stage *models.Stage) (*fileWriteGuar
 		commitFn: func() {},
 		rollbackFn: func() error {
 			if originalExists {
-				return os.WriteFile(path, originalBytes, filePerm)
+				return securefs.WriteFile(path, originalBytes, filePerm)
 			}
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err

@@ -26,11 +26,15 @@ LDFLAGS = -ldflags "-X github.com/oxhq/morfx/internal/buildinfo.Version=$(VERSIO
 
 # Tools versions
 GOLANGCI_VERSION = v2.11.4
+GOSEC_VERSION = v2.25.0
 GOFUMPT_VERSION = latest
 GOLINES_VERSION = latest
 GOTESTSUM_VERSION = latest
 GOLANGCI_LINT = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+GOSEC = go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
 LINT_BASE_REV ?= HEAD~
+SARIF_OUT ?= gosec.sarif
+SARIF_TMP = $(basename $(SARIF_OUT))
 
 # Colors for output
 RED = \033[0;31m
@@ -146,10 +150,17 @@ vet:
 
 ## sec: Run security audit
 .PHONY: sec
-sec: tools/gosec
+sec:
 	@echo "$(YELLOW)Running security audit...$(NC)"
-	@$(GOBIN)/gosec -fmt=json -out=security-report.json ./... || true
-	@$(GOBIN)/gosec ./...
+	@$(GOSEC) ./...
+
+## sec-sarif: Generate gosec SARIF for GitHub code scanning
+.PHONY: sec-sarif
+sec-sarif:
+	@echo "$(YELLOW)Generating gosec SARIF...$(NC)"
+	@$(GOSEC) -no-fail -fmt=sarif -out=$(SARIF_OUT) ./...
+	@if [ ! -f "$(SARIF_OUT)" ] && [ -f "$(SARIF_TMP)" ]; then mv "$(SARIF_TMP)" "$(SARIF_OUT)"; fi
+	@test -f "$(SARIF_OUT)"
 
 # ==================================================================================== #
 # TESTING
@@ -378,8 +389,8 @@ tools/golines:
 .PHONY: tools/gosec
 tools/gosec:
 	@if ! [ -f $(GOBIN)/gosec ]; then \
-		echo "$(YELLOW)Installing gosec...$(NC)"; \
-		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
+		echo "$(YELLOW)Installing gosec $(GOSEC_VERSION)...$(NC)"; \
+		go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION); \
 	fi
 
 .PHONY: tools/gotestsum

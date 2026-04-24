@@ -3,6 +3,7 @@
 package mcp
 
 import (
+	"math"
 	"syscall"
 	"unsafe"
 )
@@ -23,6 +24,9 @@ func isProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
+	if pid > math.MaxUint32 {
+		return false
+	}
 
 	handle, _, _ := procOpenProcess.Call(
 		uintptr(processQueryInformation),
@@ -35,6 +39,7 @@ func isProcessAlive(pid int) bool {
 	defer procCloseHandle.Call(handle)
 
 	var exitCode uint32
+	// #nosec G103 -- Windows syscall requires passing a pointer to receive the process exit code.
 	ret, _, _ := procGetExitCodeProcess.Call(
 		handle,
 		uintptr(unsafe.Pointer(&exitCode)),

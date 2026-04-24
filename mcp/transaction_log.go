@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/oxhq/morfx/internal/securefs"
 )
 
 // TransactionLog manages transaction logging for rollback capability
@@ -22,7 +24,7 @@ func NewTransactionLog() *TransactionLog {
 	if logDir == "" {
 		logDir = "./.morfx/transactions"
 	}
-	_ = os.MkdirAll(logDir, 0o755)
+	securefs.IgnoreError(securefs.MkdirAll(logDir, 0o700))
 
 	logFile := filepath.Join(logDir, fmt.Sprintf("tx_%d.log", time.Now().Unix()))
 
@@ -134,7 +136,7 @@ func (tl *TransactionLog) rollbackTransactionInternal(tx *Transaction, changeSta
 
 	// Clean up temporary file if it still exists
 	if tx.TmpPath != "" && fileExists(tx.TmpPath) {
-		os.Remove(tx.TmpPath)
+		securefs.RemoveBestEffort(tx.TmpPath)
 	}
 
 	if changeStatus {
@@ -187,14 +189,16 @@ func (tl *TransactionLog) logTransaction(tx *Transaction) {
 	}
 
 	// Append to log file
-	file, err := os.OpenFile(tl.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := securefs.OpenFile(tl.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer securefs.CloseBestEffort(file)
 
-	file.WriteString(string(data) + "\n")
-	file.Sync()
+	if _, err := file.WriteString(string(data) + "\n"); err != nil {
+		return
+	}
+	securefs.IgnoreError(file.Sync())
 }
 
 // cleanupTransaction removes old transaction data
@@ -209,7 +213,7 @@ func (tl *TransactionLog) cleanupTransaction(txID string) {
 
 	// Clean up backup files for completed transactions
 	if tx.Status == "completed" && tx.BackupPath != "" {
-		os.Remove(tx.BackupPath)
+		securefs.RemoveBestEffort(tx.BackupPath)
 	}
 
 	delete(tl.transactions, txID)
