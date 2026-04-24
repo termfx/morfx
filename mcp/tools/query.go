@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -25,7 +24,7 @@ func NewQueryTool(server types.ServerInterface) *QueryTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "query",
-		description: "Find code elements using natural language queries",
+		description: "Find code elements using an object query or Morfx DSL selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -33,8 +32,9 @@ func NewQueryTool(server types.ServerInterface) *QueryTool {
 				"source":   CommonSchemas.Source,
 				"path":     CommonSchemas.Path,
 				"query":    CommonSchemas.Query,
+				"dsl":      CommonSchemas.DSL,
 			},
-			"required": []string{"language", "query"},
+			"required": []string{"language"},
 			"oneOf": []map[string]any{
 				{"required": []string{"source"}},
 				{"required": []string{"path"}},
@@ -56,6 +56,7 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 		Source   *string         `json:"source,omitempty"`
 		Path     *string         `json:"path,omitempty"`
 		Query    json.RawMessage `json:"query"`
+		DSL      string          `json:"dsl,omitempty"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -105,9 +106,9 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse the query
-	var query core.AgentQuery
-	if err := json.Unmarshal(args.Query, &query); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "Invalid query structure", err)
+	query, err := parseRequiredQuery(args.Query, args.DSL, "query")
+	if err != nil {
+		return nil, err
 	}
 	if err := isCancelled(ctx); err != nil {
 		return nil, err

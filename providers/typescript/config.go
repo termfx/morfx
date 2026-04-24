@@ -36,6 +36,17 @@ func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
 	return []string{queryType}
 }
 
+func (c *Config) NormalizeQueryType(queryType string) string {
+	switch strings.TrimSpace(queryType) {
+	case "func", "fn":
+		return "function"
+	case "var":
+		return "variable"
+	default:
+		return strings.TrimSpace(queryType)
+	}
+}
+
 func (c *Config) aliasMap() map[string][]string {
 	return map[string][]string{
 		"function":    {"function_declaration", "function_expression", "arrow_function", "method_definition", "method_signature", "public_field_definition"},
@@ -64,6 +75,15 @@ func (c *Config) aliasMap() map[string][]string {
 		"object":      {"object", "object_pattern"},
 		"import":      {"import_statement"},
 		"export":      {"export_statement"},
+		"call":        {"call_expression", "new_expression"},
+		"assignment":  {"assignment_expression", "augmented_assignment_expression"},
+		"assign":      {"assignment_expression", "augmented_assignment_expression"},
+		"return":      {"return_statement"},
+		"condition":   {"if_statement", "switch_statement"},
+		"if":          {"if_statement"},
+		"block":       {"statement_block"},
+		"loop":        {"for_statement", "for_in_statement", "while_statement", "do_statement"},
+		"for":         {"for_statement", "for_in_statement"},
 		"module":      {"module_declaration"},
 		"namespace":   {"namespace_declaration"},
 		"property":    {"public_field_definition", "private_field_definition", "field_definition", "property_signature"},
@@ -457,6 +477,20 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 			path := source[sourceNode.StartByte():sourceNode.EndByte()]
 			return strings.Trim(path, `"'`)
 		}
+	case "call_expression":
+		if function := node.ChildByFieldName("function"); function != nil {
+			return source[function.StartByte():function.EndByte()]
+		}
+	case "new_expression":
+		if constructor := node.ChildByFieldName("constructor"); constructor != nil {
+			return source[constructor.StartByte():constructor.EndByte()]
+		}
+	case "assignment_expression", "augmented_assignment_expression":
+		if left := node.ChildByFieldName("left"); left != nil {
+			return source[left.StartByte():left.EndByte()]
+		}
+	case "return_statement":
+		return "return"
 	case "arrow_function", "function_expression":
 		// For arrow functions, check if they're assigned to a variable
 		parent := node.Parent()

@@ -284,7 +284,7 @@ build-all:
 		for tool in $(STANDALONE_TOOLS); do \
 			GOOS=$$goos GOARCH=$$goarch go build -o "$$bundle/$$tool$$ext" ./cmd/$$tool; \
 		done; \
-			cp README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE "$$bundle"/; \
+			cp README.md docs/standalone-tools.md docs/standalone-recipes.md docs/dsl.md docs/contributing-language-providers.md LICENSE "$$bundle"/; \
 		done
 	@echo "$(GREEN)✓ Release bundles ready in $(BUILD_DIR)/release/$(NC)"
 
@@ -310,7 +310,7 @@ release-artifacts: build-standalone
 	@for tool in $(STANDALONE_TOOLS); do \
 		go build -o $(DIST_DIR)/$$tool ./cmd/$$tool; \
 	done
-		@cp README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE tfx.yaml $(DIST_DIR)/
+	@cp README.md docs/standalone-tools.md docs/standalone-recipes.md docs/dsl.md docs/contributing-language-providers.md LICENSE tfx.yaml $(DIST_DIR)/
 	@if command -v shasum >/dev/null 2>&1; then \
 		shasum -a 256 $(DIST_DIR)/* > $(DIST_DIR)/SHA256SUMS; \
 	else \

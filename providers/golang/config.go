@@ -1,6 +1,7 @@
 package golang
 
 import (
+	"path"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -36,24 +37,46 @@ func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
 	return []string{queryType}
 }
 
+func (c *Config) NormalizeQueryType(queryType string) string {
+	switch strings.TrimSpace(queryType) {
+	case "func", "fn":
+		return "function"
+	case "var":
+		return "variable"
+	case "assign":
+		return "assignment"
+	default:
+		return strings.TrimSpace(queryType)
+	}
+}
+
 func (c *Config) aliasMap() map[string][]string {
 	return map[string][]string{
-		"function":  {"function_declaration", "method_declaration"},
-		"func":      {"function_declaration", "method_declaration"},
-		"fn":        {"function_declaration", "method_declaration"},
-		"struct":    {"type_spec"},
-		"interface": {"type_spec"},
-		"iface":     {"type_spec"},
-		"variable":  {"var_declaration", "short_var_declaration"},
-		"var":       {"var_declaration", "short_var_declaration"},
-		"constant":  {"const_declaration"},
-		"const":     {"const_declaration"},
-		"import":    {"import_declaration"},
-		"type":      {"type_declaration", "type_spec"},
-		"method":    {"method_declaration"},
-		"field":     {"field_declaration"},
-		"comment":   {"comment"},
-		"comments":  {"comment"},
+		"function":   {"function_declaration", "method_declaration"},
+		"func":       {"function_declaration", "method_declaration"},
+		"fn":         {"function_declaration", "method_declaration"},
+		"struct":     {"type_spec"},
+		"interface":  {"type_spec"},
+		"iface":      {"type_spec"},
+		"variable":   {"var_declaration", "short_var_declaration"},
+		"var":        {"var_declaration", "short_var_declaration"},
+		"constant":   {"const_declaration"},
+		"const":      {"const_declaration"},
+		"import":     {"import_declaration"},
+		"type":       {"type_declaration", "type_spec"},
+		"method":     {"method_declaration"},
+		"field":      {"field_declaration"},
+		"call":       {"call_expression"},
+		"assignment": {"assignment_statement", "short_var_declaration"},
+		"assign":     {"assignment_statement", "short_var_declaration"},
+		"return":     {"return_statement"},
+		"condition":  {"if_statement"},
+		"if":         {"if_statement"},
+		"block":      {"block"},
+		"loop":       {"for_statement", "range_clause"},
+		"for":        {"for_statement", "range_clause"},
+		"comment":    {"comment"},
+		"comments":   {"comment"},
 	}
 }
 
@@ -269,6 +292,21 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 				return source[child.StartByte():child.EndByte()]
 			}
 		}
+	case "field_declaration":
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "field_identifier_list" || child.Type() == "field_identifier" {
+				return firstNamedSource(child, source, "field_identifier")
+			}
+		}
+	case "call_expression":
+		if function := node.ChildByFieldName("function"); function != nil {
+			return source[function.StartByte():function.EndByte()]
+		}
+	case "assignment_statement":
+		if left := node.ChildByFieldName("left"); left != nil {
+			return firstNamedSource(left, source, "identifier")
+		}
 	case "comment":
 		return c.extractCommentContent(source[node.StartByte():node.EndByte()])
 	}
@@ -281,6 +319,21 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		}
 	}
 
+	return ""
+}
+
+func firstNamedSource(node *sitter.Node, source, nodeType string) string {
+	if node == nil {
+		return ""
+	}
+	if node.Type() == nodeType {
+		return source[node.StartByte():node.EndByte()]
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		if found := firstNamedSource(node.Child(i), source, nodeType); found != "" {
+			return found
+		}
+	}
 	return ""
 }
 
@@ -344,6 +397,10 @@ func (c *Config) ExpandMatches(node *sitter.Node, source string, query core.Agen
 	case "var_declaration", "const_declaration":
 		return c.expandVarDeclaration(node, source, query)
 	case "short_var_declaration":
+		if query.Type == "assignment" || query.Type == "assign" {
+			name := c.ExtractNodeName(node, source)
+			return []base.Target{base.NewTarget(node, query.Type, name)}
+		}
 		return c.expandShortVarDeclaration(node, source, query)
 	case "import_declaration":
 		return c.expandImportDeclaration(node, source, query)
@@ -366,6 +423,64 @@ func (c *Config) expandVarDeclaration(node *sitter.Node, source string, query co
 	}
 
 	return matches
+}
+
+func (c *Config) ValidateQueryAttributes(target base.Target, source string, attributes map[string]string) bool {
+	if len(attributes) == 0 {
+		return true
+	}
+
+	typePattern := strings.TrimSpace(attributes["type"])
+	if typePattern == "" {
+		return true
+	}
+
+	actual := c.extractTargetType(target.Node, source)
+	if actual == "" {
+		return false
+	}
+	if typePattern == "*" {
+		return true
+	}
+	matched, err := path.Match(typePattern, actual)
+	if err != nil {
+		return false
+	}
+	return matched
+}
+
+func (c *Config) extractTargetType(node *sitter.Node, source string) string {
+	if node == nil {
+		return ""
+	}
+
+	if typeNode := node.ChildByFieldName("type"); typeNode != nil {
+		return source[typeNode.StartByte():typeNode.EndByte()]
+	}
+
+	switch node.Type() {
+	case "field_declaration", "var_spec", "const_spec":
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			if child.Type() == "type_identifier" ||
+				child.Type() == "qualified_type" ||
+				child.Type() == "pointer_type" ||
+				child.Type() == "slice_type" ||
+				child.Type() == "array_type" ||
+				child.Type() == "map_type" {
+				return source[child.StartByte():child.EndByte()]
+			}
+		}
+	}
+
+	if parent := node.Parent(); parent != nil {
+		switch parent.Type() {
+		case "field_declaration", "var_spec", "const_spec":
+			return c.extractTargetType(parent, source)
+		}
+	}
+
+	return ""
 }
 
 func (c *Config) expandVarSpec(node *sitter.Node, source string, query core.AgentQuery) []base.Target {

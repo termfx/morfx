@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "morfx": {
+      "command": "morfx",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "NO_COLOR": "1"
+      }
+    }
+  }
+}

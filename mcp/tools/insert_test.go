@@ -227,7 +227,7 @@ func TestInsertTools_Schema(t *testing.T) {
 				t.Fatal("Schema should have required array")
 			}
 
-			expectedRequired := []string{"language", "target", "content"}
+			expectedRequired := []string{"language", "content"}
 			for _, req := range expectedRequired {
 				found := slices.Contains(required, req)
 				if !found {
@@ -243,6 +243,12 @@ func TestInsertTools_Schema(t *testing.T) {
 
 			if _, exists := properties["content"]; !exists {
 				t.Error("Schema should have 'content' property")
+			}
+			if _, exists := properties["target"]; !exists {
+				t.Error("Schema should have 'target' property")
+			}
+			if _, exists := properties["target_dsl"]; !exists {
+				t.Error("Schema should have 'target_dsl' property")
 			}
 		})
 	}

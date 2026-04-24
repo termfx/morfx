@@ -131,7 +131,7 @@ jobs:
             go build -o "$ARCHIVE_DIR/${tool}${EXT}" "./cmd/${tool}"
           done
 
-          for asset in README.md docs/standalone-tools.md docs/standalone-recipes.md LICENSE tfx.yaml; do
+          for asset in README.md docs/standalone-tools.md docs/standalone-recipes.md docs/dsl.md docs/contributing-language-providers.md LICENSE tfx.yaml; do
             if [ -f "$asset" ]; then
               cp "$asset" "$ARCHIVE_DIR"/
             fi
@@ -194,7 +194,7 @@ jobs:
         with:
           ref: main
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: release

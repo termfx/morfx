@@ -1,0 +1,40 @@
+{
+  "name": "morfx-codex",
+  "version": "0.1.0",
+  "description": "Codex plugin wrapper for Morfx AST-safe code transformations over MCP.",
+  "author": {
+    "name": "OxHQ",
+    "url": "https://github.com/oxhq"
+  },
+  "homepage": "https://github.com/oxhq/morfx",
+  "repository": "https://github.com/oxhq/morfx",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "ast",
+    "refactoring",
+    "codex",
+    "tree-sitter"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Morfx",
+    "shortDescription": "AST-safe code transforms with Morfx DSL selectors.",
+    "longDescription": "Morfx gives Codex a deterministic MCP server for querying and rewriting code by AST node instead of raw text. Use its DSL selectors, such as `func:* > call:os.Getenv`, for safer refactors, targeted replacements, staged edits, and recipe-driven code transformations.",
+    "developerName": "OxHQ",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/oxhq/morfx",
+    "defaultPrompt": [
+      "Use Morfx DSL to query this repo by AST nodes.",
+      "Plan a safe Morfx refactor with target_dsl selectors.",
+      "Use Morfx MCP for a targeted AST replacement."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

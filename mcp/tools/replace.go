@@ -25,7 +25,7 @@ func NewReplaceTool(server types.ServerInterface) *ReplaceTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "replace",
-		description: "Replace code elements matching a query",
+		description: "Replace code elements matching an object target or Morfx target_dsl selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -33,9 +33,10 @@ func NewReplaceTool(server types.ServerInterface) *ReplaceTool {
 				"source":      CommonSchemas.Source,
 				"path":        CommonSchemas.Path,
 				"target":      CommonSchemas.Target,
+				"target_dsl":  CommonSchemas.TargetDSL,
 				"replacement": CommonSchemas.Replacement,
 			},
-			"required": []string{"language", "target", "replacement"},
+			"required": []string{"language", "replacement"},
 			"oneOf": []map[string]any{
 				{"required": []string{"source"}},
 				{"required": []string{"path"}},
@@ -58,6 +59,7 @@ func (t *ReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, 
 		Source      string          `json:"source"`
 		Path        string          `json:"path"`
 		Target      json.RawMessage `json:"target"`
+		TargetDSL   string          `json:"target_dsl,omitempty"`
 		Replacement string          `json:"replacement"`
 	}
 
@@ -101,9 +103,9 @@ func (t *ReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, 
 	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse target
-	var target core.AgentQuery
-	if err := json.Unmarshal(args.Target, &target); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "Invalid target structure", err)
+	target, err := parseRequiredQuery(args.Target, args.TargetDSL, "target")
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute transformation

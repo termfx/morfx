@@ -25,7 +25,7 @@ func NewFileQueryTool(server types.ServerInterface) *FileQueryTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "file_query",
-		description: "Find code elements across multiple files using natural language queries",
+		description: "Find code elements across multiple files using an object query or Morfx DSL selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -59,8 +59,9 @@ func NewFileQueryTool(server types.ServerInterface) *FileQueryTool {
 					"required": []string{"path"},
 				},
 				"query": CommonSchemas.Query,
+				"dsl":   CommonSchemas.DSL,
 			},
-			"required": []string{"scope", "query"},
+			"required": []string{"scope"},
 		},
 		handler: tool.handle,
 	}
@@ -76,6 +77,7 @@ func (t *FileQueryTool) handle(ctx context.Context, params json.RawMessage) (any
 	var args struct {
 		Scope *core.FileScope `json:"scope"`
 		Query json.RawMessage `json:"query"`
+		DSL   string          `json:"dsl,omitempty"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -106,9 +108,9 @@ func (t *FileQueryTool) handle(ctx context.Context, params json.RawMessage) (any
 	}
 
 	// Parse the query
-	var query core.AgentQuery
-	if err := json.Unmarshal(args.Query, &query); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "Invalid query structure", err)
+	query, err := parseRequiredQuery(args.Query, args.DSL, "query")
+	if err != nil {
+		return nil, err
 	}
 	if err := isCancelled(ctx); err != nil {
 		return nil, err

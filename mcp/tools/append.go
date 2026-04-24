@@ -24,7 +24,7 @@ func NewAppendTool(server types.ServerInterface) *AppendTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "append",
-		description: "Append code to source - uses target if specified, otherwise intelligently places content",
+		description: "Append code to source, optionally scoped by an object target or Morfx target_dsl selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -37,12 +37,13 @@ func NewAppendTool(server types.ServerInterface) *AppendTool {
 				},
 				"target": map[string]any{
 					"type":        "object",
-					"description": "Optional target scope (struct, function, etc)",
+					"description": "Optional object target scope. Prefer target_dsl for nested AST structure, operators, and attributes.",
 					"properties": map[string]any{
 						"type": map[string]any{"type": "string"},
 						"name": map[string]any{"type": "string"},
 					},
 				},
+				"target_dsl": CommonSchemas.TargetDSL,
 			},
 			"required": []string{"language", "content"},
 			"oneOf": []map[string]any{
@@ -62,11 +63,12 @@ func (t *AppendTool) handle(ctx context.Context, params json.RawMessage) (any, e
 		ctx = context.Background()
 	}
 	var args struct {
-		Language string          `json:"language"`
-		Source   string          `json:"source"`
-		Path     string          `json:"path"`
-		Target   json.RawMessage `json:"target,omitempty"`
-		Content  string          `json:"content"`
+		Language  string          `json:"language"`
+		Source    string          `json:"source"`
+		Path      string          `json:"path"`
+		Target    json.RawMessage `json:"target,omitempty"`
+		TargetDSL string          `json:"target_dsl,omitempty"`
+		Content   string          `json:"content"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -122,11 +124,9 @@ func (t *AppendTool) handle(ctx context.Context, params json.RawMessage) (any, e
 	}
 
 	// Parse optional target
-	if len(args.Target) > 0 && string(args.Target) != "null" {
-		var target core.AgentQuery
-		if err := json.Unmarshal(args.Target, &target); err != nil {
-			return nil, types.WrapError(types.InvalidParams, "Invalid target structure", err)
-		}
+	if target, ok, err := parseOptionalQuery(args.Target, args.TargetDSL, "target"); err != nil {
+		return nil, err
+	} else if ok {
 		op.Target = target
 	}
 	if err := isCancelled(ctx); err != nil {

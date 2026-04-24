@@ -2,11 +2,12 @@ package core
 
 // AgentQuery represents a natural language query for code elements
 type AgentQuery struct {
-	Type     string       `json:"type"`               // function, struct, class, etc
-	Name     string       `json:"name,omitempty"`     // name pattern with wildcards
-	Contains *AgentQuery  `json:"contains,omitempty"` // nested queries
-	Operator string       `json:"operator,omitempty"` // AND, OR, NOT
-	Operands []AgentQuery `json:"operands,omitempty"` // for compound queries
+	Type       string            `json:"type"`                 // function, struct, class, etc
+	Name       string            `json:"name,omitempty"`       // name pattern with wildcards
+	Contains   *AgentQuery       `json:"contains,omitempty"`   // nested queries
+	Operator   string            `json:"operator,omitempty"`   // AND, OR, NOT
+	Operands   []AgentQuery      `json:"operands,omitempty"`   // for compound queries
+	Attributes map[string]string `json:"attributes,omitempty"` // extra constraints, such as type
 }
 
 // Match represents a found code element

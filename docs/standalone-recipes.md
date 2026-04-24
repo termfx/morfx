@@ -52,11 +52,19 @@ cat <<'JSON' | ./bin/replace
 JSON
 ```
 
+### Search by structural DSL
+
+```bash
+cat <<'JSON' | ./bin/query
+{"language":"go","path":"./pkg/config.go","dsl":"func:* > call:os.Getenv"}
+JSON
+```
+
 ### Remove a code block
 
 ```bash
 cat <<'JSON' | ./bin/delete
-{"language":"go","path":"./pkg/example.go","target":{"type":"function","name":"Legacy"}}
+{"language":"go","path":"./pkg/example.go","target_dsl":"func:Legacy"}
 JSON
 ```
 
@@ -90,7 +98,7 @@ cat <<'JSON' | ./bin/recipe
         "language": "go",
         "max_files": 100
       },
-      "target": {"type": "function", "name": "Legacy*"},
+      "target_dsl": "func:Legacy*",
       "replacement": "func Replacement() {}"
     }
   ]
@@ -110,7 +118,7 @@ Run a read-only search first, then decide if the replacement is narrow enough:
 
 ```bash
 cat <<'JSON' | ./bin/file_query
-{"scope":{"path":".","include":["**/*.go"],"exclude":["vendor/**"],"language":"go"},"query":{"type":"function","name":"Old*"}}
+{"scope":{"path":".","include":["**/*.go"],"exclude":["vendor/**"],"language":"go"},"dsl":"func:Old*"}
 JSON
 ```
 
@@ -130,7 +138,7 @@ git diff -- ./pkg/example.go
 
 ```bash
 cat <<'JSON' | ./bin/file_replace
-{"scope":{"path":".","include":["**/*.go"],"exclude":["vendor/**"],"language":"go"},"target":{"type":"function","name":"Debug*"},"replacement":"func Debug() {}","dry_run":true,"backup":false}
+{"scope":{"path":".","include":["**/*.go"],"exclude":["vendor/**"],"language":"go"},"target_dsl":"func:Debug*","replacement":"func Debug() {}","dry_run":true,"backup":false}
 JSON
 ```
 
@@ -182,5 +190,11 @@ bundle before cutting a tag.
 - Query first, mutate second.
 - Prefer `file_query` and `file_replace` for tree-wide work.
 - Prefer `recipe` when the same transformation will be reused.
+- Use `dsl` / `target_dsl` when the target is structural, such as
+  `func:* > call:os.Getenv`.
+- Remember that selector names are language-owned: `def:*` is meaningful for
+  Python, not Go.
+- Use [dsl.md](./dsl.md) as the source of truth for grammar, selectors, and
+  limitations before generating recipe DSL.
 - Keep shell recipes explicit about `path`, `scope`, and `language`.
 - Use TFX when the same sequence needs to be repeatable across runs.

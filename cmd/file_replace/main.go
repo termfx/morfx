@@ -28,7 +28,8 @@ Input schema:
     "language": "<optional language override>",
     "max_files": <optional limit>
   },
-  "target": {<core.AgentQuery payload>},
+  "target": {<optional core.AgentQuery payload>},
+  "target_dsl": "<optional Morfx DSL selector, such as func:* > call:os.Getenv>",
   "replacement": "<text to insert>",
   "dry_run": <bool>,
   "backup": <bool>
@@ -51,6 +52,7 @@ Output schema:
 type fileReplaceRequest struct {
 	Scope       *core.FileScope `json:"scope"`
 	Target      json.RawMessage `json:"target"`
+	TargetDSL   string          `json:"target_dsl,omitempty"`
 	Replacement string          `json:"replacement"`
 	DryRun      bool            `json:"dry_run"`
 	Backup      bool            `json:"backup"`
@@ -102,7 +104,7 @@ func main() {
 	}
 	req.Scope.Path = absPath
 
-	if len(req.Target) == 0 {
+	if len(req.Target) == 0 && strings.TrimSpace(req.TargetDSL) == "" {
 		_ = toolenv.WriteError(os.Stdout, "target is required", errors.New("missing target"))
 		os.Exit(1)
 	}
@@ -111,8 +113,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var target core.AgentQuery
-	if err := json.Unmarshal(req.Target, &target); err != nil {
+	target, err := core.ParseAgentQueryPayload(req.Target, req.TargetDSL)
+	if err != nil {
 		_ = toolenv.WriteError(os.Stdout, "invalid target structure", err)
 		os.Exit(1)
 	}

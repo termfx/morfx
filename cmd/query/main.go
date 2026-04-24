@@ -21,7 +21,8 @@ Input schema:
   "language": "<language id>",
   "source":   "<optional source code>",
   "path":     "<optional file path>",
-  "query":    {<core.AgentQuery payload>}
+  "query":    {<optional core.AgentQuery payload>},
+  "dsl":      "<optional Morfx DSL selector, such as func:* > call:os.Getenv>"
 }
 Exactly one of "source" or "path" must be provided. When "path" is used the
 file is read from disk.
@@ -39,6 +40,7 @@ type queryRequest struct {
 	Source   *string         `json:"source,omitempty"`
 	Path     *string         `json:"path,omitempty"`
 	Query    json.RawMessage `json:"query"`
+	DSL      string          `json:"dsl,omitempty"`
 }
 
 func main() {
@@ -70,7 +72,7 @@ func main() {
 		_ = toolenv.WriteError(os.Stdout, "language is required", errors.New("missing language"))
 		os.Exit(1)
 	}
-	if len(req.Query) == 0 {
+	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
 		_ = toolenv.WriteError(os.Stdout, "query is required", errors.New("missing query"))
 		os.Exit(1)
 	}
@@ -87,8 +89,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var query core.AgentQuery
-	if err := json.Unmarshal(req.Query, &query); err != nil {
+	query, err := core.ParseAgentQueryPayload(req.Query, req.DSL)
+	if err != nil {
 		_ = toolenv.WriteError(os.Stdout, "invalid query structure", err)
 		os.Exit(1)
 	}

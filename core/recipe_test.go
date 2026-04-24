@@ -173,3 +173,39 @@ func TestValidateRecipeRejectsInvalidSteps(t *testing.T) {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
+
+func TestRecipeStepAcceptsTargetDSL(t *testing.T) {
+	processor := &fakeRecipeProcessor{
+		results: []*FileTransformResult{{
+			FilesScanned:  1,
+			FilesModified: 1,
+			TotalMatches:  1,
+			Confidence:    ConfidenceScore{Score: 0.93, Level: "high"},
+		}},
+	}
+
+	recipe := Recipe{
+		Name:   "remove-functions-that-read-env",
+		DryRun: true,
+		Steps: []RecipeStep{{
+			Name:      "delete env readers",
+			Method:    "delete",
+			Scope:     FileScope{Path: ".", Include: []string{"**/*.go"}, Language: "go"},
+			TargetDSL: "func:* > call:os.Getenv",
+		}},
+	}
+
+	if err := ValidateRecipe(recipe); err != nil {
+		t.Fatalf("ValidateRecipe returned error: %v", err)
+	}
+	if _, err := ExecuteRecipe(context.Background(), processor, recipe); err != nil {
+		t.Fatalf("ExecuteRecipe returned error: %v", err)
+	}
+	if len(processor.calls) != 1 {
+		t.Fatalf("expected one processor call, got %d", len(processor.calls))
+	}
+	call := processor.calls[0]
+	if call.Target.Type != "func" || call.Target.Contains == nil {
+		t.Fatalf("expected parsed structural target, got %+v", call.Target)
+	}
+}

@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/mcp/types"
 )
+
+const dslSelectorDescription = "Morfx DSL selector for read tools. Use this instead of query when matching nested AST structure. Syntax: kind:name with * wildcard. Operators: ! not, > contains descendant, & and, | or, parentheses for grouping. Use attributes as key=value or shorthand type. Common selectors: func, def, function, method, class, struct, interface, field, call, return, assignment, condition, block, loop, import. Examples: func:* > call:os.Getenv; struct:* > field:Secret type=string; (func:* | method:*) > call:fetch."
+
+const targetDSLSelectorDescription = "Morfx target_dsl selector for mutation tools. Use this instead of target when matching nested AST structure. Syntax: kind:name with * wildcard. Operators: ! not, > contains descendant, & and, | or, parentheses for grouping. Use attributes as key=value or shorthand type. Common selectors: func, def, function, method, class, struct, interface, field, call, return, assignment, condition, block, loop, import. Examples: func:Legacy*; func:* > call:os.Getenv; struct:* > field:Secret type=string."
 
 // BaseTool provides common tool functionality
 type BaseTool struct {
@@ -79,8 +84,10 @@ var CommonSchemas = struct {
 	Source      map[string]any
 	Path        map[string]any
 	Query       map[string]any
+	DSL         map[string]any
 	Replacement map[string]any
 	Target      map[string]any
+	TargetDSL   map[string]any
 }{
 	Language: map[string]any{
 		"type":        "string",
@@ -96,7 +103,7 @@ var CommonSchemas = struct {
 	},
 	Query: map[string]any{
 		"type":        "object",
-		"description": "Query to find code elements",
+		"description": "Object query to find code elements by type/name. Prefer dsl for nested AST structure, operators, and attributes.",
 		"properties": map[string]any{
 			"type": map[string]any{
 				"type":        "string",
@@ -108,13 +115,17 @@ var CommonSchemas = struct {
 			},
 		},
 	},
+	DSL: map[string]any{
+		"type":        "string",
+		"description": dslSelectorDescription,
+	},
 	Replacement: map[string]any{
 		"type":        "string",
 		"description": "Replacement code",
 	},
 	Target: map[string]any{
 		"type":        "object",
-		"description": "Target to modify",
+		"description": "Object target to modify by type/name. Prefer target_dsl for nested AST structure, operators, and attributes.",
 		"properties": map[string]any{
 			"type": map[string]any{
 				"type": "string",
@@ -124,6 +135,26 @@ var CommonSchemas = struct {
 			},
 		},
 	},
+	TargetDSL: map[string]any{
+		"type":        "string",
+		"description": targetDSLSelectorDescription,
+	},
+}
+
+func parseRequiredQuery(raw json.RawMessage, dsl, label string) (core.AgentQuery, error) {
+	query, err := core.ParseAgentQueryPayload(raw, dsl)
+	if err != nil {
+		return core.AgentQuery{}, types.WrapError(types.InvalidParams, "Invalid "+label+" structure", err)
+	}
+	return query, nil
+}
+
+func parseOptionalQuery(raw json.RawMessage, dsl, label string) (core.AgentQuery, bool, error) {
+	query, ok, err := core.ParseOptionalAgentQueryPayload(raw, dsl)
+	if err != nil {
+		return core.AgentQuery{}, ok, types.WrapError(types.InvalidParams, "Invalid "+label+" structure", err)
+	}
+	return query, ok, nil
 }
 
 // ParseParams is a helper to unmarshal parameters with proper error handling

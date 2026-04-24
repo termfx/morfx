@@ -188,7 +188,7 @@ func TestReplaceTool_Schema(t *testing.T) {
 		t.Fatal("Schema should have required array")
 	}
 
-	expectedRequired := []string{"language", "target", "replacement"}
+	expectedRequired := []string{"language", "replacement"}
 	for _, req := range expectedRequired {
 		found := slices.Contains(required, req)
 		if !found {
@@ -199,5 +199,11 @@ func TestReplaceTool_Schema(t *testing.T) {
 	// Verify replacement property exists
 	if _, exists := properties["replacement"]; !exists {
 		t.Error("Schema should have 'replacement' property")
+	}
+	if _, exists := properties["target"]; !exists {
+		t.Error("Schema should have 'target' property")
+	}
+	if _, exists := properties["target_dsl"]; !exists {
+		t.Error("Schema should have 'target_dsl' property")
 	}
 }

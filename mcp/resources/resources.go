@@ -116,6 +116,7 @@ func RegisterAll() {
 	// Documentation resources
 	Registry.Register("docs://readme", NewReadmeResource())
 	Registry.Register("docs://api", NewAPIDocResource())
+	Registry.Register("docs://dsl", NewDSLDocResource())
 }
 
 // Get retrieves a resource by name
@@ -250,7 +251,7 @@ func NewAPIDocResource() *BaseResource {
 			return `# Morfx API Documentation
 
 ## Query Tool
-Find code elements using natural language queries.
+Find code elements using object queries or Morfx DSL selectors.
 
 ## Replace Tool
 Replace code elements with new implementations.
@@ -263,6 +264,45 @@ Insert code before or after specific elements.
 
 ## Append Tool
 Append code to functions, classes, or files.
+`, nil
+		},
+	}
+}
+
+// NewDSLDocResource creates a resource for the Morfx DSL guide.
+func NewDSLDocResource() *BaseResource {
+	return &BaseResource{
+		name:        "Morfx DSL",
+		description: "Agent-readable Morfx DSL grammar, selectors, and examples for dsl and target_dsl",
+		uri:         "docs://dsl",
+		mimeType:    "text/markdown",
+		contentFunc: func() (string, error) {
+			content, err := os.ReadFile("docs/dsl.md")
+			if err == nil {
+				return string(content), nil
+			}
+
+			content, err = os.ReadFile("../../docs/dsl.md")
+			if err == nil {
+				return string(content), nil
+			}
+
+			return `# Morfx DSL
+
+Use ` + "`dsl`" + ` with read tools and ` + "`target_dsl`" + ` with mutation tools.
+
+Syntax:
+
+- ` + "`kind:name`" + ` selects an AST element by provider-owned kind and name.
+- ` + "`*`" + ` is a wildcard.
+- Operators: ` + "`!`" + `, ` + "`>`" + `, ` + "`&`" + `, ` + "`|`" + `, and parentheses.
+- Attributes use ` + "`key=value`" + ` or shorthand type.
+
+Examples:
+
+- ` + "`func:* > call:os.Getenv`" + `
+- ` + "`struct:* > field:Secret type=string`" + `
+- ` + "`(func:* | method:*) > call:fetch`" + `
 `, nil
 		},
 	}

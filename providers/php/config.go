@@ -46,6 +46,17 @@ func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
 	return []string{queryType}
 }
 
+func (c *Config) NormalizeQueryType(queryType string) string {
+	switch strings.TrimSpace(queryType) {
+	case "func", "fn":
+		return "function"
+	case "var":
+		return "variable"
+	default:
+		return strings.TrimSpace(queryType)
+	}
+}
+
 func (c *Config) aliasMap() map[string][]string {
 	return map[string][]string{
 		"function":      {"function_definition", "method_declaration", "anonymous_function_creation_expression", "arrow_function"},
@@ -60,6 +71,8 @@ func (c *Config) aliasMap() map[string][]string {
 		"trait":         {"trait_declaration"},
 		"variable":      {"assignment_expression", "simple_parameter", "property_declaration", "variable_name"},
 		"var":           {"assignment_expression", "simple_parameter", "property_declaration", "variable_name"},
+		"assignment":    {"assignment_expression"},
+		"assign":        {"assignment_expression"},
 		"property":      {"property_declaration"},
 		"field":         {"property_declaration"},
 		"constant":      {"const_declaration", "class_constant_declaration"},
@@ -71,6 +84,14 @@ func (c *Config) aliasMap() map[string][]string {
 		"include_once":  {"include_once_expression"},
 		"require":       {"require_expression"},
 		"require_once":  {"require_once_expression"},
+		"call":          {"function_call_expression", "member_call_expression", "scoped_call_expression"},
+		"return":        {"return_statement"},
+		"condition":     {"if_statement", "switch_statement"},
+		"if":            {"if_statement"},
+		"block":         {"compound_statement", "declaration_list"},
+		"loop":          {"for_statement", "foreach_statement", "while_statement", "do_statement"},
+		"for":           {"for_statement", "foreach_statement"},
+		"foreach":       {"foreach_statement"},
 		"enum":          {"enum_declaration"},
 		"array":         {"array_creation_expression"},
 		"array_element": {"array_element_initializer"},
@@ -173,6 +194,15 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 		if val := node.ChildByFieldName("value"); val != nil {
 			return strings.TrimSpace(source[val.StartByte():val.EndByte()])
 		}
+	case "function_call_expression", "member_call_expression", "scoped_call_expression":
+		if function := node.ChildByFieldName("function"); function != nil {
+			return strings.TrimPrefix(source[function.StartByte():function.EndByte()], "$")
+		}
+		if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+			return strings.TrimPrefix(source[nameNode.StartByte():nameNode.EndByte()], "$")
+		}
+	case "return_statement":
+		return "return"
 	case "comment":
 		return c.commentSummary(source[node.StartByte():node.EndByte()])
 	}

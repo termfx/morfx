@@ -41,9 +41,11 @@ For more practical shell recipes and the external TFX dogfood path, see
   {
     "language": "go",
     "source": "...",          // or "path": "file.go"
-    "query": { /* AgentQuery */ }
+    "query": { /* optional AgentQuery */ },
+    "dsl": "func:* > call:os.Getenv"
   }
   ```
+  Use either `query` or `dsl`.
   Exactly one of `source` or `path` must be supplied.
 - **Output:**
   ```json
@@ -62,7 +64,8 @@ For more practical shell recipes and the external TFX dogfood path, see
   {
     "language": "go",
     "source": "...",          // or "path": "file.go"
-    "target": { /* AgentQuery */ },
+    "target": { /* optional AgentQuery */ },
+    "target_dsl": "func:Legacy*",
     "replacement": "..."
   }
   ```
@@ -81,7 +84,8 @@ For more practical shell recipes and the external TFX dogfood path, see
 
 ## `delete`
 - **Purpose:** Remove code elements identified by a query.
-- **Input:** Same structure as `replace` without `replacement`.
+- **Input:** Same structure as `replace` without `replacement`; use either
+  `target` or `target_dsl`.
 - **Output:**
   ```json
   {
@@ -102,7 +106,8 @@ For more practical shell recipes and the external TFX dogfood path, see
   {
     "language": "go",
     "path": "file.go",       // or "source"
-    "target": { /* AgentQuery */ },
+    "target": { /* optional AgentQuery */ },
+    "target_dsl": "func:* > call:os.Getenv",
     "content": "snippet"
   }
   ```
@@ -118,6 +123,7 @@ For more practical shell recipes and the external TFX dogfood path, see
     "language": "go",
     "path": "file.go",       // or "source"
     "target": { /* optional AgentQuery */ },
+    "target_dsl": "struct:Config",
     "content": "snippet"
   }
   ```
@@ -135,7 +141,8 @@ For more practical shell recipes and the external TFX dogfood path, see
       "language": "go",
       "max_files": 100
     },
-    "query": { /* AgentQuery */ }
+    "query": { /* optional AgentQuery */ },
+    "dsl": "struct:* > field:Secret string"
   }
   ```
 - **Output:**
@@ -154,7 +161,8 @@ For more practical shell recipes and the external TFX dogfood path, see
   ```json
   {
     "scope": { /* FileScope */ },
-    "target": { /* AgentQuery */ },
+    "target": { /* optional AgentQuery */ },
+    "target_dsl": "func:Debug*",
     "replacement": "snippet",
     "dry_run": false,
     "backup": false
@@ -197,7 +205,7 @@ For more practical shell recipes and the external TFX dogfood path, see
           "include": ["**/*.go"],
           "language": "go"
         },
-        "target": {"type": "function", "name": "Legacy*"},
+        "target_dsl": "func:Legacy*",
         "replacement": "func Replacement() {}"
       }
     ]
@@ -222,6 +230,28 @@ Supported step methods are `replace`, `delete`, `insert_before`,
 `insert_after`, and `append`. Apply-mode recipes run a dry-run preflight first
 and only mutate files after each step meets its confidence gate. The same
 payload shape is also exposed through the MCP `recipe` tool.
+
+## Structural DSL
+
+The DSL is a compact selector layer over `core.AgentQuery`:
+
+```txt
+func:Init
+func:Handle*
+!func:Test*
+func:* > call:os.Getenv
+struct:* > field:Secret string
+func:* | method:*
+```
+
+Use `dsl` for `query` / `file_query`, and `target_dsl` for mutation tools and
+recipe steps. Morfx parses the selector shape centrally, but each language
+provider owns the meaning of the selector kind. For example, `def:*` is a
+Python provider alias, while Go does not treat `def` as a function alias. The
+JSON `query` / `target` payloads remain supported.
+
+For the full grammar, selector tables, agent usage rules, and limitations, see
+[dsl.md](./dsl.md).
 
 ## `apply`
 - **Purpose:** Apply staged transformations stored in the Morfx database.

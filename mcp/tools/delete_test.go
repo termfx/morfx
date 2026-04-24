@@ -58,7 +58,7 @@ func TestDeleteTool_Execute(t *testing.T) {
 				"target":   []string{"invalid"},
 			},
 			expectErr: true,
-			errMsg:    "target must be an object",
+			errMsg:    "Invalid target structure",
 		},
 		{
 			name: "delete_non_existent",
@@ -180,7 +180,7 @@ func TestDeleteTool_Schema(t *testing.T) {
 		t.Fatal("Schema should have required array")
 	}
 
-	expectedRequired := []string{"language", "target"}
+	expectedRequired := []string{"language"}
 	for _, req := range expectedRequired {
 		found := slices.Contains(required, req)
 		if !found {
@@ -196,5 +196,11 @@ func TestDeleteTool_Schema(t *testing.T) {
 
 	if _, exists := properties["replacement"]; exists {
 		t.Error("Delete tool should not have 'replacement' property")
+	}
+	if _, exists := properties["target"]; !exists {
+		t.Error("Delete tool should have 'target' property")
+	}
+	if _, exists := properties["target_dsl"]; !exists {
+		t.Error("Delete tool should have 'target_dsl' property")
 	}
 }

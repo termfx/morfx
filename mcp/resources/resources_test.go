@@ -217,6 +217,29 @@ func TestNewAPIDocResource(t *testing.T) {
 	}
 }
 
+func TestNewDSLDocResource(t *testing.T) {
+	resource := NewDSLDocResource()
+
+	if resource.Name() != "Morfx DSL" {
+		t.Errorf("Expected name 'Morfx DSL', got '%s'", resource.Name())
+	}
+
+	if resource.URI() != "docs://dsl" {
+		t.Errorf("Expected URI 'docs://dsl', got '%s'", resource.URI())
+	}
+
+	content, err := resource.Contents()
+	if err != nil {
+		t.Errorf("Contents() failed: %v", err)
+	}
+
+	for _, expected := range []string{"kind:name", "target_dsl", "func:* > call:os.Getenv"} {
+		if !strings.Contains(content, expected) {
+			t.Errorf("Content should contain %q", expected)
+		}
+	}
+}
+
 func TestRegisterAll(t *testing.T) {
 	// Clear registry for clean test
 	Registry = &resourceRegistry{
@@ -227,8 +250,8 @@ func TestRegisterAll(t *testing.T) {
 	RegisterAll()
 
 	resources := Registry.List()
-	if len(resources) != 4 {
-		t.Errorf("Expected 4 registered resources, got %d", len(resources))
+	if len(resources) != 5 {
+		t.Errorf("Expected 5 registered resources, got %d", len(resources))
 	}
 
 	expectedResources := []string{
@@ -236,6 +259,7 @@ func TestRegisterAll(t *testing.T) {
 		"config://transformation-methods",
 		"docs://readme",
 		"docs://api",
+		"docs://dsl",
 	}
 
 	for _, expected := range expectedResources {
@@ -273,8 +297,8 @@ func TestGetDefinitions(t *testing.T) {
 	RegisterAll()
 
 	definitions := GetDefinitions()
-	if len(definitions) != 4 {
-		t.Errorf("Expected 4 definitions, got %d", len(definitions))
+	if len(definitions) != 5 {
+		t.Errorf("Expected 5 definitions, got %d", len(definitions))
 	}
 
 	// Check first definition structure

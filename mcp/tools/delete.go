@@ -24,16 +24,17 @@ func NewDeleteTool(server types.ServerInterface) *DeleteTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "delete",
-		description: "Delete code elements matching a query",
+		description: "Delete code elements matching an object target or Morfx target_dsl selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"language": CommonSchemas.Language,
-				"source":   CommonSchemas.Source,
-				"path":     CommonSchemas.Path,
-				"target":   CommonSchemas.Target,
+				"language":   CommonSchemas.Language,
+				"source":     CommonSchemas.Source,
+				"path":       CommonSchemas.Path,
+				"target":     CommonSchemas.Target,
+				"target_dsl": CommonSchemas.TargetDSL,
 			},
-			"required": []string{"language", "target"},
+			"required": []string{"language"},
 			"oneOf": []map[string]any{
 				{"required": []string{"source"}},
 				{"required": []string{"path"}},
@@ -51,10 +52,11 @@ func (t *DeleteTool) handle(ctx context.Context, params json.RawMessage) (any, e
 		ctx = context.Background()
 	}
 	var args struct {
-		Language string          `json:"language"`
-		Source   string          `json:"source"`
-		Path     string          `json:"path"`
-		Target   json.RawMessage `json:"target"`
+		Language  string          `json:"language"`
+		Source    string          `json:"source"`
+		Path      string          `json:"path"`
+		Target    json.RawMessage `json:"target"`
+		TargetDSL string          `json:"target_dsl,omitempty"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -95,9 +97,9 @@ func (t *DeleteTool) handle(ctx context.Context, params json.RawMessage) (any, e
 	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse target
-	var target core.AgentQuery
-	if err := json.Unmarshal(args.Target, &target); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "target must be an object", err)
+	target, err := parseRequiredQuery(args.Target, args.TargetDSL, "target")
+	if err != nil {
+		return nil, err
 	}
 	if err := isCancelled(ctx); err != nil {
 		return nil, err

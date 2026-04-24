@@ -92,6 +92,15 @@ func TestHandleQueryTool(t *testing.T) {
 			expectErr: false,
 		},
 		{
+			name: "valid_source_dsl_query",
+			params: map[string]any{
+				"language": "go",
+				"source":   "package main\nimport \"os\"\nfunc load() string { return os.Getenv(\"TOKEN\") }\nfunc other() {}",
+				"dsl":      "func:* > call:os.Getenv",
+			},
+			expectErr: false,
+		},
+		{
 			name: "missing_language",
 			params: map[string]any{
 				"source": "package main\nfunc test() {}",

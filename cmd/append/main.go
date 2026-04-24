@@ -23,6 +23,7 @@ Input schema:
   "source":   "<optional source code>",
   "path":     "<optional file path>",
   "target":   {<optional core.AgentQuery payload>},
+  "target_dsl": "<optional Morfx DSL selector, such as class:Service>",
   "content":  "<text to append>"
 }
 Exactly one of "source" or "path" must be provided. When "path" is set the
@@ -41,11 +42,12 @@ Output schema:
 }`
 
 type appendRequest struct {
-	Language string          `json:"language"`
-	Source   *string         `json:"source,omitempty"`
-	Path     *string         `json:"path,omitempty"`
-	Target   json.RawMessage `json:"target,omitempty"`
-	Content  *string         `json:"content"`
+	Language  string          `json:"language"`
+	Source    *string         `json:"source,omitempty"`
+	Path      *string         `json:"path,omitempty"`
+	Target    json.RawMessage `json:"target,omitempty"`
+	TargetDSL string          `json:"target_dsl,omitempty"`
+	Content   *string         `json:"content"`
 }
 
 func main() {
@@ -99,12 +101,12 @@ func main() {
 		Content: *req.Content,
 	}
 
-	if len(req.Target) > 0 && strings.TrimSpace(string(req.Target)) != "null" {
-		var target core.AgentQuery
-		if err := json.Unmarshal(req.Target, &target); err != nil {
-			_ = toolenv.WriteError(os.Stdout, "invalid target structure", err)
-			os.Exit(1)
+	if target, ok, err := core.ParseOptionalAgentQueryPayload(req.Target, req.TargetDSL); err != nil {
+		if writeErr := toolenv.WriteError(os.Stdout, "invalid target structure", err); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "failed to write error output: %v\n", writeErr)
 		}
+		os.Exit(1)
+	} else if ok {
 		op.Target = target
 	}
 

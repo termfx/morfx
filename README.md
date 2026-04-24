@@ -40,6 +40,7 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 - **Confidence scoring** — Every transform gets a score with explainable factors
 - **Multi-language** — Go, JavaScript, TypeScript, PHP, Python via tree-sitter
 - **Recipes / Rules** - Named repeatable transformations composed from the same safe primitives
+- **Structural DSL** - Morfx selectors such as `func:* > call:os.Getenv`
 
 ## Modes
 
@@ -57,6 +58,10 @@ For the standalone stdin/stdout contracts, see
 [docs/standalone-tools.md](./docs/standalone-tools.md). For shell-level usage
 patterns and TFX recipes, see
 [docs/standalone-recipes.md](./docs/standalone-recipes.md).
+For the structural selector language, see
+[docs/dsl.md](./docs/dsl.md).
+For provider authoring, see
+[docs/contributing-language-providers.md](./docs/contributing-language-providers.md).
 
 If you are just evaluating Morfx, you can ignore TFX at first. TFX is optional
 runtime orchestration around the same standalone tools.
@@ -210,6 +215,15 @@ These are the JSON payloads your AI agent sends. You don't type these — your a
 }
 ```
 
+**Find functions that contain a specific call:**
+```json
+{
+  "language": "go",
+  "path": "/project/config.go",
+  "dsl": "func:* > call:os.Getenv"
+}
+```
+
 **Replace a method:**
 ```json
 {
@@ -229,6 +243,30 @@ These are the JSON payloads your AI agent sends. You don't type these — your a
   "content": "// DeleteUser removes a user permanently. Use with caution."
 }
 ```
+
+## Structural DSL
+
+Morfx also accepts a compact selector syntax when a JSON query would be too
+clumsy. Use `dsl` on read tools and `target_dsl` on mutation tools
+or recipe steps. The full agent-facing reference lives in
+[docs/dsl.md](./docs/dsl.md).
+
+```txt
+func:Init
+func:Handle*
+!func:Test*
+func:* > call:os.Getenv
+struct:* > field:Secret string
+func:* | method:*
+```
+
+The DSL is intentionally small: `kind:pattern`, optional type constraints,
+`>` for parent/contains-child structure, `!` for negation, and `&` / `|` for
+basic logical composition. The parser keeps `kind` as written; each language
+provider decides which names are valid aliases, so Python can own `def`,
+Go can own `func`, and PHP/TypeScript can keep their own vocabulary. It
+compiles to the same `AgentQuery` model used by the JSON tools, so the existing
+confidence, dry-run, staged apply, and recipe workflow still apply.
 
 ## Recipes and rules
 
@@ -258,7 +296,7 @@ Recipes are available both as the MCP `recipe` tool and as the standalone
         "language": "go",
         "max_files": 100
       },
-      "target": {"type": "function", "name": "Legacy*"},
+      "target_dsl": "func:Legacy*",
       "replacement": "func Replacement() {}"
     }
   ]

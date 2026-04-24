@@ -22,7 +22,8 @@ Input schema:
   "language": "<language id>",
   "source":   "<optional source code>",
   "path":     "<optional file path>",
-  "target":   {<core.AgentQuery payload>},
+  "target":   {<optional core.AgentQuery payload>},
+  "target_dsl": "<optional Morfx DSL selector, such as func:Legacy*>",
   "replacement": "<replacement text>"
 }
 Exactly one of "source" or "path" must be provided. When "path" is set the
@@ -44,6 +45,7 @@ type replaceRequest struct {
 	Source      *string         `json:"source,omitempty"`
 	Path        *string         `json:"path,omitempty"`
 	Target      json.RawMessage `json:"target"`
+	TargetDSL   string          `json:"target_dsl,omitempty"`
 	Replacement string          `json:"replacement"`
 }
 
@@ -76,7 +78,7 @@ func main() {
 		_ = toolenv.WriteError(os.Stdout, "language is required", errors.New("missing language"))
 		os.Exit(1)
 	}
-	if len(req.Target) == 0 {
+	if len(req.Target) == 0 && strings.TrimSpace(req.TargetDSL) == "" {
 		_ = toolenv.WriteError(os.Stdout, "target is required", errors.New("missing target"))
 		os.Exit(1)
 	}
@@ -97,8 +99,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var target core.AgentQuery
-	if err := json.Unmarshal(req.Target, &target); err != nil {
+	target, err := core.ParseAgentQueryPayload(req.Target, req.TargetDSL)
+	if err != nil {
 		_ = toolenv.WriteError(os.Stdout, "invalid target structure", err)
 		os.Exit(1)
 	}

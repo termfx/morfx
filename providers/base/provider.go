@@ -38,6 +38,11 @@ type SmartAppendConfig interface {
 	SmartAppend(source string, target *sitter.Node, content string) (string, bool)
 }
 
+// QueryTypeNormalizer lets providers own DSL/query aliases for their language.
+type QueryTypeNormalizer interface {
+	NormalizeQueryType(queryType string) string
+}
+
 // Provider provides common functionality for all language providers
 type Provider struct {
 	config LanguageConfig
@@ -120,6 +125,8 @@ func (p *Provider) Stats() providers.Stats {
 
 // Query finds code elements matching the query
 func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult {
+	query = p.normalizeQuery(query)
+
 	parser := p.borrowParser()
 	defer p.releaseParser(parser)
 
@@ -142,7 +149,7 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 	targets := p.findTargets(tree.RootNode(), source, query)
 	matches := make([]core.Match, 0, len(targets))
 	for _, target := range targets {
-		matches = append(matches, p.targetToMatch(source, query.Type, target))
+		matches = append(matches, p.targetToMatch(source, target.Type, target))
 	}
 
 	return core.QueryResult{
@@ -153,6 +160,8 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 
 // Transform applies a transformation operation
 func (p *Provider) Transform(source string, op core.TransformOp) core.TransformResult {
+	op.Target = p.normalizeQuery(op.Target)
+
 	parser := p.borrowParser()
 	defer p.releaseParser(parser)
 
@@ -279,8 +288,39 @@ func (p *Provider) matchesPattern(name, pattern string) bool {
 	return matched
 }
 
-// findTargets finds all matches for the query with proper expansion
+// findTargets finds all matches for the query with proper expansion.
 func (p *Provider) findTargets(root *sitter.Node, source string, query core.AgentQuery) []Target {
+	switch strings.ToUpper(strings.TrimSpace(query.Operator)) {
+	case "AND":
+		return p.findIntersectionTargets(root, source, query.Operands)
+	case "OR":
+		return p.findUnionTargets(root, source, query.Operands)
+	case "NOT":
+		return p.findNegatedTargets(root, source, query.Operands)
+	default:
+		return p.findSimpleTargets(root, source, query)
+	}
+}
+
+func (p *Provider) normalizeQuery(query core.AgentQuery) core.AgentQuery {
+	if normalizer, ok := p.config.(QueryTypeNormalizer); ok {
+		query.Type = normalizer.NormalizeQueryType(query.Type)
+	}
+	if query.Contains != nil {
+		child := p.normalizeQuery(*query.Contains)
+		query.Contains = &child
+	}
+	if len(query.Operands) > 0 {
+		operands := make([]core.AgentQuery, len(query.Operands))
+		for i, operand := range query.Operands {
+			operands[i] = p.normalizeQuery(operand)
+		}
+		query.Operands = operands
+	}
+	return query
+}
+
+func (p *Provider) findSimpleTargets(root *sitter.Node, source string, query core.AgentQuery) []Target {
 	var matches []Target
 	seen := make(map[string]struct{})
 
@@ -302,6 +342,86 @@ func (p *Provider) findTargets(root *sitter.Node, source string, query core.Agen
 	}
 
 	walk(root)
+	return matches
+}
+
+func (p *Provider) findTargetsBelow(root *sitter.Node, source string, query core.AgentQuery) []Target {
+	var matches []Target
+	for i := 0; i < int(root.ChildCount()); i++ {
+		matches = append(matches, p.findTargets(root.Child(i), source, query)...)
+	}
+	return matches
+}
+
+func (p *Provider) findUnionTargets(root *sitter.Node, source string, operands []core.AgentQuery) []Target {
+	var matches []Target
+	seen := make(map[string]struct{})
+	for _, operand := range operands {
+		for _, target := range p.findTargets(root, source, operand) {
+			key := semanticTargetKey(target.Type, target)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			matches = append(matches, target)
+		}
+	}
+	return matches
+}
+
+func (p *Provider) findIntersectionTargets(root *sitter.Node, source string, operands []core.AgentQuery) []Target {
+	if len(operands) == 0 {
+		return nil
+	}
+
+	current := p.findTargets(root, source, operands[0])
+	for _, operand := range operands[1:] {
+		next := p.findTargets(root, source, operand)
+		nextKeys := make(map[string]struct{}, len(next))
+		for _, target := range next {
+			nextKeys[semanticTargetKey(target.Type, target)] = struct{}{}
+		}
+
+		filtered := current[:0]
+		for _, target := range current {
+			if _, exists := nextKeys[semanticTargetKey(target.Type, target)]; exists {
+				filtered = append(filtered, target)
+			}
+		}
+		current = filtered
+	}
+	return current
+}
+
+func (p *Provider) findNegatedTargets(root *sitter.Node, source string, operands []core.AgentQuery) []Target {
+	if len(operands) != 1 {
+		return nil
+	}
+
+	operand := operands[0]
+	if strings.TrimSpace(operand.Type) == "" {
+		return nil
+	}
+
+	allQuery := operand
+	allQuery.Name = "*"
+	allQuery.Contains = nil
+	allQuery.Operator = ""
+	allQuery.Operands = nil
+	allQuery.Attributes = nil
+
+	excluded := p.findTargets(root, source, operand)
+	excludedKeys := make(map[string]struct{}, len(excluded))
+	for _, target := range excluded {
+		excludedKeys[semanticTargetKey(target.Type, target)] = struct{}{}
+	}
+
+	var matches []Target
+	for _, target := range p.findTargets(root, source, allQuery) {
+		if _, exists := excludedKeys[semanticTargetKey(target.Type, target)]; !exists {
+			matches = append(matches, target)
+		}
+	}
 	return matches
 }
 
@@ -338,12 +458,38 @@ func (p *Provider) candidateTargets(node *sitter.Node, source string, query core
 			name = "anonymous"
 			target.Name = name
 		}
-		if p.matchesPattern(name, query.Name) {
+		if p.matchesPattern(name, query.Name) &&
+			p.matchesAttributes(target, source, query.Attributes) &&
+			p.matchesContains(target, source, query.Contains) {
 			filtered = append(filtered, target)
 		}
 	}
 
 	return filtered
+}
+
+func (p *Provider) matchesAttributes(target Target, source string, attributes map[string]string) bool {
+	if len(attributes) == 0 {
+		return true
+	}
+
+	if validator, ok := p.config.(interface {
+		ValidateQueryAttributes(Target, string, map[string]string) bool
+	}); ok {
+		return validator.ValidateQueryAttributes(target, source, attributes)
+	}
+
+	return true
+}
+
+func (p *Provider) matchesContains(target Target, source string, child *core.AgentQuery) bool {
+	if child == nil {
+		return true
+	}
+	if target.Node == nil {
+		return false
+	}
+	return len(p.findTargetsBelow(target.Node, source, *child)) > 0
 }
 
 // nodeMatches checks if a node matches the query with provider-specific validation

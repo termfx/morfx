@@ -22,7 +22,7 @@ func NewRecipeTool(server types.ServerInterface) *RecipeTool {
 	tool := &RecipeTool{server: server}
 	tool.BaseTool = &BaseTool{
 		name:        "recipe",
-		description: "Run named repeatable transformations with confidence gates",
+		description: "Run named repeatable transformations with confidence gates and Morfx target_dsl selectors",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -53,6 +53,7 @@ func NewRecipeTool(server types.ServerInterface) *RecipeTool {
 							"method":         map[string]any{"type": "string"},
 							"scope":          map[string]any{"type": "object"},
 							"target":         CommonSchemas.Target,
+							"target_dsl":     CommonSchemas.TargetDSL,
 							"replacement":    CommonSchemas.Replacement,
 							"content":        map[string]any{"type": "string"},
 							"min_confidence": map[string]any{"type": "number"},

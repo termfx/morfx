@@ -28,7 +28,8 @@ Input schema:
     "language": "<optional language override>",
     "max_files": <optional limit>
   },
-  "query": {<core.AgentQuery payload>}
+  "query": {<optional core.AgentQuery payload>},
+  "dsl": "<optional Morfx DSL selector, such as struct:* > field:Secret type=string>"
 }
 "path" must reference an accessible directory. Optional include/exclude filters
 follow the same semantics as the MCP tool.
@@ -44,6 +45,7 @@ Output schema:
 type fileQueryRequest struct {
 	Scope *core.FileScope `json:"scope"`
 	Query json.RawMessage `json:"query"`
+	DSL   string          `json:"dsl,omitempty"`
 }
 
 func main() {
@@ -91,13 +93,13 @@ func main() {
 	}
 	req.Scope.Path = absPath
 
-	if len(req.Query) == 0 {
+	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
 		_ = toolenv.WriteError(os.Stdout, "query is required", errors.New("missing query"))
 		os.Exit(1)
 	}
 
-	var query core.AgentQuery
-	if err := json.Unmarshal(req.Query, &query); err != nil {
+	query, err := core.ParseAgentQueryPayload(req.Query, req.DSL)
+	if err != nil {
 		_ = toolenv.WriteError(os.Stdout, "invalid query structure", err)
 		os.Exit(1)
 	}

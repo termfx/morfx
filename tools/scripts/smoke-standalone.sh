@@ -29,8 +29,19 @@ SAMPLE_FILE="$TMP_DIR/sample.go"
 cat > "$SAMPLE_FILE" <<'EOF'
 package sample
 
+import "os"
+
 func HelloUser() string {
 	return "hello"
+}
+
+func EnvUser() string {
+	return os.Getenv("USER")
+}
+
+type User struct {
+	Secret string
+	Count  int
 }
 EOF
 
@@ -40,6 +51,20 @@ EOF
 "$BIN_DIR/query" < "$TMP_DIR/query.json" > "$ARTIFACT_DIR/query.json"
 grep -q '"matches"' "$ARTIFACT_DIR/query.json"
 grep -q 'HelloUser' "$ARTIFACT_DIR/query.json"
+
+cat > "$TMP_DIR/query_dsl.json" <<EOF
+{"language":"go","path":"$SAMPLE_FILE","dsl":"func:* > call:os.Getenv"}
+EOF
+"$BIN_DIR/query" < "$TMP_DIR/query_dsl.json" > "$ARTIFACT_DIR/query_dsl.json"
+grep -q '"matches"' "$ARTIFACT_DIR/query_dsl.json"
+grep -q 'EnvUser' "$ARTIFACT_DIR/query_dsl.json"
+
+cat > "$TMP_DIR/query_dsl_attribute.json" <<EOF
+{"language":"go","path":"$SAMPLE_FILE","dsl":"struct:* > field:Secret type=string"}
+EOF
+"$BIN_DIR/query" < "$TMP_DIR/query_dsl_attribute.json" > "$ARTIFACT_DIR/query_dsl_attribute.json"
+grep -q '"matches"' "$ARTIFACT_DIR/query_dsl_attribute.json"
+grep -q 'User' "$ARTIFACT_DIR/query_dsl_attribute.json"
 
 cat > "$TMP_DIR/replace.json" <<EOF
 {"language":"go","path":"$SAMPLE_FILE","target":{"type":"function","name":"HelloUser"},"replacement":"func HelloUser() string { return \"updated\" }"}
@@ -55,7 +80,7 @@ grep -q '"files"' "$ARTIFACT_DIR/file_query.json"
 grep -q 'HelloUser' "$ARTIFACT_DIR/file_query.json"
 
 cat > "$TMP_DIR/recipe.json" <<EOF
-{"name":"replace-hello-recipe","dry_run":true,"min_confidence":0.85,"steps":[{"name":"replace hello function","method":"replace","scope":{"path":"$TMP_DIR","include":["**/*.go"],"language":"go","max_files":10},"target":{"type":"function","name":"HelloUser"},"replacement":"func HelloUser() string { return \"recipe\" }"}]}
+{"name":"replace-hello-recipe","dry_run":true,"min_confidence":0.85,"steps":[{"name":"replace hello function","method":"replace","scope":{"path":"$TMP_DIR","include":["**/*.go"],"language":"go","max_files":10},"target_dsl":"func:HelloUser","replacement":"func HelloUser() string { return \"recipe\" }"}]}
 EOF
 "$BIN_DIR/recipe" < "$TMP_DIR/recipe.json" > "$ARTIFACT_DIR/recipe.json"
 grep -q '"steps_run"' "$ARTIFACT_DIR/recipe.json"

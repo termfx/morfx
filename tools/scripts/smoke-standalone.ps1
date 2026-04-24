@@ -83,11 +83,22 @@ New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
 try {
 	$sampleFile = Join-Path $tmpDir "sample.go"
-	Write-Utf8NoBom -Path $sampleFile -Content @"
+Write-Utf8NoBom -Path $sampleFile -Content @"
 package sample
+
+import "os"
 
 func HelloUser() string {
 	return "hello"
+}
+
+func EnvUser() string {
+	return os.Getenv("USER")
+}
+
+type User struct {
+	Secret string
+	Count  int
 }
 "@
 
@@ -105,6 +116,32 @@ func HelloUser() string {
 	$queryOutput = Get-Content (Join-Path $artifactDir "query.json") -Raw
 	if ($queryOutput -notmatch '"matches"' -or $queryOutput -notmatch 'HelloUser') {
 		throw "query smoke check failed"
+	}
+
+	$dslQueryPayload = @{
+		language = "go"
+		path = $sampleFile
+		dsl = "func:* > call:os.Getenv"
+	} | ConvertTo-Json -Compress
+	$dslQueryJson = Join-Path $tmpDir "query_dsl.json"
+	Write-Utf8NoBom -Path $dslQueryJson -Content $dslQueryPayload
+	Invoke-JsonTool -ExePath (Join-Path $binDir "query.exe") -InputPath $dslQueryJson -OutputPath (Join-Path $artifactDir "query_dsl.json")
+	$dslQueryOutput = Get-Content (Join-Path $artifactDir "query_dsl.json") -Raw
+	if ($dslQueryOutput -notmatch '"matches"' -or $dslQueryOutput -notmatch 'EnvUser') {
+		throw "dsl query smoke check failed"
+	}
+
+	$dslAttributePayload = @{
+		language = "go"
+		path = $sampleFile
+		dsl = "struct:* > field:Secret type=string"
+	} | ConvertTo-Json -Compress
+	$dslAttributeJson = Join-Path $tmpDir "query_dsl_attribute.json"
+	Write-Utf8NoBom -Path $dslAttributeJson -Content $dslAttributePayload
+	Invoke-JsonTool -ExePath (Join-Path $binDir "query.exe") -InputPath $dslAttributeJson -OutputPath (Join-Path $artifactDir "query_dsl_attribute.json")
+	$dslAttributeOutput = Get-Content (Join-Path $artifactDir "query_dsl_attribute.json") -Raw
+	if ($dslAttributeOutput -notmatch '"matches"' -or $dslAttributeOutput -notmatch 'User') {
+		throw "dsl attribute query smoke check failed"
 	}
 
 	$replacePayload = @{
@@ -158,10 +195,7 @@ func HelloUser() string {
 					language = "go"
 					max_files = 10
 				}
-				target = @{
-					type = "function"
-					name = "HelloUser"
-				}
+				target_dsl = "func:HelloUser"
 				replacement = 'func HelloUser() string { return "recipe" }'
 			}
 		)

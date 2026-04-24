@@ -24,20 +24,21 @@ func NewInsertBeforeTool(server types.ServerInterface) *InsertBeforeTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "insert_before",
-		description: "Insert code before elements matching a query",
+		description: "Insert code before elements matching an object target or Morfx target_dsl selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"language": CommonSchemas.Language,
-				"source":   CommonSchemas.Source,
-				"path":     CommonSchemas.Path,
-				"target":   CommonSchemas.Target,
+				"language":   CommonSchemas.Language,
+				"source":     CommonSchemas.Source,
+				"path":       CommonSchemas.Path,
+				"target":     CommonSchemas.Target,
+				"target_dsl": CommonSchemas.TargetDSL,
 				"content": map[string]any{
 					"type":        "string",
 					"description": "Code to insert",
 				},
 			},
-			"required": []string{"language", "target", "content"},
+			"required": []string{"language", "content"},
 			"oneOf": []map[string]any{
 				{"required": []string{"source"}},
 				{"required": []string{"path"}},
@@ -55,11 +56,12 @@ func (t *InsertBeforeTool) handle(ctx context.Context, params json.RawMessage) (
 		ctx = context.Background()
 	}
 	var args struct {
-		Language string          `json:"language"`
-		Source   string          `json:"source"`
-		Path     string          `json:"path"`
-		Target   json.RawMessage `json:"target"`
-		Content  string          `json:"content"`
+		Language  string          `json:"language"`
+		Source    string          `json:"source"`
+		Path      string          `json:"path"`
+		Target    json.RawMessage `json:"target"`
+		TargetDSL string          `json:"target_dsl,omitempty"`
+		Content   string          `json:"content"`
 	}
 
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -99,9 +101,9 @@ func (t *InsertBeforeTool) handle(ctx context.Context, params json.RawMessage) (
 	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
 
 	// Parse target
-	var target core.AgentQuery
-	if err := json.Unmarshal(args.Target, &target); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "Invalid target structure", err)
+	target, err := parseRequiredQuery(args.Target, args.TargetDSL, "target")
+	if err != nil {
+		return nil, err
 	}
 	if err := isCancelled(ctx); err != nil {
 		return nil, err

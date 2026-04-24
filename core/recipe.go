@@ -24,6 +24,7 @@ type RecipeStep struct {
 	Method        string     `json:"method"`
 	Scope         FileScope  `json:"scope"`
 	Target        AgentQuery `json:"target"`
+	TargetDSL     string     `json:"target_dsl,omitempty"`
 	Replacement   string     `json:"replacement,omitempty"`
 	Content       string     `json:"content,omitempty"`
 	MinConfidence float64    `json:"min_confidence,omitempty"`
@@ -150,8 +151,13 @@ func validateRecipeStep(index int, step RecipeStep) error {
 	if strings.TrimSpace(step.Scope.Path) == "" {
 		return fmt.Errorf("%s scope.path is required", prefix)
 	}
-	if step.Target.Type == "" && step.Method != "append" {
+	if step.Target.Type == "" && strings.TrimSpace(step.TargetDSL) == "" && step.Method != "append" {
 		return fmt.Errorf("%s target.type is required", prefix)
+	}
+	if strings.TrimSpace(step.TargetDSL) != "" {
+		if _, err := ParseDSL(step.TargetDSL); err != nil {
+			return fmt.Errorf("%s target_dsl is invalid: %w", prefix, err)
+		}
 	}
 	switch step.Method {
 	case "replace":
@@ -179,10 +185,18 @@ func isSupportedRecipeMethod(method string) bool {
 }
 
 func recipeStepOperation(step RecipeStep, dryRun bool) FileTransformOp {
+	target := step.Target
+	if strings.TrimSpace(step.TargetDSL) != "" {
+		parsed, err := ParseDSL(step.TargetDSL)
+		if err == nil {
+			target = parsed
+		}
+	}
+
 	return FileTransformOp{
 		TransformOp: TransformOp{
 			Method:      step.Method,
-			Target:      step.Target,
+			Target:      target,
 			Content:     step.Content,
 			Replacement: step.Replacement,
 		},

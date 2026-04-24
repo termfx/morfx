@@ -24,7 +24,7 @@ func NewFileReplaceTool(server types.ServerInterface) *FileReplaceTool {
 
 	tool.BaseTool = &BaseTool{
 		name:        "file_replace",
-		description: "Replace code elements across multiple files",
+		description: "Replace code elements across multiple files using an object target or Morfx target_dsl selector",
 		inputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -50,6 +50,7 @@ func NewFileReplaceTool(server types.ServerInterface) *FileReplaceTool {
 					"required": []string{"path"},
 				},
 				"target":      CommonSchemas.Target,
+				"target_dsl":  CommonSchemas.TargetDSL,
 				"replacement": CommonSchemas.Replacement,
 				"dry_run": map[string]any{
 					"type":        "boolean",
@@ -60,7 +61,7 @@ func NewFileReplaceTool(server types.ServerInterface) *FileReplaceTool {
 					"description": "Create backup files",
 				},
 			},
-			"required": []string{"scope", "target", "replacement"},
+			"required": []string{"scope", "replacement"},
 		},
 		handler: tool.handle,
 	}
@@ -76,6 +77,7 @@ func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (a
 	var args struct {
 		Scope       core.FileScope  `json:"scope"`
 		Target      json.RawMessage `json:"target"`
+		TargetDSL   string          `json:"target_dsl,omitempty"`
 		Replacement string          `json:"replacement"`
 		DryRun      bool            `json:"dry_run"`
 		Backup      bool            `json:"backup"`
@@ -90,9 +92,9 @@ func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (a
 	}
 
 	// Parse target
-	var target core.AgentQuery
-	if err := json.Unmarshal(args.Target, &target); err != nil {
-		return nil, types.WrapError(types.InvalidParams, "Invalid target structure", err)
+	target, err := parseRequiredQuery(args.Target, args.TargetDSL, "target")
+	if err != nil {
+		return nil, err
 	}
 	notifyProgress(ctx, t.server, 20, 100, "prepared target")
 	if err := isCancelled(ctx); err != nil {

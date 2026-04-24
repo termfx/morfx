@@ -36,6 +36,17 @@ func (c *Config) MapQueryTypeToNodeTypes(queryType string) []string {
 	return []string{queryType}
 }
 
+func (c *Config) NormalizeQueryType(queryType string) string {
+	switch strings.TrimSpace(queryType) {
+	case "def", "func", "fn":
+		return "function"
+	case "var":
+		return "variable"
+	default:
+		return strings.TrimSpace(queryType)
+	}
+}
+
 func (c *Config) aliasMap() map[string][]string {
 	return map[string][]string{
 		"function":   {"function_definition", "async_function_definition"},
@@ -50,8 +61,17 @@ func (c *Config) aliasMap() map[string][]string {
 		"type_alias": {"type_alias_statement"},
 		"variable":   {"assignment", "augmented_assignment", "global_statement", "nonlocal_statement"},
 		"var":        {"assignment", "augmented_assignment", "global_statement", "nonlocal_statement"},
+		"assignment": {"assignment", "augmented_assignment"},
+		"assign":     {"assignment", "augmented_assignment"},
 		"import":     {"import_statement", "import_from_statement"},
 		"from":       {"import_from_statement"},
+		"call":       {"call"},
+		"return":     {"return_statement"},
+		"condition":  {"if_statement", "match_statement"},
+		"if":         {"if_statement"},
+		"block":      {"block"},
+		"loop":       {"for_statement", "while_statement"},
+		"for":        {"for_statement"},
 		"decorator":  {"decorator"},
 		"lambda":     {"lambda"},
 		"comment":    {"comment"},
@@ -110,6 +130,12 @@ func (c *Config) ExtractNodeName(node *sitter.Node, source string) string {
 				return source[child.StartByte():child.EndByte()]
 			}
 		}
+	case "call":
+		if function := node.ChildByFieldName("function"); function != nil {
+			return source[function.StartByte():function.EndByte()]
+		}
+	case "return_statement":
+		return "return"
 	case "comment":
 		return c.commentSummary(source[node.StartByte():node.EndByte()])
 	}

@@ -34,6 +34,7 @@ Input schema:
         "language": "go"
       },
       "target": {"type": "function", "name": "Old*"},
+      "target_dsl": "func:Old*",
       "replacement": "func NewName() {}"
     }
   ]
