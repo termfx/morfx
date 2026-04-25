@@ -11,6 +11,7 @@ type Match struct {
 	EndByte   uint32
 	Line      uint32
 	Column    uint32
+	Captures  map[string]string
 }
 
 // Target is a provider-local transformation target that retains the parser node.

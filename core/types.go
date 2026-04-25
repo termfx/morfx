@@ -2,22 +2,24 @@ package core
 
 // AgentQuery represents a natural language query for code elements
 type AgentQuery struct {
-	Type       string            `json:"type"`                 // function, struct, class, etc
-	Name       string            `json:"name,omitempty"`       // name pattern with wildcards
-	Contains   *AgentQuery       `json:"contains,omitempty"`   // nested queries
-	Operator   string            `json:"operator,omitempty"`   // AND, OR, NOT
-	Operands   []AgentQuery      `json:"operands,omitempty"`   // for compound queries
-	Attributes map[string]string `json:"attributes,omitempty"` // extra constraints, such as type
+	Type           string            `json:"type"`                      // function, struct, class, etc
+	Name           string            `json:"name,omitempty"`            // name pattern with wildcards or $captures
+	Contains       *AgentQuery       `json:"contains,omitempty"`        // nested queries
+	ContainsDirect bool              `json:"contains_direct,omitempty"` // true when using direct-child containment
+	Operator       string            `json:"operator,omitempty"`        // AND, OR, NOT
+	Operands       []AgentQuery      `json:"operands,omitempty"`        // for compound queries
+	Attributes     map[string]string `json:"attributes,omitempty"`      // extra constraints, such as type
 }
 
 // Match represents a found code element
 type Match struct {
-	Type     string   `json:"type"`
-	Name     string   `json:"name"`
-	Location Location `json:"location"`
-	Content  string   `json:"content,omitempty"`
-	Scope    string   `json:"scope,omitempty"`  // file, function, class
-	Parent   string   `json:"parent,omitempty"` // parent element name
+	Type     string            `json:"type"`
+	Name     string            `json:"name"`
+	Location Location          `json:"location"`
+	Content  string            `json:"content,omitempty"`
+	Captures map[string]string `json:"captures,omitempty"`
+	Scope    string            `json:"scope,omitempty"`  // file, function, class
+	Parent   string            `json:"parent,omitempty"` // parent element name
 }
 
 // Location in source code

@@ -311,6 +311,8 @@ release-artifacts: build-standalone
 		go build -o $(DIST_DIR)/$$tool ./cmd/$$tool; \
 	done
 	@cp README.md docs/standalone-tools.md docs/standalone-recipes.md docs/dsl.md docs/contributing-language-providers.md LICENSE tfx.yaml $(DIST_DIR)/
+	@go run ./tools/release-metadata manifest $(DIST_DIR) "$(VERSION)" "$(COMMIT)" > $(DIST_DIR)/MANIFEST.json
+	@go run ./tools/release-metadata sbom $(DIST_DIR) "$(VERSION)" "$(COMMIT)" > $(DIST_DIR)/SBOM.spdx.json
 	@if command -v shasum >/dev/null 2>&1; then \
 		shasum -a 256 $(DIST_DIR)/* > $(DIST_DIR)/SHA256SUMS; \
 	else \

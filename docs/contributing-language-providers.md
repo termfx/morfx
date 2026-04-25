@@ -151,7 +151,7 @@ func (c *Config) ExpandMatches(
 
 ### `ValidateQueryAttributes`
 
-Use this for DSL/type constraints such as:
+Use this for provider-owned DSL/type constraints such as:
 
 ```txt
 struct:* > field:Secret string
@@ -167,6 +167,11 @@ func (c *Config) ValidateQueryAttributes(
     attributes map[string]string,
 ) bool
 ```
+
+Core already handles cross-provider attributes such as `text`, `source`,
+`arg`, `arg0`, `before`, and `after`. Providers should reserve
+`ValidateQueryAttributes` for language-specific constraints such as field
+types, visibility, modifiers, or framework-specific metadata.
 
 ### `SmartAppend`
 

@@ -115,6 +115,11 @@ func tokenizeDSL(input string) ([]dslToken, error) {
 			i++
 			continue
 		case '!', '&', '|', '>':
+			if trimmed[i] == '>' && i+1 < len(trimmed) && trimmed[i+1] == '>' {
+				tokens = append(tokens, dslToken{kind: dslTokenOperator, value: ">>"})
+				i += 2
+				continue
+			}
 			tokens = append(tokens, dslToken{kind: dslTokenOperator, value: string(trimmed[i])})
 			i++
 			continue
@@ -133,7 +138,7 @@ func tokenizeDSL(input string) ([]dslToken, error) {
 			continue
 		}
 		kind := dslTokenAttribute
-		if strings.Contains(value, ":") {
+		if strings.Contains(value, ":") && !strings.Contains(value, "=") {
 			kind = dslTokenSelector
 		}
 		tokens = append(tokens, dslToken{kind: kind, value: value})
@@ -187,14 +192,22 @@ func (p *dslParser) parseContains() (AgentQuery, error) {
 	if err != nil {
 		return AgentQuery{}, err
 	}
-	for p.matchOperator(">") {
+	for {
+		direct := false
+		switch {
+		case p.matchOperator(">>"):
+			direct = true
+		case p.matchOperator(">"):
+			direct = false
+		default:
+			return left, nil
+		}
 		right, err := p.parseUnary()
 		if err != nil {
 			return AgentQuery{}, fmt.Errorf("invalid child selector: %w", err)
 		}
-		left = attachContains(left, right)
+		left = attachContains(left, right, direct)
 	}
-	return left, nil
 }
 
 func (p *dslParser) parseUnary() (AgentQuery, error) {
@@ -295,12 +308,12 @@ func mergeBinaryQuery(operator string, left, right AgentQuery) AgentQuery {
 	return AgentQuery{Operator: operator, Operands: operands}
 }
 
-func attachContains(parent, child AgentQuery) AgentQuery {
+func attachContains(parent, child AgentQuery, direct bool) AgentQuery {
 	switch parent.Operator {
 	case "AND", "OR":
 		operands := make([]AgentQuery, len(parent.Operands))
 		for i, operand := range parent.Operands {
-			operands[i] = attachContains(operand, child)
+			operands[i] = attachContains(operand, child, direct)
 		}
 		parent.Operands = operands
 		return parent
@@ -308,9 +321,10 @@ func attachContains(parent, child AgentQuery) AgentQuery {
 
 	if parent.Contains == nil {
 		parent.Contains = &child
+		parent.ContainsDirect = direct
 		return parent
 	}
-	nested := attachContains(*parent.Contains, child)
+	nested := attachContains(*parent.Contains, child, direct)
 	parent.Contains = &nested
 	return parent
 }

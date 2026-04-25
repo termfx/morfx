@@ -90,6 +90,9 @@ Prebuilt archives are the primary install path. Every GitHub release publishes:
 - `morfx_<version>_darwin_amd64.tar.gz`
 - `morfx_<version>_darwin_arm64.tar.gz`
 - `morfx_<version>_windows_amd64.zip`
+- `SHA256SUMS`
+- `MANIFEST.json`
+- `SBOM.spdx.json`
 
 Use the [GitHub Releases page](https://github.com/oxhq/morfx/releases) for
 manual download, or pull the matching archive with GitHub CLI:
@@ -111,6 +114,9 @@ Get-ChildItem .\morfx_*\morfx.exe
 
 Each archive includes `morfx`, the standalone tools, the standalone tool docs,
 and `tfx.yaml`.
+
+Release workflows also request GitHub build provenance attestations for the
+published archives, checksums, manifest, and SBOM.
 
 ### Build from source
 
@@ -256,17 +262,21 @@ func:Init
 func:Handle*
 !func:Test*
 func:* > call:os.Getenv
+class:* >> method:render
+call:$client.$method
+call:fetch arg0="/api/user"
 struct:* > field:Secret string
 func:* | method:*
 ```
 
-The DSL is intentionally small: `kind:pattern`, optional type constraints,
-`>` for parent/contains-child structure, `!` for negation, and `&` / `|` for
-basic logical composition. The parser keeps `kind` as written; each language
-provider decides which names are valid aliases, so Python can own `def`,
-Go can own `func`, and PHP/TypeScript can keep their own vocabulary. It
-compiles to the same `AgentQuery` model used by the JSON tools, so the existing
-confidence, dry-run, staged apply, and recipe workflow still apply.
+The DSL is intentionally compact: `kind:pattern`, optional attributes, `>` for
+descendant containment, `>>` for direct semantic children, `$capture` patterns,
+argument/source/order predicates, `!` for negation, and `&` / `|` for logical
+composition. The parser keeps `kind` as written; each language provider decides
+which names are valid aliases, so Python can own `def`, Go can own `func`, and
+PHP/TypeScript can keep their own vocabulary. It compiles to the same
+`AgentQuery` model used by the JSON tools, so the existing confidence, dry-run,
+staged apply, and recipe workflow still apply.
 
 ## Recipes and rules
 

@@ -101,9 +101,38 @@ func TestParseDSLParsesKeyValueAttributes(t *testing.T) {
 	}
 }
 
+func TestParseDSLParsesDirectChildOperator(t *testing.T) {
+	query, err := ParseDSL("class:User >> method:render")
+	if err != nil {
+		t.Fatalf("ParseDSL returned error: %v", err)
+	}
+
+	if query.Contains == nil {
+		t.Fatal("expected child query")
+	}
+	if !query.ContainsDirect {
+		t.Fatalf("expected direct child containment, got %+v", query)
+	}
+	if query.Contains.Type != "method" || query.Contains.Name != "render" {
+		t.Fatalf("unexpected child query: %+v", query.Contains)
+	}
+}
+
+func TestParseDSLParsesCapturePatterns(t *testing.T) {
+	query, err := ParseDSL("call:$pkg.$name")
+	if err != nil {
+		t.Fatalf("ParseDSL returned error: %v", err)
+	}
+
+	if query.Name != "$pkg.$name" {
+		t.Fatalf("expected capture pattern to be preserved, got %q", query.Name)
+	}
+}
+
 func TestParseDSLRejectsMalformedExpressions(t *testing.T) {
 	cases := []string{
 		"func:* >",
+		"func:* >>",
 		"(func:* | method:*",
 		"func:* | | method:*",
 		"field:Secret type=",

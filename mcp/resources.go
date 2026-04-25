@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -335,6 +336,14 @@ func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 
 // generateServerCapabilities creates server capabilities resource content
 func (s *StdioServer) generateServerCapabilities() (*ResourceContent, error) {
+	languages := s.supportedLanguagePayload()
+	languageNames := make([]string, 0, len(languages))
+	for _, language := range languages {
+		if name, ok := language["name"].(string); ok {
+			languageNames = append(languageNames, name)
+		}
+	}
+
 	capabilities := map[string]any{
 		"protocol_version": supportedProtocolVersion,
 		"tools": map[string]any{
@@ -346,12 +355,18 @@ func (s *StdioServer) generateServerCapabilities() (*ResourceContent, error) {
 			"features": []string{"read", "subscribe", "notifications"},
 		},
 		"prompts": map[string]any{
-			"count":    5, // Number of available prompts
+			"count":    len(GetPromptDefinitions()),
 			"features": []string{"get", "list"},
 		},
 		"languages": map[string]any{
-			"supported": []string{"go"},
-			"planned":   []string{"python", "javascript", "typescript"},
+			"supported": languageNames,
+		},
+		"dsl": map[string]any{
+			"captures":            true,
+			"descendant_contains": true,
+			"direct_child":        true,
+			"logical_operators":   []string{"!", "&", "|"},
+			"attributes":          commonDSLAttributes(),
 		},
 		"transformations": []string{
 			"query", "replace", "delete", "insert_before", "insert_after", "append",
@@ -377,38 +392,7 @@ func (s *StdioServer) generateServerCapabilities() (*ResourceContent, error) {
 // generateSupportedLanguages creates supported languages resource content
 func (s *StdioServer) generateSupportedLanguages() (*ResourceContent, error) {
 	languages := map[string]any{
-		"supported": []map[string]any{
-			{
-				"name":         "go",
-				"display_name": "Go",
-				"extensions":   []string{".go"},
-				"features": map[string]any{
-					"ast_parsing":        true,
-					"transformations":    true,
-					"confidence_scoring": true,
-				},
-			},
-		},
-		"planned": []map[string]any{
-			{
-				"name":         "python",
-				"display_name": "Python",
-				"extensions":   []string{".py"},
-				"status":       "in_development",
-			},
-			{
-				"name":         "javascript",
-				"display_name": "JavaScript",
-				"extensions":   []string{".js", ".jsx"},
-				"status":       "planned",
-			},
-			{
-				"name":         "typescript",
-				"display_name": "TypeScript",
-				"extensions":   []string{".ts", ".tsx"},
-				"status":       "planned",
-			},
-		},
+		"supported": s.supportedLanguagePayload(),
 	}
 
 	data, err := json.MarshalIndent(languages, "", "  ")
@@ -421,6 +405,65 @@ func (s *StdioServer) generateSupportedLanguages() (*ResourceContent, error) {
 		MimeType: "application/json",
 		Text:     string(data),
 	}, nil
+}
+
+func (s *StdioServer) supportedLanguagePayload() []map[string]any {
+	if s == nil || s.providers == nil {
+		return nil
+	}
+	providers := s.providers.List()
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].Language() < providers[j].Language()
+	})
+
+	languages := make([]map[string]any, 0, len(providers))
+	for _, provider := range providers {
+		selectors := provider.SupportedQueryTypes()
+		sort.Strings(selectors)
+		languages = append(languages, map[string]any{
+			"name":         provider.Language(),
+			"display_name": displayLanguageName(provider.Language()),
+			"extensions":   provider.Extensions(),
+			"selectors":    selectors,
+			"attributes":   commonDSLAttributes(),
+			"features": map[string]any{
+				"ast_parsing":        true,
+				"transformations":    true,
+				"confidence_scoring": true,
+				"dsl":                true,
+				"captures":           true,
+				"direct_child":       true,
+				"argument_matching":  true,
+				"source_constraints": true,
+				"sibling_order":      true,
+			},
+		})
+	}
+	return languages
+}
+
+func commonDSLAttributes() []string {
+	return []string{"type", "text", "source", "arg", "arg0", "argN", "before", "after"}
+}
+
+func displayLanguageName(language string) string {
+	switch language {
+	case "go":
+		return "Go"
+	case "javascript":
+		return "JavaScript"
+	case "typescript":
+		return "TypeScript"
+	case "php":
+		return "PHP"
+	case "python":
+		return "Python"
+	default:
+		if language == "" {
+			return ""
+		}
+		return strings.ToUpper(language[:1]) + language[1:]
+	}
 }
 
 // generateCurrentSession creates current session resource content

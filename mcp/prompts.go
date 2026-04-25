@@ -135,10 +135,44 @@ func (s *StdioServer) generatePromptContent(name string, args map[string]string)
 	case "best-practices":
 		return s.generateBestPracticesPrompt(args)
 	default:
+		if prompt, ok := prompts.Registry.Get(name); ok {
+			return generateRegistryPromptContent(prompt, args)
+		}
 		return nil, NewMCPError(MethodNotFound, "Prompt not found", map[string]any{
 			"name": name,
 		})
 	}
+}
+
+func generateRegistryPromptContent(prompt types.Prompt, args map[string]string) ([]PromptMessage, error) {
+	var body strings.Builder
+	body.WriteString(prompt.Content())
+
+	if len(prompt.Arguments()) > 0 {
+		body.WriteString("\n\nInputs:\n")
+		for _, argument := range prompt.Arguments() {
+			value := args[argument.Name]
+			if argument.Required && strings.TrimSpace(value) == "" {
+				return nil, NewMCPError(InvalidParams, "Missing required argument: "+argument.Name, nil)
+			}
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			body.WriteString("\n")
+			body.WriteString(argument.Name)
+			body.WriteString(":\n")
+			body.WriteString(value)
+			body.WriteString("\n")
+		}
+	}
+
+	return []PromptMessage{{
+		Role: "user",
+		Content: []PromptContent{{
+			Type: "text",
+			Text: body.String(),
+		}},
+	}}, nil
 }
 
 // generateCodeAnalysisPrompt creates a code analysis prompt

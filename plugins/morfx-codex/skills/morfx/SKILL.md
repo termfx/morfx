@@ -32,8 +32,10 @@ Morfx DSL syntax:
 
 - `kind:name` selects an AST element by provider-owned kind and name. `*` is a wildcard.
 - `>` means descendant containment, for example `func:* > call:os.Getenv`.
+- `>>` means direct semantic child containment, for example `class:* >> method:render`.
 - `&`, `|`, `!`, and parentheses compose selectors.
-- Attributes use `key=value`, and shorthand attributes map to provider-owned defaults. Example: `struct:* > field:Secret type=string`.
+- `$capture` patterns return captured name parts in match payloads. Example: `call:$client.$method`.
+- Attributes use `key=value`, and shorthand attributes map to provider-owned defaults. Examples: `struct:* > field:Secret type=string`, `call:fetch arg0="/api/user"`, `import:* source=react`, `func:init before=func:run`.
 - Common selector kinds include `func`, `def`, `function`, `method`, `class`, `struct`, `interface`, `field`, `call`, `return`, `assignment`, `condition`, `block`, `loop`, and `import`.
 
 Examples:

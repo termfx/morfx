@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -149,7 +150,7 @@ func (p *Provider) Query(source string, query core.AgentQuery) core.QueryResult 
 	targets := p.findTargets(tree.RootNode(), source, query)
 	matches := make([]core.Match, 0, len(targets))
 	for _, target := range targets {
-		matches = append(matches, p.targetToMatch(source, target.Type, target))
+		matches = append(matches, p.targetToMatch(source, target))
 	}
 
 	return core.QueryResult{
@@ -276,16 +277,81 @@ func (p *Provider) Validate(source string) providers.ValidationResult {
 
 // matchesPattern checks if name matches pattern (with wildcards)
 func (p *Provider) matchesPattern(name, pattern string) bool {
+	matched, _ := p.matchPatternCaptures(name, pattern)
+	return matched
+}
+
+func (p *Provider) matchPatternCaptures(name, pattern string) (bool, map[string]string) {
 	if pattern == "" || pattern == "*" {
-		return true
+		return true, nil
+	}
+
+	if strings.Contains(pattern, "$") {
+		return matchCapturePattern(name, pattern)
 	}
 
 	matched, err := path.Match(pattern, name)
 	if err != nil {
-		return false
+		return false, nil
 	}
 
-	return matched
+	return matched, nil
+}
+
+func matchCapturePattern(name, pattern string) (bool, map[string]string) {
+	var (
+		builder strings.Builder
+		names   []string
+	)
+	builder.WriteString("^")
+	for i := 0; i < len(pattern); {
+		switch pattern[i] {
+		case '*':
+			builder.WriteString(".*")
+			i++
+		case '$':
+			start := i + 1
+			end := start
+			for end < len(pattern) {
+				ch := pattern[end]
+				if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+					end++
+					continue
+				}
+				break
+			}
+			if end == start {
+				builder.WriteString(regexp.QuoteMeta("$"))
+				i++
+				continue
+			}
+			names = append(names, pattern[start:end])
+			if end < len(pattern) {
+				builder.WriteString("(.+?)")
+			} else {
+				builder.WriteString("(.+)")
+			}
+			i = end
+		default:
+			builder.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			i++
+		}
+	}
+	builder.WriteString("$")
+
+	re, err := regexp.Compile(builder.String())
+	if err != nil {
+		return false, nil
+	}
+	matches := re.FindStringSubmatch(name)
+	if matches == nil {
+		return false, nil
+	}
+	captures := make(map[string]string, len(names))
+	for i, captureName := range names {
+		captures[captureName] = matches[i+1]
+	}
+	return true, captures
 }
 
 // findTargets finds all matches for the query with proper expansion.
@@ -458,9 +524,11 @@ func (p *Provider) candidateTargets(node *sitter.Node, source string, query core
 			name = "anonymous"
 			target.Name = name
 		}
-		if p.matchesPattern(name, query.Name) &&
+		matched, captures := p.matchPatternCaptures(name, query.Name)
+		if matched &&
 			p.matchesAttributes(target, source, query.Attributes) &&
-			p.matchesContains(target, source, query.Contains) {
+			p.matchesContains(target, source, query.Contains, query.ContainsDirect) {
+			target.Captures = captures
 			filtered = append(filtered, target)
 		}
 	}
@@ -473,23 +541,217 @@ func (p *Provider) matchesAttributes(target Target, source string, attributes ma
 		return true
 	}
 
+	providerAttributes := make(map[string]string, len(attributes))
+	for key, value := range attributes {
+		switch {
+		case key == "text":
+			if !matchTextAttribute(nodeContent(target.Node, source), value) {
+				return false
+			}
+		case key == "source":
+			if !matchTextAttribute(target.Name, value) && !matchTextAttribute(nodeContent(target.Node, source), value) {
+				return false
+			}
+		case key == "arg" || strings.HasPrefix(key, "arg"):
+			if !matchArgumentAttribute(target.Node, source, key, value) {
+				return false
+			}
+		case key == "before":
+			if !p.matchesSiblingPredicate(target.Node, source, value, true) {
+				return false
+			}
+		case key == "after":
+			if !p.matchesSiblingPredicate(target.Node, source, value, false) {
+				return false
+			}
+		default:
+			providerAttributes[key] = value
+		}
+	}
+	if len(providerAttributes) == 0 {
+		return true
+	}
+
 	if validator, ok := p.config.(interface {
 		ValidateQueryAttributes(Target, string, map[string]string) bool
 	}); ok {
-		return validator.ValidateQueryAttributes(target, source, attributes)
+		return validator.ValidateQueryAttributes(target, source, providerAttributes)
 	}
 
 	return true
 }
 
-func (p *Provider) matchesContains(target Target, source string, child *core.AgentQuery) bool {
+func nodeContent(node *sitter.Node, source string) string {
+	if node == nil {
+		return ""
+	}
+	start := int(node.StartByte())
+	end := int(node.EndByte())
+	if start < 0 || end < start || end > len(source) {
+		return ""
+	}
+	return source[start:end]
+}
+
+func matchTextAttribute(actual, pattern string) bool {
+	actual = stripAttributeQuotes(strings.TrimSpace(actual))
+	pattern = stripAttributeQuotes(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return actual == ""
+	}
+	if strings.ContainsAny(pattern, "*?[") {
+		matched, err := path.Match(pattern, actual)
+		return err == nil && matched
+	}
+	return actual == pattern || strings.Contains(actual, pattern)
+}
+
+func stripAttributeQuotes(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		first := value[0]
+		last := value[len(value)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
+			return value[1 : len(value)-1]
+		}
+	}
+	return value
+}
+
+func matchArgumentAttribute(node *sitter.Node, source, key, pattern string) bool {
+	args := argumentTexts(node, source)
+	if len(args) == 0 {
+		return false
+	}
+	if key == "arg" {
+		for _, arg := range args {
+			if matchTextAttribute(arg, pattern) {
+				return true
+			}
+		}
+		return false
+	}
+
+	indexText := strings.TrimPrefix(key, "arg")
+	var index int
+	for _, ch := range indexText {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+		index = index*10 + int(ch-'0')
+	}
+	if index < 0 || index >= len(args) {
+		return false
+	}
+	return matchTextAttribute(args[index], pattern)
+}
+
+func argumentTexts(node *sitter.Node, source string) []string {
+	if node == nil {
+		return nil
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child == nil {
+			continue
+		}
+		childType := child.Type()
+		if childType == "arguments" || childType == "argument_list" || strings.Contains(childType, "arguments") {
+			args := make([]string, 0, child.NamedChildCount())
+			for j := 0; j < int(child.NamedChildCount()); j++ {
+				arg := child.NamedChild(j)
+				text := stripAttributeQuotes(nodeContent(arg, source))
+				if text != "" {
+					args = append(args, text)
+				}
+			}
+			return args
+		}
+	}
+	return nil
+}
+
+func (p *Provider) matchesSiblingPredicate(node *sitter.Node, source, dsl string, before bool) bool {
+	if node == nil || node.Parent() == nil {
+		return false
+	}
+	query, err := core.ParseDSL(dsl)
+	if err != nil {
+		return false
+	}
+
+	parent := node.Parent()
+	for i := 0; i < int(parent.ChildCount()); i++ {
+		sibling := parent.Child(i)
+		if sibling == nil || sibling == node {
+			continue
+		}
+		targets := p.findTargets(sibling, source, query)
+		for _, target := range targets {
+			if before && target.StartByte > node.EndByte() {
+				return true
+			}
+			if !before && target.EndByte < node.StartByte() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (p *Provider) matchesContains(target Target, source string, child *core.AgentQuery, direct bool) bool {
 	if child == nil {
 		return true
 	}
 	if target.Node == nil {
 		return false
 	}
+	if direct {
+		return p.matchesDirectChild(target.Node, source, *child)
+	}
 	return len(p.findTargetsBelow(target.Node, source, *child)) > 0
+}
+
+func (p *Provider) matchesDirectChild(parent *sitter.Node, source string, query core.AgentQuery) bool {
+	for _, child := range directSemanticChildren(parent) {
+		if len(p.candidateTargets(child, source, query)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func directSemanticChildren(parent *sitter.Node) []*sitter.Node {
+	if parent == nil {
+		return nil
+	}
+
+	var children []*sitter.Node
+	for i := 0; i < int(parent.ChildCount()); i++ {
+		child := parent.Child(i)
+		if child == nil {
+			continue
+		}
+		if isTransparentContainer(child.Type()) {
+			for j := 0; j < int(child.ChildCount()); j++ {
+				if grandchild := child.Child(j); grandchild != nil {
+					children = append(children, grandchild)
+				}
+			}
+			continue
+		}
+		children = append(children, child)
+	}
+	return children
+}
+
+func isTransparentContainer(nodeType string) bool {
+	switch nodeType {
+	case "class_body", "declaration_list", "statement_block", "block", "compound_statement", "body":
+		return true
+	default:
+		return false
+	}
 }
 
 // nodeMatches checks if a node matches the query with provider-specific validation
@@ -532,7 +794,7 @@ func (p *Provider) passesProviderValidation(node *sitter.Node, source string, qu
 	return true
 }
 
-func (p *Provider) targetToMatch(source, queryType string, target Target) core.Match {
+func (p *Provider) targetToMatch(source string, target Target) core.Match {
 	location := core.Location{
 		Line:   int(target.Line) + 1,
 		Column: int(target.Column) + 1,
@@ -551,10 +813,11 @@ func (p *Provider) targetToMatch(source, queryType string, target Target) core.M
 	}
 
 	return core.Match{
-		Type:     queryType,
+		Type:     target.Type,
 		Name:     target.Name,
 		Location: location,
 		Content:  content,
+		Captures: target.Captures,
 	}
 }
 

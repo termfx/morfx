@@ -156,6 +156,43 @@ func TestHandleGetPrompt_UnknownPrompt(t *testing.T) {
 	}
 }
 
+func TestHandleGetPrompt_RegistryPrompt(t *testing.T) {
+	server := &StdioServer{
+		debugLog: func(format string, args ...any) {},
+	}
+
+	params := map[string]any{
+		"name": "code_review",
+		"arguments": map[string]string{
+			"language": "go",
+			"code":     "func test() {}",
+		},
+	}
+	paramsJSON, _ := json.Marshal(params)
+
+	req := Request{
+		ID:     &[]string{"test-registry"}[0],
+		Method: "prompts/get",
+		Params: paramsJSON,
+	}
+
+	response := server.handleGetPrompt(context.Background(), req)
+	if response.Error != nil {
+		t.Fatalf("Expected registry prompt to resolve, got: %v", response.Error)
+	}
+
+	res, ok := response.Result.(getPromptResult)
+	if !ok {
+		t.Fatalf("Expected getPromptResult, got %T", response.Result)
+	}
+	if len(res.Messages) != 1 || len(res.Messages[0].Content) != 1 {
+		t.Fatalf("Expected one registry prompt message, got %+v", res.Messages)
+	}
+	if !strings.Contains(res.Messages[0].Content[0].Text, "func test() {}") {
+		t.Fatalf("Expected prompt content to include code argument, got %q", res.Messages[0].Content[0].Text)
+	}
+}
+
 // Test generatePromptContent function
 func TestGeneratePromptContent_AllPrompts(t *testing.T) {
 	server := &StdioServer{

@@ -146,6 +146,14 @@ func TestHandleReadResource_ServerCapabilities(t *testing.T) {
 	if tools["count"] == nil {
 		t.Error("Tools count is missing")
 	}
+
+	dsl, ok := capabilities["dsl"].(map[string]any)
+	if !ok {
+		t.Fatal("DSL section is missing or invalid")
+	}
+	if captures, ok := dsl["captures"].(bool); !ok || !captures {
+		t.Fatalf("expected DSL captures capability, got %+v", dsl)
+	}
 }
 
 func TestHandleReadResource_SupportedLanguages(t *testing.T) {
@@ -190,10 +198,26 @@ func TestHandleReadResource_SupportedLanguages(t *testing.T) {
 		t.Error("Expected at least one supported language")
 	}
 
-	// Check Go language support
-	goLang := supported[0].(map[string]any)
-	if goLang["name"] != "go" {
-		t.Errorf("Expected Go language support, got %v", goLang["name"])
+	byName := make(map[string]map[string]any, len(supported))
+	for _, item := range supported {
+		lang := item.(map[string]any)
+		byName[lang["name"].(string)] = lang
+	}
+
+	for _, name := range []string{"go", "javascript", "typescript", "php", "python"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("expected %s support in provider resource, got %+v", name, byName)
+		}
+	}
+
+	jsLang := byName["javascript"]
+	selectors, ok := jsLang["selectors"].([]any)
+	if !ok || len(selectors) == 0 {
+		t.Fatalf("expected selector vocabulary for javascript, got %+v", jsLang)
+	}
+	attributes, ok := jsLang["attributes"].([]any)
+	if !ok || len(attributes) == 0 {
+		t.Fatalf("expected DSL attributes for javascript, got %+v", jsLang)
 	}
 }
 

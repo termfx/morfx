@@ -295,12 +295,16 @@ Syntax:
 
 - ` + "`kind:name`" + ` selects an AST element by provider-owned kind and name.
 - ` + "`*`" + ` is a wildcard.
-- Operators: ` + "`!`" + `, ` + "`>`" + `, ` + "`&`" + `, ` + "`|`" + `, and parentheses.
-- Attributes use ` + "`key=value`" + ` or shorthand type.
+- ` + "`$capture`" + ` patterns return captured name parts in matches.
+- Operators: ` + "`!`" + `, ` + "`>`" + `, ` + "`>>`" + `, ` + "`&`" + `, ` + "`|`" + `, and parentheses.
+- Attributes use ` + "`key=value`" + ` or shorthand type. Common attributes include ` + "`arg`" + `, ` + "`arg0`" + `, ` + "`source`" + `, ` + "`text`" + `, ` + "`before`" + `, and ` + "`after`" + `.
 
 Examples:
 
 - ` + "`func:* > call:os.Getenv`" + `
+- ` + "`class:* >> method:render`" + `
+- ` + "`call:$client.$method`" + `
+- ` + "`call:fetch arg0=\"/api/user\"`" + `
 - ` + "`struct:* > field:Secret type=string`" + `
 - ` + "`(func:* | method:*) > call:fetch`" + `
 `, nil

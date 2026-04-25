@@ -16,7 +16,12 @@ dry-run checks, staged apply, provider validation, or recipe safety gates.
 func:Handle*
 !func:Test*
 func:* > call:os.Getenv
+class:UserController >> method:index
 (func:* | method:*) > call:fetch
+call:$client.$method
+call:fetch arg0="/api/user"
+import:* source=react
+func:init before=func:run
 struct:* > field:Secret string
 field:Secret type=string visibility=private
 class:* > method:render
@@ -30,7 +35,7 @@ return:*
 expression  = or
 or          = and ("|" and)*
 and         = contains ("&" contains)*
-contains    = unary (">" unary)*
+contains    = unary ((">" | ">>") unary)*
 unary       = "!" unary | primary
 primary     = selector | "(" expression ")"
 selector    = kind ":" pattern attributes*
@@ -40,7 +45,7 @@ attributes  = shorthand_type | key "=" value
 Operator precedence, from strongest to weakest:
 
 1. `!` negation
-2. `>` contains descendant
+2. `>` / `>>` contains descendant or direct semantic child
 3. `&` intersection
 4. `|` union
 
@@ -57,6 +62,15 @@ It is not limited to direct children.
 ```txt
 func:* > call:os.Getenv
 class:* > method:render > call:setState
+```
+
+`>>` means the child selector must be a direct semantic child of the left
+selector. Morfx treats common wrapper nodes such as class bodies and statement
+blocks as transparent, so this stays useful across tree-sitter grammars.
+
+```txt
+class:UserController >> method:index
+func:load >> return:*
 ```
 
 When the left side is a compound expression, the child selector is distributed
@@ -97,6 +111,20 @@ call:os.*
 field:Secret
 ```
 
+Pattern captures use `$name` inside the pattern. A capture matches that portion
+of the selected name and returns it in the match `captures` object.
+
+```txt
+call:$callee
+call:$client.$method
+```
+
+For `api.fetch`, the second selector returns:
+
+```json
+{"captures":{"client":"api","method":"fetch"}}
+```
+
 Use `*` for any name:
 
 ```txt
@@ -125,6 +153,9 @@ Use explicit key/value attributes for agent-generated queries:
 ```txt
 field:Secret type=string
 method:render visibility=public
+call:fetch arg0="/api/user"
+import:* source=react
+func:init before=func:run
 ```
 
 Current provider support is intentionally conservative. Go supports `type`
@@ -137,6 +168,24 @@ struct:* > field:Secret type=string
 
 Unsupported attributes are ignored unless a provider implements validation for
 them. Agents should prefer attributes documented for the target language.
+
+Morfx also supports a small set of cross-provider predicate attributes:
+
+| Attribute | Meaning |
+| --- | --- |
+| `text=<pattern>` | Match against the selected node source text |
+| `source=<pattern>` | Match import/use/source selectors by extracted name or node text |
+| `arg=<pattern>` | Match any call argument |
+| `arg0=<pattern>`, `arg1=<pattern>` | Match a specific zero-based call argument |
+| `before=<selector>` | Match when a sibling selector appears after this node |
+| `after=<selector>` | Match when a sibling selector appears before this node |
+
+Use quotes for argument or source values that contain punctuation:
+
+```txt
+call:fetch arg0="/api/user"
+import:* source="react"
+```
 
 ## Common Selectors
 
@@ -349,22 +398,46 @@ Find PHP methods returning from a body:
 method:* > return:*
 ```
 
+Capture member calls:
+
+```txt
+call:$client.$method
+```
+
+Find calls by argument:
+
+```txt
+call:fetch arg0="/api/user"
+```
+
+Find direct class members:
+
+```txt
+class:* >> method:render
+```
+
+Find ordered siblings:
+
+```txt
+func:init before=func:run
+```
+
 ## Limits
 
-The DSL does not yet support captures or template bindings. Do not generate
-queries such as:
+Captures are query-time bindings. They are returned with matches, but they are
+not yet template variables for replacements. Do not generate replacement
+templates such as:
 
 ```txt
-func:$fn > call:$pkg.$name
+replacement:"$client.$method()"
 ```
 
-Use exact or wildcard patterns instead:
+Use capture output to inspect matches first, then send explicit replacement
+content.
 
-```txt
-func:* > call:os.Getenv
-call:*.GetString
-```
-
-The DSL also does not yet express sibling order, direct-child-only matching,
-argument matching, import-source constraints, or typed captures. Use provider
-tests or JSON queries for behavior beyond the documented DSL.
+The DSL does not yet support arbitrary boolean predicates, full typed captures,
+or language-server-level symbol resolution. `>>` is direct semantic containment,
+not a promise that the underlying tree-sitter node is an immediate raw child in
+every grammar. Argument matching compares argument source text rather than
+evaluating code. Use provider tests or JSON queries for behavior beyond the
+documented DSL.

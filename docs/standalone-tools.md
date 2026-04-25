@@ -240,6 +240,9 @@ func:Init
 func:Handle*
 !func:Test*
 func:* > call:os.Getenv
+class:* >> method:render
+call:$client.$method
+call:fetch arg0="/api/user"
 struct:* > field:Secret string
 func:* | method:*
 ```
@@ -247,8 +250,11 @@ func:* | method:*
 Use `dsl` for `query` / `file_query`, and `target_dsl` for mutation tools and
 recipe steps. Morfx parses the selector shape centrally, but each language
 provider owns the meaning of the selector kind. For example, `def:*` is a
-Python provider alias, while Go does not treat `def` as a function alias. The
-JSON `query` / `target` payloads remain supported.
+Python provider alias, while Go does not treat `def` as a function alias.
+Captures are returned in match payloads, and cross-provider predicates such as
+`arg0`, `source`, `before`, and `after` help agents express deeper structural
+queries without leaving the AST-safe path. The JSON `query` / `target` payloads
+remain supported.
 
 For the full grammar, selector tables, agent usage rules, and limitations, see
 [dsl.md](./dsl.md).

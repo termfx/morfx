@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   verify:
@@ -224,6 +226,23 @@ jobs:
           EOF
           fi
 
+      - name: Generate release manifest and SBOM
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          go run ./tools/release-metadata manifest release "$TAG" "$GITHUB_SHA" > release/MANIFEST.json
+          go run ./tools/release-metadata sbom release "$TAG" "$GITHUB_SHA" > release/SBOM.spdx.json
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS
+            release/MANIFEST.json
+            release/SBOM.spdx.json
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -234,9 +253,9 @@ jobs:
           title="Morfx ${TAG}"
           if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GH_REPO" --notes-file release/RELEASE_NOTES.md
-            gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS --clobber
+            gh release upload "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS release/MANIFEST.json release/SBOM.spdx.json --clobber
           else
-            gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS \
+            gh release create "$TAG" --repo "$GH_REPO" release/*.tar.gz release/*.zip release/SHA256SUMS release/MANIFEST.json release/SBOM.spdx.json \
               --title "$title" \
               --notes-file release/RELEASE_NOTES.md
           fi
