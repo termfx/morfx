@@ -118,6 +118,23 @@ and `tfx.yaml`.
 Release workflows also request GitHub build provenance attestations for the
 published archives, checksums, manifest, and SBOM.
 
+### PHP and Composer projects
+
+PHP projects can use the
+[oxhq/morfx Composer wrapper](https://github.com/oxhq/morfx-php) once it is
+published on Packagist:
+
+```bash
+composer require --dev oxhq/morfx
+vendor/bin/morfx --version
+```
+
+The Composer package is a thin distribution layer. It downloads the matching
+native Morfx release binary, verifies it against `SHA256SUMS`, caches it inside
+the installed package, and forwards `vendor/bin/morfx` arguments to the native
+binary. The AST engine, MCP server, standalone tools, release artifacts, and
+language providers remain in this repository.
+
 ### Build from source
 
 Use a source build when you want to contribute, test local changes, or produce
