@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 	"github.com/oxhq/morfx/models"
 	"github.com/oxhq/morfx/providers"
@@ -37,6 +38,7 @@ func (r *mockRegistry) Get(language string) (core.Provider, bool) {
 
 // mockServer implements types.ServerInterface for testing
 type mockServer struct {
+	engine           *engine.Engine
 	providerRegistry *providers.Registry
 	coreRegistry     *mockRegistry
 	fileProcessor    *core.FileProcessor
@@ -49,6 +51,11 @@ type mockServer struct {
 }
 
 func newMockServer() *mockServer {
+	e, err := engine.New(engine.Config{})
+	if err != nil {
+		panic(fmt.Sprintf("engine.New() error = %v", err))
+	}
+
 	// Create provider registry for MCP
 	providerRegistry := providers.NewRegistry()
 
@@ -67,6 +74,7 @@ func newMockServer() *mockServer {
 	fileProc := core.NewFileProcessor(coreRegistry)
 
 	return &mockServer{
+		engine:           e,
 		providerRegistry: providerRegistry,
 		coreRegistry:     coreRegistry,
 		fileProcessor:    fileProc,
@@ -74,6 +82,10 @@ func newMockServer() *mockServer {
 		safety:           &mockSafety{},
 		sessionID:        "mock-session",
 	}
+}
+
+func (m *mockServer) GetEngine() *engine.Engine {
+	return m.engine
 }
 
 func (m *mockServer) GetProviders() *providers.Registry {

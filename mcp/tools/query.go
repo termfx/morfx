@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -70,6 +71,9 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 	if (!sourceProvided && !pathProvided) || (sourceProvided && pathProvided) {
 		return nil, types.NewMCPError(types.InvalidParams, "Exactly one of 'source' or 'path' must be provided", nil)
 	}
+	if strings.TrimSpace(args.Language) == "" {
+		return nil, types.NewMCPError(types.InvalidParams, "language is required", nil)
+	}
 	notifyProgress(ctx, t.server, 5, 100, "validating")
 	if err := isCancelled(ctx); err != nil {
 		return nil, err
@@ -93,37 +97,38 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 		return nil, err
 	}
 
-	// Get provider for language
-	provider, exists := t.server.GetProviders().Get(args.Language)
-	if !exists {
-		return nil, types.NewMCPError(types.LanguageNotFound,
-			fmt.Sprintf("No provider for language: %s", args.Language),
-			map[string]any{
-				"requested": args.Language,
-				"supported": []string{"go", "python", "javascript", "typescript", "php"},
-			})
-	}
-	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
-
 	// Parse the query
 	query, err := parseRequiredQuery(args.Query, args.DSL, "query")
 	if err != nil {
 		return nil, err
 	}
+	notifyProgress(ctx, t.server, 25, 100, "prepared query")
 	if err := isCancelled(ctx); err != nil {
 		return nil, err
 	}
 
 	// Execute query
-	result := provider.Query(source, query)
-	if result.Error != nil {
+	result, err := t.server.GetEngine().Query(ctx, engine.QueryRequest{
+		Language: args.Language,
+		Source:   source,
+		Query:    query,
+	})
+	if err != nil {
 		// Check if it's a syntax error or other
-		errMsg := result.Error.Error()
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "provider not found") {
+			return nil, types.NewMCPError(types.LanguageNotFound,
+				fmt.Sprintf("No provider for language: %s", args.Language),
+				map[string]any{
+					"requested": args.Language,
+					"supported": []string{"go", "python", "javascript", "typescript", "php"},
+				})
+		}
 		if strings.Contains(errMsg, "parse") || strings.Contains(errMsg, "syntax") {
 			return nil, types.NewMCPError(types.SyntaxError, "Failed to parse source code",
 				map[string]any{"details": errMsg})
 		}
-		return nil, types.WrapError(types.TransformFailed, "Query execution failed", result.Error)
+		return nil, types.WrapError(types.TransformFailed, "Query execution failed", err)
 	}
 	notifyProgress(ctx, t.server, 70, 100, "evaluated query")
 	if err := isCancelled(ctx); err != nil {
@@ -132,16 +137,16 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 
 	// Format matches as human-readable text
 	var responseText string
-	if len(result.Matches) == 0 {
+	if len(result.Results) == 0 {
 		responseText = "No matches found"
 	} else {
-		responseText = fmt.Sprintf("Found %d match", len(result.Matches))
-		if len(result.Matches) != 1 {
+		responseText = fmt.Sprintf("Found %d match", len(result.Results))
+		if len(result.Results) != 1 {
 			responseText += "es"
 		}
 		responseText += ":\n\n"
 
-		for _, match := range result.Matches {
+		for _, match := range result.Results {
 			responseText += fmt.Sprintf("• %s '%s' at line %d, column %d",
 				match.Type, match.Name,
 				match.Location.Line, match.Location.Column)
@@ -158,8 +163,8 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 	}
 
 	// Build structured match data for API consumers
-	matchData := make([]map[string]any, 0, len(result.Matches))
-	for _, match := range result.Matches {
+	matchData := make([]map[string]any, 0, len(result.Results))
+	for _, match := range result.Results {
 		m := map[string]any{
 			"type":    match.Type,
 			"name":    match.Name,
@@ -178,7 +183,7 @@ func (t *QueryTool) handle(ctx context.Context, params json.RawMessage) (any, er
 				"text": responseText,
 			},
 		},
-		"matches":    len(result.Matches),
+		"matches":    len(result.Results),
 		"match_data": matchData,
 	}, nil
 }

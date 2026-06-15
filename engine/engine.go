@@ -1,5 +1,10 @@
 package engine
 
+import (
+	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/providers"
+)
+
 func New(cfg Config) (*Engine, error) {
 	cfg = normalizeConfig(cfg)
 
@@ -16,4 +21,18 @@ func normalizeConfig(cfg Config) Config {
 		cfg.WriteMode = WriteModePreview
 	}
 	return cfg
+}
+
+func (e *Engine) Providers() *providers.Registry {
+	if e == nil || e.runtime == nil {
+		return nil
+	}
+	return e.runtime.Providers
+}
+
+func (e *Engine) FileProcessor() *core.FileProcessor {
+	if e == nil || e.runtime == nil {
+		return nil
+	}
+	return e.runtime.FileProcessor
 }

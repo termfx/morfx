@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -120,11 +121,14 @@ func (t *FileQueryTool) handle(ctx context.Context, params json.RawMessage) (any
 	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	fileProcessor := t.server.GetFileProcessor()
-	matches, err := fileProcessor.QueryFiles(opCtx, *args.Scope, query)
+	result, err := t.server.GetEngine().FileQuery(opCtx, engine.FileQueryRequest{
+		Scope: *args.Scope,
+		Query: query,
+	})
 	if err != nil {
 		return nil, types.WrapError(types.TransformFailed, "File query failed", err)
 	}
+	matches := result.Results
 	notifyProgress(ctx, t.server, 80, 100, "processed files")
 	if err := isCancelled(ctx); err != nil {
 		return nil, err

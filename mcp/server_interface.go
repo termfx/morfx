@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 	"github.com/oxhq/morfx/providers"
 )
@@ -13,6 +14,11 @@ type ServerInterface = types.ServerInterface
 
 // Ensure StdioServer implements ServerInterface
 var _ types.ServerInterface = (*StdioServer)(nil)
+
+// GetEngine returns the shared engine instance.
+func (s *StdioServer) GetEngine() *engine.Engine {
+	return s.engine
+}
 
 // GetProviders returns the provider registry
 func (s *StdioServer) GetProviders() *providers.Registry {

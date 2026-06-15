@@ -87,7 +87,7 @@ func (t *RecipeTool) handle(ctx context.Context, params json.RawMessage) (any, e
 	opCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
-	result, err := core.ExecuteRecipe(opCtx, t.server.GetFileProcessor(), recipe)
+	result, err := t.server.GetEngine().Recipe(opCtx, recipe)
 	if err != nil {
 		return nil, types.WrapError(types.TransformFailed, "Recipe failed", err)
 	}

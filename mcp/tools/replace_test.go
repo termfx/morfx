@@ -53,7 +53,8 @@ func TestReplaceTool_Execute(t *testing.T) {
 					"name": "test",
 				},
 			},
-			expectErr: false, // Go uses empty string as default value
+			expectErr: true,
+			errMsg:    "Replace operation failed",
 		},
 		{
 			name: "missing_target",

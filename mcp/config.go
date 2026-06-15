@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/securefs"
 )
 
@@ -30,6 +31,9 @@ type Config struct {
 
 	// Debug
 	Debug bool
+
+	// Engine allows callers to inject a shared morfx engine instance.
+	Engine *engine.Engine
 
 	// LogWriter allows tests to redirect debug logging; defaults to stderr.
 	LogWriter io.Writer

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -94,30 +95,34 @@ func (t *ReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, 
 		return nil, err
 	}
 
-	// Get provider
-	provider, exists := t.server.GetProviders().Get(args.Language)
-	if !exists {
-		return nil, types.NewMCPError(types.LanguageNotFound, "Language not supported", nil)
-	}
-
-	notifyProgress(ctx, t.server, 25, 100, "resolved provider")
-
 	// Parse target
 	target, err := parseRequiredQuery(args.Target, args.TargetDSL, "target")
 	if err != nil {
 		return nil, err
 	}
+	notifyProgress(ctx, t.server, 25, 100, "prepared target")
 
 	// Execute transformation
+	method := "replace"
+	if args.Replacement == "" {
+		method = "delete"
+	}
 	op := core.TransformOp{
-		Method:      "replace",
+		Method:      method,
 		Target:      target,
 		Replacement: args.Replacement,
 	}
 
-	result := provider.Transform(source, op)
-	if result.Error != nil {
-		return nil, types.WrapError(types.TransformFailed, "Replace operation failed", result.Error)
+	result, err := t.server.GetEngine().Transform(ctx, engine.TransformRequest{
+		Language: args.Language,
+		Source:   source,
+		Op:       op,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "provider not found") {
+			return nil, types.NewMCPError(types.LanguageNotFound, "Language not supported", nil)
+		}
+		return nil, types.WrapError(types.TransformFailed, "Replace operation failed", err)
 	}
 
 	notifyProgress(ctx, t.server, 70, 100, "transformed source")
@@ -134,17 +139,18 @@ func (t *ReplaceTool) handle(ctx context.Context, params json.RawMessage) (any, 
 		TargetJSON:     args.Target,
 		Path:           args.Path,
 		OriginalSource: source,
-		Result:         result,
+		Result: core.TransformResult{
+			MatchCount: result.MatchCount,
+			Modified:   result.Modified,
+			Diff:       result.Diff,
+			Confidence: result.Confidence,
+		},
 		ResponseText:   t.formatResponse(result, args.Path),
 	})
 }
 
 // formatResponse formats the transformation result
-func (t *ReplaceTool) formatResponse(result core.TransformResult, path string) string {
-	if result.Error != nil {
-		return "Replace operation failed: " + result.Error.Error()
-	}
-
+func (t *ReplaceTool) formatResponse(result engine.TransformResult, path string) string {
 	response := "✅ Replace operation completed successfully\n\n"
 
 	if path != "" {

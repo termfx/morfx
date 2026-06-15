@@ -14,7 +14,7 @@ import (
 
 	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/db"
-	"github.com/oxhq/morfx/internal/runtime"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/prompts"
 	"github.com/oxhq/morfx/mcp/resources"
 	"github.com/oxhq/morfx/mcp/tools"
@@ -42,6 +42,9 @@ type StdioServer struct {
 
 	// Provider registry
 	providers *providers.Registry
+
+	// Shared engine for MCP tool execution
+	engine *engine.Engine
 
 	// File processor for filesystem operations
 	fileProcessor *core.FileProcessor
@@ -162,11 +165,18 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		server.toolRegistry.Register(tool.Name(), tool)
 	}
 
-	rt, err := runtime.Build(runtime.Config{TransactionLogDir: defaultTransactionLogDir()})
-	if err != nil {
-		return nil, err
+	serverEngine := config.Engine
+	if serverEngine == nil {
+		builtEngine, err := engine.New(engine.Config{
+			TransactionLogDir: defaultTransactionLogDir(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		serverEngine = builtEngine
 	}
-	server.providers = rt.Providers
+	server.engine = serverEngine
+	server.providers = serverEngine.Providers()
 
 	// Register dynamic spec resource via standard resources endpoint
 	resources.Registry.Register("config://query-spec", resources.NewDynamicResource(
@@ -199,7 +209,7 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 	))
 
 	// Initialize file processor with shared runtime builder
-	server.fileProcessor = rt.FileProcessor
+	server.fileProcessor = serverEngine.FileProcessor()
 	server.debugLog("Initialized file processor")
 	if txLogDir := defaultTransactionLogDir(); txLogDir != "" {
 		server.debugLog("Configured file transaction log dir: %s", txLogDir)

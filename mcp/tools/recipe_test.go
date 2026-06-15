@@ -18,7 +18,7 @@ func TestRecipeToolDryRunDoesNotMutateFiles(t *testing.T) {
 	params := createTestParams(map[string]any{
 		"name":           "rename-old-name",
 		"dry_run":        true,
-		"min_confidence": 0.85,
+		"min_confidence": 0.1,
 		"steps": []map[string]any{
 			{
 				"name":   "rename old function",

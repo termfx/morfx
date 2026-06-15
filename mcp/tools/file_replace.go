@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
@@ -102,16 +103,10 @@ func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (a
 	}
 
 	// Create transform operation
-	fileOp := core.FileTransformOp{
-		TransformOp: core.TransformOp{
+	fileOp := core.TransformOp{
 			Method:      "replace",
 			Target:      target,
 			Replacement: args.Replacement,
-		},
-		Scope:    args.Scope,
-		DryRun:   args.DryRun,
-		Backup:   args.Backup,
-		Parallel: true,
 	}
 	notifyProgress(ctx, t.server, 35, 100, "prepared operation")
 	if err := isCancelled(ctx); err != nil {
@@ -122,8 +117,12 @@ func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (a
 	opCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	fileProcessor := t.server.GetFileProcessor()
-	result, err := fileProcessor.TransformFiles(opCtx, fileOp)
+	result, err := t.server.GetEngine().FileReplace(opCtx, engine.FileReplaceRequest{
+		Scope:  args.Scope,
+		Op:     fileOp,
+		DryRun: args.DryRun,
+		Backup: args.Backup,
+	})
 	if err != nil {
 		return nil, types.WrapError(types.TransformFailed, "File replace failed", err)
 	}
@@ -147,7 +146,7 @@ func (t *FileReplaceTool) handle(ctx context.Context, params json.RawMessage) (a
 }
 
 // formatResponse formats the file replace results
-func (t *FileReplaceTool) formatResponse(result *core.FileTransformResult, dryRun bool) string {
+func (t *FileReplaceTool) formatResponse(result engine.FileReplaceResult, dryRun bool) string {
 	mode := ""
 	if dryRun {
 		mode = " [DRY RUN]"
@@ -162,13 +161,13 @@ func (t *FileReplaceTool) formatResponse(result *core.FileTransformResult, dryRu
 	}
 	response += fmt.Sprintf("Total matches: %d\n", result.TotalMatches)
 
-	if len(result.Files) > 0 {
+	if len(result.Details) > 0 {
 		if dryRun {
 			response += "\nAffected files:\n"
 		} else {
 			response += "\nModified files:\n"
 		}
-		for _, file := range result.Files {
+		for _, file := range result.Details {
 			if file.MatchCount > 0 {
 				response += fmt.Sprintf("📄 %s: %d changes\n", file.FilePath, file.MatchCount)
 			}

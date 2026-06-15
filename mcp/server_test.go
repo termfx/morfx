@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/tools"
 	"github.com/oxhq/morfx/mcp/types"
 	"github.com/oxhq/morfx/models"
@@ -1134,6 +1135,10 @@ func newApplyToolServerAdapter(inner *StdioServer, staging any) *applyToolServer
 
 func (a *applyToolServerAdapter) GetProviders() *providers.Registry {
 	return a.inner.GetProviders()
+}
+
+func (a *applyToolServerAdapter) GetEngine() *engine.Engine {
+	return a.inner.GetEngine()
 }
 
 func (a *applyToolServerAdapter) GetFileProcessor() *core.FileProcessor {

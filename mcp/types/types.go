@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/models"
 	"github.com/oxhq/morfx/providers"
 )
 
 // ServerInterface defines what tools need from the server
 type ServerInterface interface {
+	GetEngine() *engine.Engine
 	GetProviders() *providers.Registry
 	GetFileProcessor() *core.FileProcessor
 	GetStaging() any
