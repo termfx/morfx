@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/internal/securefs"
 )
 
@@ -248,4 +250,72 @@ func (e *Engine) ExpireStages(ctx context.Context, now time.Time) (int, error) {
 		expired++
 	}
 	return expired, nil
+}
+
+func (e *Engine) ApplyStage(ctx context.Context, req StageApplyRequest) (ApplyResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	stage, err := e.GetStage(ctx, req.ID)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if stage.Status != StageStatusPending {
+		return ApplyResult{}, fmt.Errorf("stage already %s", stage.Status)
+	}
+
+	store, err := e.stageStore()
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
+	if !stage.ExpiresAt.IsZero() && time.Now().After(stage.ExpiresAt) {
+		stage.Status = StageStatusExpired
+		if err := store.Update(ctx, stage); err != nil {
+			return ApplyResult{}, err
+		}
+		return ApplyResult{}, fmt.Errorf("stage expired")
+	}
+
+	path, err := newRootPolicy(e.cfg.AllowedRoots).ValidatePath(stage.Path)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	stage.Path = path
+
+	if stage.BaseDigest != "" {
+		current, err := securefs.ReadFile(path)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		if calculateSHA256(string(current)) != stage.BaseDigest {
+			return ApplyResult{}, fmt.Errorf("file integrity check failed")
+		}
+	}
+
+	writer := core.NewAtomicWriter(core.DefaultAtomicConfig())
+	if err := writer.WriteFile(path, stage.Modified); err != nil {
+		return ApplyResult{}, err
+	}
+
+	now := time.Now().UTC()
+	stage.Status = StageStatusApplied
+	stage.AppliedAt = &now
+	if err := store.Update(ctx, stage); err != nil {
+		return ApplyResult{}, err
+	}
+
+	return ApplyResult{
+		StageID:     stage.ID,
+		Applied:     true,
+		AutoApplied: req.AutoApplied,
+		Status:      stage.Status,
+		AppliedAt:   stage.AppliedAt,
+	}, nil
+}
+
+func calculateSHA256(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
