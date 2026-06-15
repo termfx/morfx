@@ -322,8 +322,8 @@ func (fw *FileWalker) isExcluded(path string, patterns []string) bool {
 
 // matchPattern performs robust glob-style pattern matching with ** support
 func (fw *FileWalker) matchPattern(path, pattern string) bool {
-	normalizedPath := filepath.ToSlash(path)
-	normalizedPattern := filepath.ToSlash(pattern)
+	normalizedPath := fw.normalizeGlobValue(path)
+	normalizedPattern := fw.normalizeGlobValue(pattern)
 
 	for _, candidatePattern := range fw.globPatternVariants(normalizedPattern) {
 		if doublestar.MatchUnvalidated(candidatePattern, normalizedPath) {
@@ -340,6 +340,16 @@ func (fw *FileWalker) matchPattern(path, pattern string) bool {
 	}
 
 	return false
+}
+
+// normalizeGlobValue keeps matching stable for scope-relative paths and patterns.
+func (fw *FileWalker) normalizeGlobValue(value string) string {
+	normalized := filepath.ToSlash(value)
+	for strings.HasPrefix(normalized, "./") {
+		normalized = strings.TrimPrefix(normalized, "./")
+	}
+
+	return normalized
 }
 
 // globPatternVariants expands patterns that use **/ so they also match zero directories.
