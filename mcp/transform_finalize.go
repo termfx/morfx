@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 	"github.com/oxhq/morfx/models"
 	"gorm.io/datatypes"
@@ -50,6 +51,17 @@ func (s *StdioServer) FinalizeTransform(ctx context.Context, req types.Transform
 	status := "completed"
 	var referenceID string
 	autoApplied := false
+
+	stageMetadata := map[string]any{
+		"target_type": req.Target.Type,
+		"target_name": req.Target.Name,
+	}
+	if s.session != nil {
+		stageMetadata["session_id"] = s.session.ID
+	}
+	if req.Path != "" {
+		stageMetadata["file_path"] = req.Path
+	}
 
 	// writeFileDirect writes the modified content to disk, bypassing staging.
 	writeFileDirect := func() error {
@@ -97,50 +109,39 @@ func (s *StdioServer) FinalizeTransform(ctx context.Context, req types.Transform
 
 	// Try staging path first
 	staged := false
-	if s.staging != nil {
-		stage := s.buildStage(req, originalHash)
-		if err := s.staging.CreateStage(ctx, stage); err != nil {
-			s.debugLog("Staging failed, will fallback to direct write: %v", err)
-			// Don't block — fall through to direct write below
+	if s.engine != nil {
+		stage, err := s.engine.CreateStage(ctx, engine.StageCreateRequest{
+			Path:        req.Path,
+			Language:    req.Language,
+			Operation:   req.Operation,
+			Original:    req.OriginalSource,
+			Modified:    req.Result.Modified,
+			Diff:        req.Result.Diff,
+			BaseDigest:  originalHash,
+			AfterDigest: calculateSHA256(req.Result.Modified),
+			Confidence:  req.Result.Confidence,
+			Metadata:    stageMetadata,
+		})
+		if err != nil {
+			s.debugLog("Engine staging failed, will fallback to direct write: %v", err)
 		} else {
 			staged = true
 			status = "staged"
 			referenceID = stage.ID
 
-			if shouldAutoApply {
-				// Write file first, then mark stage as applied
-				if fileMode {
-					if err := writeFileDirect(); err != nil {
-						responseText += fmt.Sprintf("\n⚠️ Auto-apply file write failed: %v", err)
-						responseText += fmt.Sprintf("\n📋 Staged for review (ID: %s)", stage.ID)
-						responseText += "\nUse the apply tool to write changes to disk."
-					} else {
-						// File written, now mark stage as applied in DB
-						applyResult, err := s.staging.ApplyStage(ctx, stage.ID, true)
-						if err != nil {
-							// File is already written, just log the DB error
-							s.debugLog("Stage apply record failed (file already written): %v", err)
-						}
-						autoApplied = true
-						status = "applied"
-						if applyResult != nil {
-							referenceID = applyResult.ID
-						}
-						responseText += fmt.Sprintf("\n✅ Auto-applied and saved (ID: %s)", referenceID)
-					}
-				} else {
-					// Source mode: mark as applied without file write
-					applyResult, err := s.staging.ApplyStage(ctx, stage.ID, true)
-					if err != nil {
-						responseText += fmt.Sprintf("\n⚠️ Failed to auto-apply: %v", err)
-					} else {
-						autoApplied = true
-						status = "applied"
-						if applyResult != nil {
-							referenceID = applyResult.ID
-						}
-						responseText += fmt.Sprintf("\n✅ Auto-applied (ID: %s)", referenceID)
-					}
+			if fileMode && shouldAutoApply {
+				applyResult, err := s.engine.ApplyStage(ctx, engine.StageApplyRequest{
+					ID:          stage.ID,
+					AutoApplied: true,
+				})
+				if err != nil {
+					s.debugLog("Engine auto-apply failed, leaving stage pending: %v", err)
+					responseText += fmt.Sprintf("\n⚠️ Auto-apply failed: %v", err)
+				} else if applyResult.Applied {
+					autoApplied = true
+					status = "applied"
+					referenceID = applyResult.StageID
+					responseText += fmt.Sprintf("\n✅ Auto-applied and saved (ID: %s)", referenceID)
 				}
 			}
 

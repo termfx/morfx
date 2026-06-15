@@ -8,14 +8,27 @@ import (
 	"testing"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
 )
 
-func TestFinalizeTransform_AutoApplyStateless(t *testing.T) {
+func TestFinalizeTransform_AutoApplyDelegatesToEngineLifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	eng, err := engine.New(engine.Config{
+		AllowedRoots:  []string{tmpDir},
+		WriteMode:     engine.WriteModeStage,
+		EnableStaging: true,
+		StageDir:      filepath.Join(tmpDir, ".morfx-stages"),
+	})
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
 	config := DefaultConfig()
 	config.DatabaseURL = "skip"
 	config.AutoApplyThreshold = 0.8
 	config.LogWriter = io.Discard
+	config.Engine = eng
 
 	server, err := NewStdioServer(config)
 	if err != nil {
@@ -23,7 +36,6 @@ func TestFinalizeTransform_AutoApplyStateless(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = server.Close() })
 
-	tmpDir := t.TempDir()
 	targetFile := filepath.Join(tmpDir, "auto.go")
 	original := "package main\n\nfunc greet() string { return \"world\" }\n"
 	if err := os.WriteFile(targetFile, []byte(original), 0o644); err != nil {
@@ -57,6 +69,10 @@ func TestFinalizeTransform_AutoApplyStateless(t *testing.T) {
 	if status, _ := resp["result"].(string); status != "applied" {
 		t.Fatalf("expected result 'applied', got %v", resp["result"])
 	}
+	stageID, ok := resp["id"].(string)
+	if !ok || stageID == "" {
+		t.Fatalf("expected stage identifier in response, got %v", resp["id"])
+	}
 
 	contents, err := os.ReadFile(targetFile)
 	if err != nil {
@@ -65,16 +81,33 @@ func TestFinalizeTransform_AutoApplyStateless(t *testing.T) {
 	if string(contents) != modified {
 		t.Fatalf("expected file to be updated, got %s", string(contents))
 	}
+
+	stage, err := eng.GetStage(context.Background(), stageID)
+	if err != nil {
+		t.Fatalf("GetStage() error = %v", err)
+	}
+	if stage.Status != engine.StageStatusApplied {
+		t.Fatalf("expected applied stage, got %s", stage.Status)
+	}
 }
 
-func TestFinalizeTransform_StagingWithoutAutoApply(t *testing.T) {
+func TestFinalizeTransform_StagesThroughEngineLifecycle(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "morfx.db")
+	eng, err := engine.New(engine.Config{
+		AllowedRoots:  []string{tmpDir},
+		WriteMode:     engine.WriteModeStage,
+		EnableStaging: true,
+		StageDir:      filepath.Join(tmpDir, ".morfx-stages"),
+	})
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
 
 	config := DefaultConfig()
-	config.DatabaseURL = dbPath
+	config.DatabaseURL = "skip"
 	config.AutoApplyThreshold = 0.9
 	config.LogWriter = io.Discard
+	config.Engine = eng
 
 	server, err := NewStdioServer(config)
 	if err != nil {
@@ -115,7 +148,8 @@ func TestFinalizeTransform_StagingWithoutAutoApply(t *testing.T) {
 	if status, _ := resp["result"].(string); status != "staged" {
 		t.Fatalf("expected result 'staged', got %v", resp["result"])
 	}
-	if _, hasID := resp["id"].(string); !hasID {
+	stageID, hasID := resp["id"].(string)
+	if !hasID || stageID == "" {
 		t.Fatal("expected stage identifier in response")
 	}
 
@@ -125,5 +159,13 @@ func TestFinalizeTransform_StagingWithoutAutoApply(t *testing.T) {
 	}
 	if string(contents) != original {
 		t.Fatalf("expected file to remain unchanged, got %s", string(contents))
+	}
+
+	stage, err := eng.GetStage(context.Background(), stageID)
+	if err != nil {
+		t.Fatalf("GetStage() error = %v", err)
+	}
+	if stage.Status != engine.StageStatusPending {
+		t.Fatalf("expected pending stage, got %s", stage.Status)
 	}
 }
