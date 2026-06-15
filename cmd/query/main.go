@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
 
@@ -43,6 +45,26 @@ type queryRequest struct {
 	DSL      string          `json:"dsl,omitempty"`
 }
 
+type queryRunner interface {
+	Query(context.Context, engine.QueryRequest) (engine.QueryResult, error)
+}
+
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e commandError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e commandError) Unwrap() error {
+	return e.cause
+}
+
 func main() {
 	var showHelp bool
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
@@ -56,9 +78,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	env, err := toolenv.NewEnvironment()
+	e, err := engine.New(engine.Config{})
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to initialise environment", err)
+		_ = toolenv.WriteError(os.Stdout, "failed to initialise engine", err)
 		os.Exit(1)
 	}
 
@@ -68,40 +90,51 @@ func main() {
 		os.Exit(1)
 	}
 
-	if strings.TrimSpace(req.Language) == "" {
-		_ = toolenv.WriteError(os.Stdout, "language is required", errors.New("missing language"))
+	payload, err := runQuery(context.Background(), e, *req)
+	if err != nil {
+		writeCommandError(err)
 		os.Exit(1)
 	}
-	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
-		_ = toolenv.WriteError(os.Stdout, "query is required", errors.New("missing query"))
+
+	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func runQuery(ctx context.Context, runner queryRunner, req queryRequest) (map[string]any, error) {
+	if strings.TrimSpace(req.Language) == "" {
+		return nil, commandError{message: "language is required", cause: errors.New("missing language")}
+	}
+	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
+		return nil, commandError{message: "query is required", cause: errors.New("missing query")}
 	}
 
 	src, err := toolenv.LoadSource(req.Source, req.Path)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to resolve source", err)
-		os.Exit(1)
-	}
-
-	provider, err := env.Provider(req.Language)
-	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "language provider not available", err)
-		os.Exit(1)
+		return nil, commandError{message: "failed to resolve source", cause: err}
 	}
 
 	query, err := core.ParseAgentQueryPayload(req.Query, req.DSL)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid query structure", err)
-		os.Exit(1)
+		return nil, commandError{message: "invalid query structure", cause: err}
 	}
 
-	result := provider.Query(src.Code, query)
-	if result.Error != nil {
-		_ = toolenv.WriteError(os.Stdout, "query execution failed", result.Error)
-		os.Exit(1)
+	result, err := runner.Query(ctx, engine.QueryRequest{
+		Language: req.Language,
+		Source:   src.Code,
+		Query:    query,
+		DSL:      req.DSL,
+	})
+	if err != nil {
+		return nil, commandError{message: "query execution failed", cause: err}
 	}
 
-	responseText := formatQueryResponse(result, src.Path)
+	formatted := core.QueryResult{
+		Total:   result.Matches,
+		Matches: result.Results,
+	}
+	responseText := formatQueryResponse(formatted, src.Path)
 
 	payload := map[string]any{
 		"content": []map[string]any{
@@ -110,18 +143,24 @@ func main() {
 				"text": responseText,
 			},
 		},
-		"matches": result.Total,
-		"results": result.Matches,
+		"matches": result.Matches,
+		"results": result.Results,
 	}
 
 	if src.FromFile {
 		payload["path"] = src.Path
 	}
 
-	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
-		os.Exit(1)
+	return payload, nil
+}
+
+func writeCommandError(err error) {
+	var cmdErr commandError
+	if errors.As(err, &cmdErr) {
+		_ = toolenv.WriteError(os.Stdout, cmdErr.message, cmdErr.cause)
+		return
 	}
+	_ = toolenv.WriteError(os.Stdout, "query execution failed", err)
 }
 
 func formatQueryResponse(result core.QueryResult, path string) string {

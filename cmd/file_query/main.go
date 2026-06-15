@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
 
@@ -48,6 +49,26 @@ type fileQueryRequest struct {
 	DSL   string          `json:"dsl,omitempty"`
 }
 
+type fileQueryRunner interface {
+	FileQuery(context.Context, engine.FileQueryRequest) (engine.FileQueryResult, error)
+}
+
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e commandError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e commandError) Unwrap() error {
+	return e.cause
+}
+
 func main() {
 	var showHelp bool
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
@@ -61,9 +82,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	env, err := toolenv.NewEnvironment()
+	e, err := engine.New(engine.Config{})
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to initialise environment", err)
+		_ = toolenv.WriteError(os.Stdout, "failed to initialise engine", err)
 		os.Exit(1)
 	}
 
@@ -73,63 +94,78 @@ func main() {
 		os.Exit(1)
 	}
 
-	if req.Scope == nil {
-		_ = toolenv.WriteError(os.Stdout, "scope is required", errors.New("missing scope"))
-		os.Exit(1)
-	}
-	if strings.TrimSpace(req.Scope.Path) == "" {
-		_ = toolenv.WriteError(os.Stdout, "scope.path is required", errors.New("missing scope.path"))
-		os.Exit(1)
-	}
-
-	absPath, err := filepath.Abs(req.Scope.Path)
-	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid scope path", err)
-		os.Exit(1)
-	}
-	if _, err := os.Stat(absPath); err != nil {
-		_ = toolenv.WriteError(os.Stdout, "scope path not accessible", err)
-		os.Exit(1)
-	}
-	req.Scope.Path = absPath
-
-	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
-		_ = toolenv.WriteError(os.Stdout, "query is required", errors.New("missing query"))
-		os.Exit(1)
-	}
-
-	query, err := core.ParseAgentQueryPayload(req.Query, req.DSL)
-	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid query structure", err)
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	processor := env.FileProcessor()
-	matches, err := processor.QueryFiles(ctx, *req.Scope, query)
+	payload, err := runFileQuery(ctx, e, *req)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "file query failed", err)
+		writeCommandError(err)
 		os.Exit(1)
-	}
-
-	responseText := formatFileQueryResponse(matches, *req.Scope)
-
-	payload := map[string]any{
-		"content": []map[string]any{{
-			"type": "text",
-			"text": responseText,
-		}},
-		"matches": len(matches),
-		"files":   countUniqueFiles(matches),
-		"results": matches,
 	}
 
 	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runFileQuery(ctx context.Context, runner fileQueryRunner, req fileQueryRequest) (map[string]any, error) {
+	if req.Scope == nil {
+		return nil, commandError{message: "scope is required", cause: errors.New("missing scope")}
+	}
+	if strings.TrimSpace(req.Scope.Path) == "" {
+		return nil, commandError{message: "scope.path is required", cause: errors.New("missing scope.path")}
+	}
+
+	absPath, err := filepath.Abs(req.Scope.Path)
+	if err != nil {
+		return nil, commandError{message: "invalid scope path", cause: err}
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return nil, commandError{message: "scope path not accessible", cause: err}
+	}
+
+	if len(req.Query) == 0 && strings.TrimSpace(req.DSL) == "" {
+		return nil, commandError{message: "query is required", cause: errors.New("missing query")}
+	}
+
+	query, err := core.ParseAgentQueryPayload(req.Query, req.DSL)
+	if err != nil {
+		return nil, commandError{message: "invalid query structure", cause: err}
+	}
+
+	scope := *req.Scope
+	scope.Path = absPath
+	result, err := runner.FileQuery(ctx, engine.FileQueryRequest{
+		Scope: scope,
+		Query: query,
+		DSL:   req.DSL,
+	})
+	if err != nil {
+		return nil, commandError{message: "file query failed", cause: err}
+	}
+
+	responseText := formatFileQueryResponse(result.Results, scope)
+	payload := map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": responseText,
+		}},
+		"matches": len(result.Results),
+		"files":   countUniqueFiles(result.Results),
+		"results": result.Results,
+	}
+
+	return payload, nil
+}
+
+func writeCommandError(err error) {
+	var cmdErr commandError
+	if errors.As(err, &cmdErr) {
+		_ = toolenv.WriteError(os.Stdout, cmdErr.message, cmdErr.cause)
+		return
+	}
+	_ = toolenv.WriteError(os.Stdout, "file query failed", err)
 }
 
 func formatFileQueryResponse(matches []core.FileMatch, scope core.FileScope) string {

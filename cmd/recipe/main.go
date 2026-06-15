@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
 
@@ -45,6 +47,26 @@ Apply-mode recipes always run a dry-run preflight first and only mutate files
 when each step meets its min_confidence gate.
 `
 
+type recipeRunner interface {
+	Recipe(context.Context, core.Recipe) (*core.RecipeResult, error)
+}
+
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e commandError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e commandError) Unwrap() error {
+	return e.cause
+}
+
 func main() {
 	var showHelp bool
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
@@ -58,26 +80,38 @@ func main() {
 		os.Exit(0)
 	}
 
-	env, err := toolenv.NewEnvironment()
+	e, err := engine.New(engine.Config{})
 	if err != nil {
-		writeErrorAndExit("failed to initialise environment", err)
+		writeErrorAndExit(commandError{message: "failed to initialise engine", cause: err})
 	}
 
 	req, err := toolenv.ReadJSON[core.Recipe](os.Stdin)
 	if err != nil {
-		writeErrorAndExit("invalid input", err)
-	}
-
-	if err := normalizeRecipeScopes(req); err != nil {
-		writeErrorAndExit("invalid recipe scope", err)
+		writeErrorAndExit(commandError{message: "invalid input", cause: err})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	result, err := core.ExecuteRecipe(ctx, env.FileProcessor(), *req)
+	payload, err := runRecipe(ctx, e, req)
 	if err != nil {
-		writeErrorAndExit("recipe failed", err)
+		writeErrorAndExit(err)
+	}
+
+	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runRecipe(ctx context.Context, runner recipeRunner, recipe *core.Recipe) (map[string]any, error) {
+	if err := normalizeRecipeScopes(recipe); err != nil {
+		return nil, commandError{message: "invalid recipe scope", cause: err}
+	}
+
+	result, err := runner.Recipe(ctx, *recipe)
+	if err != nil {
+		return nil, commandError{message: "recipe failed", cause: err}
 	}
 
 	payload := map[string]any{
@@ -95,14 +129,19 @@ func main() {
 		"steps":           result.Steps,
 	}
 
-	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
-		os.Exit(1)
-	}
+	return payload, nil
 }
 
-func writeErrorAndExit(message string, err error) {
-	if writeErr := toolenv.WriteError(os.Stdout, message, err); writeErr != nil {
+func writeErrorAndExit(err error) {
+	message := "recipe failed"
+	cause := err
+	var cmdErr commandError
+	if errors.As(err, &cmdErr) {
+		message = cmdErr.message
+		cause = cmdErr.cause
+	}
+
+	if writeErr := toolenv.WriteError(os.Stdout, message, cause); writeErr != nil {
 		fmt.Fprintf(os.Stderr, "failed to write error output: %v\n", writeErr)
 	}
 	os.Exit(1)

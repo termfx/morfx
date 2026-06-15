@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
 
@@ -58,6 +59,26 @@ type fileReplaceRequest struct {
 	Backup      bool            `json:"backup"`
 }
 
+type fileReplaceRunner interface {
+	FileReplace(context.Context, engine.FileReplaceRequest) (engine.FileReplaceResult, error)
+}
+
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e commandError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e commandError) Unwrap() error {
+	return e.cause
+}
+
 func main() {
 	var showHelp bool
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
@@ -71,9 +92,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	env, err := toolenv.NewEnvironment()
+	e, err := engine.New(engine.Config{})
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to initialise environment", err)
+		_ = toolenv.WriteError(os.Stdout, "failed to initialise engine", err)
 		os.Exit(1)
 	}
 
@@ -83,66 +104,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	if req.Scope == nil {
-		_ = toolenv.WriteError(os.Stdout, "scope is required", errors.New("missing scope"))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	payload, err := runFileReplace(ctx, e, *req)
+	if err != nil {
+		writeCommandError(err)
 		os.Exit(1)
 	}
 
-	if strings.TrimSpace(req.Scope.Path) == "" {
-		_ = toolenv.WriteError(os.Stdout, "scope.path is required", errors.New("missing scope.path"))
+	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func runFileReplace(ctx context.Context, runner fileReplaceRunner, req fileReplaceRequest) (map[string]any, error) {
+	if req.Scope == nil {
+		return nil, commandError{message: "scope is required", cause: errors.New("missing scope")}
+	}
+	if strings.TrimSpace(req.Scope.Path) == "" {
+		return nil, commandError{message: "scope.path is required", cause: errors.New("missing scope.path")}
 	}
 
 	absPath, err := filepath.Abs(req.Scope.Path)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid scope path", err)
-		os.Exit(1)
+		return nil, commandError{message: "invalid scope path", cause: err}
 	}
 	if _, err := os.Stat(absPath); err != nil {
-		_ = toolenv.WriteError(os.Stdout, "scope path not accessible", err)
-		os.Exit(1)
+		return nil, commandError{message: "scope path not accessible", cause: err}
 	}
-	req.Scope.Path = absPath
 
 	if len(req.Target) == 0 && strings.TrimSpace(req.TargetDSL) == "" {
-		_ = toolenv.WriteError(os.Stdout, "target is required", errors.New("missing target"))
-		os.Exit(1)
+		return nil, commandError{message: "target is required", cause: errors.New("missing target")}
 	}
 	if strings.TrimSpace(req.Replacement) == "" {
-		_ = toolenv.WriteError(os.Stdout, "replacement is required", errors.New("missing replacement"))
-		os.Exit(1)
+		return nil, commandError{message: "replacement is required", cause: errors.New("missing replacement")}
 	}
 
 	target, err := core.ParseAgentQueryPayload(req.Target, req.TargetDSL)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid target structure", err)
-		os.Exit(1)
+		return nil, commandError{message: "invalid target structure", cause: err}
 	}
 
-	op := core.FileTransformOp{
-		TransformOp: core.TransformOp{
+	scope := *req.Scope
+	scope.Path = absPath
+	result, err := runner.FileReplace(ctx, engine.FileReplaceRequest{
+		Scope: scope,
+		Op: core.TransformOp{
 			Method:      "replace",
 			Target:      target,
 			Replacement: req.Replacement,
 		},
-		Scope:    *req.Scope,
-		DryRun:   req.DryRun,
-		Backup:   req.Backup,
-		Parallel: true,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	processor := env.FileProcessor()
-	result, err := processor.TransformFiles(ctx, op)
+		DryRun: req.DryRun,
+		Backup: req.Backup,
+	})
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "file replace failed", err)
-		os.Exit(1)
+		return nil, commandError{message: "file replace failed", cause: err}
 	}
 
-	responseText := formatFileReplaceResponse(result, req.DryRun)
-
+	formatted := &core.FileTransformResult{
+		FilesScanned:  result.FilesScanned,
+		FilesModified: result.FilesModified,
+		TotalMatches:  result.TotalMatches,
+		Errors:        result.Errors,
+		TransactionID: result.TransactionID,
+		Files:         result.Details,
+	}
+	responseText := formatFileReplaceResponse(formatted, req.DryRun)
 	payload := map[string]any{
 		"content": []map[string]any{{
 			"type": "text",
@@ -154,13 +183,19 @@ func main() {
 		"dry_run":         req.DryRun,
 		"errors":          result.Errors,
 		"transaction":     result.TransactionID,
-		"details":         result.Files,
+		"details":         result.Details,
 	}
 
-	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
-		os.Exit(1)
+	return payload, nil
+}
+
+func writeCommandError(err error) {
+	var cmdErr commandError
+	if errors.As(err, &cmdErr) {
+		_ = toolenv.WriteError(os.Stdout, cmdErr.message, cmdErr.cause)
+		return
 	}
+	_ = toolenv.WriteError(os.Stdout, "file replace failed", err)
 }
 
 func formatFileReplaceResponse(result *core.FileTransformResult, dryRun bool) string {

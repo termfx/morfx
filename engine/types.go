@@ -44,3 +44,29 @@ type FileTransformResult struct {
 	Diff       string
 	Confidence core.ConfidenceScore
 }
+
+type FileQueryRequest struct {
+	Scope core.FileScope
+	Query core.AgentQuery
+	DSL   string
+}
+
+type FileQueryResult struct {
+	Results []core.FileMatch
+}
+
+type FileReplaceRequest struct {
+	Scope  core.FileScope
+	Op     core.TransformOp
+	DryRun bool
+	Backup bool
+}
+
+type FileReplaceResult struct {
+	FilesScanned  int
+	FilesModified int
+	TotalMatches  int
+	Errors        []string
+	TransactionID string
+	Details       []core.FileTransformDetail
+}

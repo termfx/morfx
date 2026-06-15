@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/oxhq/morfx/core"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolcmd"
 	"github.com/oxhq/morfx/internal/toolenv"
 )
@@ -49,6 +51,26 @@ type replaceRequest struct {
 	Replacement string          `json:"replacement"`
 }
 
+type replaceRunner interface {
+	Transform(context.Context, engine.TransformRequest) (engine.TransformResult, error)
+}
+
+type commandError struct {
+	message string
+	cause   error
+}
+
+func (e commandError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e commandError) Unwrap() error {
+	return e.cause
+}
+
 func main() {
 	var showHelp bool
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
@@ -62,9 +84,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	env, err := toolenv.NewEnvironment()
+	e, err := engine.New(engine.Config{})
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to initialise environment", err)
+		_ = toolenv.WriteError(os.Stdout, "failed to initialise engine", err)
 		os.Exit(1)
 	}
 
@@ -74,58 +96,64 @@ func main() {
 		os.Exit(1)
 	}
 
-	if strings.TrimSpace(req.Language) == "" {
-		_ = toolenv.WriteError(os.Stdout, "language is required", errors.New("missing language"))
+	payload, err := runReplace(context.Background(), e, *req)
+	if err != nil {
+		writeCommandError(err)
 		os.Exit(1)
+	}
+
+	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runReplace(ctx context.Context, runner replaceRunner, req replaceRequest) (map[string]any, error) {
+	if strings.TrimSpace(req.Language) == "" {
+		return nil, commandError{message: "language is required", cause: errors.New("missing language")}
 	}
 	if len(req.Target) == 0 && strings.TrimSpace(req.TargetDSL) == "" {
-		_ = toolenv.WriteError(os.Stdout, "target is required", errors.New("missing target"))
-		os.Exit(1)
+		return nil, commandError{message: "target is required", cause: errors.New("missing target")}
 	}
 	if strings.TrimSpace(req.Replacement) == "" {
-		_ = toolenv.WriteError(os.Stdout, "replacement is required", errors.New("missing replacement"))
-		os.Exit(1)
+		return nil, commandError{message: "replacement is required", cause: errors.New("missing replacement")}
 	}
 
 	src, err := toolenv.LoadSource(req.Source, req.Path)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to resolve source", err)
-		os.Exit(1)
-	}
-
-	provider, err := env.Provider(req.Language)
-	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "language provider not available", err)
-		os.Exit(1)
+		return nil, commandError{message: "failed to resolve source", cause: err}
 	}
 
 	target, err := core.ParseAgentQueryPayload(req.Target, req.TargetDSL)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "invalid target structure", err)
-		os.Exit(1)
+		return nil, commandError{message: "invalid target structure", cause: err}
 	}
 
-	op := core.TransformOp{
-		Method:      "replace",
-		Target:      target,
-		Replacement: req.Replacement,
-	}
-
-	result := provider.Transform(src.Code, op)
-	if result.Error != nil {
-		_ = toolenv.WriteError(os.Stdout, "replace operation failed", result.Error)
-		os.Exit(1)
+	result, err := runner.Transform(ctx, engine.TransformRequest{
+		Language: req.Language,
+		Source:   src.Code,
+		Op: core.TransformOp{
+			Method:      "replace",
+			Target:      target,
+			Replacement: req.Replacement,
+		},
+	})
+	if err != nil {
+		return nil, commandError{message: "replace operation failed", cause: err}
 	}
 
 	wroteFile, err := toolcmd.WriteModifiedSource(src.Path, src.FromFile, src.Code, result.Modified, src.Perm)
 	if err != nil {
-		if writeErr := toolenv.WriteError(os.Stdout, "failed to write modified file", err); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "failed to write error output: %v\n", writeErr)
-		}
-		os.Exit(1)
+		return nil, commandError{message: "failed to write modified file", cause: err}
 	}
 
-	responseText := formatReplaceResponse(result, src.Path, src.FromFile, wroteFile)
+	formatted := core.TransformResult{
+		MatchCount: result.MatchCount,
+		Modified:   result.Modified,
+		Diff:       result.Diff,
+		Confidence: result.Confidence,
+	}
+	responseText := formatReplaceResponse(formatted, src.Path, src.FromFile, wroteFile)
 
 	payload := map[string]any{
 		"content": []map[string]any{
@@ -145,10 +173,16 @@ func main() {
 		payload["applied"] = wroteFile
 	}
 
-	if err := toolenv.WriteJSON(os.Stdout, payload); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write output: %v\n", err)
-		os.Exit(1)
+	return payload, nil
+}
+
+func writeCommandError(err error) {
+	var cmdErr commandError
+	if errors.As(err, &cmdErr) {
+		_ = toolenv.WriteError(os.Stdout, cmdErr.message, cmdErr.cause)
+		return
 	}
+	_ = toolenv.WriteError(os.Stdout, "replace operation failed", err)
 }
 
 func formatReplaceResponse(result core.TransformResult, path string, fromFile bool, applied bool) string {
