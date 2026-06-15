@@ -44,6 +44,12 @@ type AtomicWriter struct {
 	mu     sync.RWMutex
 }
 
+const (
+	initialLockRetryDelay   = 10 * time.Millisecond
+	maxLockRetryDelay       = 100 * time.Millisecond
+	incompleteLockGraceTime = 50 * time.Millisecond
+)
+
 // NewAtomicWriter creates a new atomic writer
 func NewAtomicWriter(config AtomicWriteConfig) *AtomicWriter {
 	return &AtomicWriter{
@@ -143,6 +149,7 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 	lock.mu.Unlock()
 
 	deadline := time.Now().Add(aw.config.LockTimeout)
+	retryDelay := initialLockRetryDelay
 	for {
 		lockFile, err := securefs.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
@@ -169,7 +176,7 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 		}
 
 		if os.IsExist(err) {
-			if aw.isLockStale(lockPath) {
+			if aw.shouldReapLock(lockPath) {
 				securefs.RemoveBestEffort(lockPath)
 				continue
 			}
@@ -177,13 +184,41 @@ func (aw *AtomicWriter) acquireLock(path string) error {
 				aw.decrementRefCount(path, lock)
 				return fmt.Errorf("timeout waiting for lock on %s", path)
 			}
-			time.Sleep(100 * time.Millisecond)
+			remaining := time.Until(deadline)
+			if remaining > 0 {
+				delay := retryDelay
+				if delay > remaining {
+					delay = remaining
+				}
+				time.Sleep(delay)
+			}
+			if retryDelay < maxLockRetryDelay {
+				retryDelay *= 2
+				if retryDelay > maxLockRetryDelay {
+					retryDelay = maxLockRetryDelay
+				}
+			}
 			continue
 		}
 
 		aw.decrementRefCount(path, lock)
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
+}
+
+// shouldReapLock reports whether an existing lock file is stale enough to remove.
+func (aw *AtomicWriter) shouldReapLock(lockPath string) bool {
+	content, err := securefs.ReadFile(lockPath)
+	if err != nil {
+		return aw.lockExceededGracePeriod(lockPath)
+	}
+
+	var pid int
+	if _, err := fmt.Sscanf(string(content), "%d", &pid); err != nil {
+		return aw.lockExceededGracePeriod(lockPath)
+	}
+
+	return !isProcessAlive(pid)
 }
 
 // releaseLock releases the file lock
@@ -244,6 +279,15 @@ func (aw *AtomicWriter) isLockStale(lockPath string) bool {
 
 	// Cross-platform process check
 	return !isProcessAlive(pid)
+}
+
+func (aw *AtomicWriter) lockExceededGracePeriod(lockPath string) bool {
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		return true
+	}
+
+	return time.Since(info.ModTime()) >= incompleteLockGraceTime
 }
 
 // createBackup creates a backup copy with timestamp
