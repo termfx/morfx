@@ -30,13 +30,14 @@ func (e *Engine) FileTransform(ctx context.Context, req FileTransformRequest) (F
 		return FileTransformResult{}, err
 	}
 
-	applied, err := e.writePipelineApply(path, string(original), transformResult.Modified)
+	applied, stageID, err := e.writePipelineApply(path, string(original), transformResult.Modified)
 	if err != nil {
 		return FileTransformResult{}, err
 	}
 
 	return FileTransformResult{
 		Applied:    applied,
+		StageID:    stageID,
 		MatchCount: transformResult.MatchCount,
 		Diff:       transformResult.Diff,
 		Confidence: transformResult.Confidence,

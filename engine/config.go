@@ -14,4 +14,5 @@ type Config struct {
 	WriteMode          WriteMode
 	EnableStaging      bool
 	StagingDatabaseURI string
+	StageDir           string
 }

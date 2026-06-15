@@ -40,6 +40,7 @@ type FileTransformRequest struct {
 
 type FileTransformResult struct {
 	Applied    bool
+	StageID    string
 	MatchCount int
 	Diff       string
 	Confidence core.ConfidenceScore
