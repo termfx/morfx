@@ -30,17 +30,28 @@ func (e *Engine) FileTransform(ctx context.Context, req FileTransformRequest) (F
 		return FileTransformResult{}, err
 	}
 
-	applied, stageID, err := e.writePipelineApply(path, string(original), transformResult.Modified)
+	applied, stage, err := e.writePipelineApply(path, transformResult.Modified, StageCreateRequest{
+		Path:        path,
+		Language:    req.Language,
+		Operation:   req.Op.Method,
+		Original:    string(original),
+		Modified:    transformResult.Modified,
+		Diff:        transformResult.Diff,
+		BaseDigest:  calculateSHA256(string(original)),
+		AfterDigest: calculateSHA256(transformResult.Modified),
+		Confidence:  transformResult.Confidence,
+	})
 	if err != nil {
 		return FileTransformResult{}, err
 	}
 
 	return FileTransformResult{
-		Applied:    applied,
-		StageID:    stageID,
-		MatchCount: transformResult.MatchCount,
-		Diff:       transformResult.Diff,
-		Confidence: transformResult.Confidence,
+		Applied:     applied,
+		StageID:     stage.ID,
+		StageStatus: stage.Status,
+		MatchCount:  transformResult.MatchCount,
+		Diff:        transformResult.Diff,
+		Confidence:  transformResult.Confidence,
 	}, nil
 }
 

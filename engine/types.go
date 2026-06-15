@@ -43,11 +43,12 @@ type FileTransformRequest struct {
 }
 
 type FileTransformResult struct {
-	Applied    bool
-	StageID    string
-	MatchCount int
-	Diff       string
-	Confidence core.ConfidenceScore
+	Applied     bool
+	StageID     string
+	StageStatus StageStatus
+	MatchCount  int
+	Diff        string
+	Confidence  core.ConfidenceScore
 }
 
 type StageStatus string
