@@ -42,6 +42,8 @@ type mockServer struct {
 	providerRegistry *providers.Registry
 	coreRegistry     *mockRegistry
 	fileProcessor    *core.FileProcessor
+	rootDir          string
+	stageDir         string
 	staging          any
 	safety           any
 	sessionID        string
@@ -51,7 +53,16 @@ type mockServer struct {
 }
 
 func newMockServer() *mockServer {
-	e, err := engine.New(engine.Config{})
+	rootDir, err := os.MkdirTemp("", "morfx-mcp-tools-*")
+	if err != nil {
+		panic(fmt.Sprintf("os.MkdirTemp() error = %v", err))
+	}
+	stageDir := filepath.Join(rootDir, ".morfx-stages")
+
+	e, err := engine.New(engine.Config{
+		AllowedRoots: []string{rootDir, os.TempDir()},
+		StageDir:     stageDir,
+	})
 	if err != nil {
 		panic(fmt.Sprintf("engine.New() error = %v", err))
 	}
@@ -78,6 +89,8 @@ func newMockServer() *mockServer {
 		providerRegistry: providerRegistry,
 		coreRegistry:     coreRegistry,
 		fileProcessor:    fileProc,
+		rootDir:          rootDir,
+		stageDir:         stageDir,
 		staging:          &mockStaging{stages: make(map[string]any)},
 		safety:           &mockSafety{},
 		sessionID:        "mock-session",
@@ -404,4 +417,52 @@ func getStageCount(server *mockServer) int {
 		return len(staging.stages)
 	}
 	return 0
+}
+
+func createPendingEngineStage(t *testing.T, server *mockServer, name string) engine.Stage {
+	t.Helper()
+
+	original := fmt.Sprintf("package main\nfunc %s() {}\n", name)
+	modified := fmt.Sprintf("package main\nfunc %sUpdated() {}\n", name)
+	path := filepath.Join(server.rootDir, strings.ToLower(name)+".go")
+	createTestFile(t, path, original)
+
+	stage, err := server.engine.CreateStage(context.Background(), engine.StageCreateRequest{
+		Path:      path,
+		Language:  "go",
+		Operation: "replace",
+		Original:  original,
+		Modified:  modified,
+	})
+	if err != nil {
+		t.Fatalf("CreateStage() error = %v", err)
+	}
+	return stage
+}
+
+func clearPendingEngineStages(t *testing.T, server *mockServer) {
+	t.Helper()
+
+	entries, err := os.ReadDir(server.stageDir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("os.ReadDir() error = %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		if err := os.Remove(filepath.Join(server.stageDir, entry.Name())); err != nil {
+			t.Fatalf("os.Remove() error = %v", err)
+		}
+	}
+}
+
+func listPendingEngineStages(t *testing.T, server *mockServer) []engine.Stage {
+	t.Helper()
+
+	stages, err := server.engine.ListStages(context.Background(), engine.StageFilter{Status: engine.StageStatusPending})
+	if err != nil {
+		t.Fatalf("ListStages() error = %v", err)
+	}
+	return stages
 }

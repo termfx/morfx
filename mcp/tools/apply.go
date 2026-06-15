@@ -3,11 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"os"
 
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
-	"gorm.io/gorm"
 )
 
 // ApplyTool handles applying staged transformations
@@ -66,27 +66,12 @@ func (t *ApplyTool) handle(ctx context.Context, params json.RawMessage) (any, er
 		return nil, err
 	}
 
-	stagingRaw := t.server.GetStaging()
-	if stagingRaw == nil {
-		return nil, types.NewMCPError(types.InvalidParams,
-			"Staging not available",
-			map[string]any{"reason": "Database connection required for staging"})
+	lifecycle := t.server.GetEngine()
+	if lifecycle == nil {
+		return nil, types.NewMCPError(types.InvalidParams, "engine lifecycle not available", nil)
 	}
 
-	staging, ok := stagingRaw.(types.StagingManager)
-	if !ok {
-		return nil, types.NewMCPError(types.InvalidParams,
-			"Staging manager does not implement required interface",
-			nil)
-	}
-
-	if !staging.IsEnabled() {
-		return nil, types.NewMCPError(types.InvalidParams, "staging is not enabled", nil)
-	}
-
-	sessionID := t.server.GetSessionID()
-
-	notifyProgress(ctx, t.server, 20, 100, "staging ready")
+	notifyProgress(ctx, t.server, 20, 100, "engine ready")
 	if err := isCancelled(ctx); err != nil {
 		return nil, err
 	}
@@ -125,26 +110,16 @@ func (t *ApplyTool) handle(ctx context.Context, params json.RawMessage) (any, er
 		mode = "single"
 		notifyProgress(ctx, t.server, 60, 100, "applying stage")
 
-		if sessionID == "" {
-			return nil, types.NewMCPError(types.InvalidParams,
-				"staging session unavailable",
-				map[string]any{"reason": "server did not negotiate persistence"})
-		}
-		stage, err := staging.GetStage(args.ID)
+		stage, err := lifecycle.GetStage(ctx, args.ID)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if os.IsNotExist(err) {
 				return nil, types.NewMCPError(types.InvalidParams,
 					"stage not found: "+args.ID,
 					nil)
 			}
 			return nil, types.WrapError(types.InvalidParams, "failed to load stage", err)
 		}
-		if stage != nil && stage.SessionID != "" && stage.SessionID != sessionID {
-			return nil, types.NewMCPError(types.InvalidParams,
-				fmt.Sprintf("stage %s belongs to a different session", args.ID),
-				nil)
-		}
-		if stage != nil && stage.Status != "pending" {
+		if stage.Status != engine.StageStatusPending {
 			return nil, types.NewMCPError(types.InvalidParams,
 				fmt.Sprintf("stage already %s", stage.Status),
 				nil)
@@ -154,29 +129,35 @@ func (t *ApplyTool) handle(ctx context.Context, params json.RawMessage) (any, er
 			return nil, err
 		}
 
-		if _, err := staging.ApplyStage(ctx, args.ID, false); err != nil {
+		result, err := lifecycle.ApplyStage(ctx, engine.StageApplyRequest{ID: args.ID})
+		if err != nil {
 			return nil, err
 		}
-		appliedIDs = append(appliedIDs, args.ID)
-		summary = map[string]any{"mode": mode, "stageId": args.ID}
+		if result.Applied {
+			appliedIDs = append(appliedIDs, result.StageID)
+		}
+		summary = map[string]any{"mode": mode, "stageId": result.StageID}
 
 	case args.All:
 		mode = "all"
 		notifyProgress(ctx, t.server, 60, 100, "applying all stages")
+		stages, err := lifecycle.ListStages(ctx, engine.StageFilter{Status: engine.StageStatusPending})
+		if err != nil {
+			return nil, types.WrapError(types.InvalidParams, "failed to list stages", err)
+		}
+		if len(stages) == 0 {
+			return nil, types.NewMCPError(types.InvalidParams, "no stages available", nil)
+		}
 		if err := t.server.ConfirmApply(ctx, "Apply all pending stages"); err != nil {
 			return nil, err
-		}
-
-		stages, err := staging.ListPendingStages(sessionID)
-		if err != nil || len(stages) == 0 {
-			return nil, types.NewMCPError(types.InvalidParams, "no stages available", nil)
 		}
 		for _, stage := range stages {
 			if err := isCancelled(ctx); err != nil {
 				return nil, err
 			}
-			if _, err := staging.ApplyStage(ctx, stage.ID, false); err == nil {
-				appliedIDs = append(appliedIDs, stage.ID)
+			result, err := lifecycle.ApplyStage(ctx, engine.StageApplyRequest{ID: stage.ID})
+			if err == nil && result.Applied {
+				appliedIDs = append(appliedIDs, result.StageID)
 			}
 		}
 		summary = map[string]any{"mode": mode, "appliedCount": len(appliedIDs)}
@@ -184,19 +165,25 @@ func (t *ApplyTool) handle(ctx context.Context, params json.RawMessage) (any, er
 	case args.Latest:
 		mode = "latest"
 		notifyProgress(ctx, t.server, 60, 100, "applying latest stage")
-		stages, err := staging.ListPendingStages(sessionID)
-		if err != nil || len(stages) == 0 {
+		stages, err := lifecycle.ListStages(ctx, engine.StageFilter{Status: engine.StageStatusPending})
+		if err != nil {
+			return nil, types.WrapError(types.InvalidParams, "failed to list stages", err)
+		}
+		if len(stages) == 0 {
 			return nil, types.NewMCPError(types.InvalidParams, "no stages available", nil)
 		}
 		stageID := stages[0].ID // Most recent stage
 		if err := t.server.ConfirmApply(ctx, fmt.Sprintf("Apply latest stage %s", stageID)); err != nil {
 			return nil, err
 		}
-		if _, err := staging.ApplyStage(ctx, stageID, false); err != nil {
+		result, err := lifecycle.ApplyStage(ctx, engine.StageApplyRequest{ID: stageID})
+		if err != nil {
 			return nil, err
 		}
-		appliedIDs = append(appliedIDs, stageID)
-		summary = map[string]any{"mode": mode, "stageId": stageID}
+		if result.Applied {
+			appliedIDs = append(appliedIDs, result.StageID)
+		}
+		summary = map[string]any{"mode": mode, "stageId": result.StageID}
 
 	default:
 		return nil, types.NewMCPError(types.InvalidParams, "unsupported apply parameters", nil)

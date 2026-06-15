@@ -2,130 +2,188 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
+
+	"github.com/oxhq/morfx/engine"
 )
+
+func TestApplyToolUsesEngineStageLifecycle(t *testing.T) {
+	root := t.TempDir()
+	server := newEngineOnlyServer(t, engine.Config{
+		AllowedRoots: []string{root},
+		StageDir:     filepath.Join(root, ".morfx-stages"),
+	})
+	tool := NewApplyTool(server)
+
+	targetPath := filepath.Join(root, "main.go")
+	if err := os.WriteFile(targetPath, []byte("package main\nfunc A() {}\n"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	stage, err := server.GetEngine().CreateStage(context.Background(), engine.StageCreateRequest{
+		Path:      targetPath,
+		Language:  "go",
+		Operation: "replace",
+		Original:  "package main\nfunc A() {}\n",
+		Modified:  "package main\nfunc B() {}\n",
+	})
+	if err != nil {
+		t.Fatalf("CreateStage() error = %v", err)
+	}
+
+	resp, err := tool.handle(context.Background(), createTestParams(map[string]any{
+		"id": stage.ID,
+	}))
+	assertNoError(t, err)
+	if resp == nil {
+		t.Fatal("expected response")
+	}
+
+	contents, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+	if string(contents) != "package main\nfunc B() {}\n" {
+		t.Fatalf("expected engine apply to update file, got %q", string(contents))
+	}
+}
 
 func TestApplyTool_Execute(t *testing.T) {
 	server := newMockServer()
-	setStaging(server, true)
 	tool := NewApplyTool(server)
-
-	// Create some test stages
-	stage1 := map[string]any{
-		"id":        "stage1",
-		"operation": "replace",
-		"timestamp": time.Now().Unix(),
-	}
-	stage2 := map[string]any{
-		"id":        "stage2",
-		"operation": "delete",
-		"timestamp": time.Now().Unix(),
-	}
-	stage3 := map[string]any{
-		"id":        "stage3",
-		"operation": "insert",
-		"timestamp": time.Now().Unix(),
-	}
-
-	addTestStage(server, "stage1", stage1)
-	addTestStage(server, "stage2", stage2)
-	addTestStage(server, "stage3", stage3)
 
 	tests := []struct {
 		name      string
-		params    map[string]any
+		setup     func(t *testing.T) []engine.Stage
+		params    func(stages []engine.Stage) map[string]any
 		expectErr bool
 		errMsg    string
-		setup     func()
+		check     func(t *testing.T, result map[string]any, stages []engine.Stage)
 	}{
 		{
 			name: "apply_specific_stage",
-			params: map[string]any{
-				"id": "stage1",
+			setup: func(t *testing.T) []engine.Stage {
+				return []engine.Stage{createPendingEngineStage(t, server, "Specific")}
 			},
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"id": stages[0].ID} },
 			expectErr: false,
+			check: func(t *testing.T, result map[string]any, stages []engine.Stage) {
+				applied := toStringSlice(result["applied"])
+				if len(applied) != 1 || applied[0] != stages[0].ID {
+					t.Fatalf("expected applied stage %s, got %+v", stages[0].ID, applied)
+				}
+			},
 		},
 		{
 			name: "apply_specific_stage_with_sampling",
-			params: map[string]any{
-				"id": "stage2",
-			},
-			expectErr: false,
-			setup: func() {
+			setup: func(t *testing.T) []engine.Stage {
 				server.samplingResults = []map[string]any{{"summary": "ok"}}
+				return []engine.Stage{createPendingEngineStage(t, server, "Sampling")}
 			},
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"id": stages[0].ID} },
+			expectErr: false,
 		},
 		{
 			name: "apply_latest_stage",
-			params: map[string]any{
-				"latest": true,
+			setup: func(t *testing.T) []engine.Stage {
+				return []engine.Stage{
+					createPendingEngineStage(t, server, "First"),
+					createPendingEngineStage(t, server, "Second"),
+					createPendingEngineStage(t, server, "Third"),
+				}
 			},
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"latest": true} },
 			expectErr: false,
+			check: func(t *testing.T, result map[string]any, stages []engine.Stage) {
+				applied := toStringSlice(result["applied"])
+				if len(applied) != 1 {
+					t.Fatalf("expected one applied stage, got %+v", applied)
+				}
+				if remaining := listPendingEngineStages(t, server); len(remaining) != 2 {
+					t.Fatalf("expected 2 pending stages after latest apply, got %d", len(remaining))
+				}
+			},
 		},
 		{
 			name: "apply_all_stages",
-			params: map[string]any{
-				"all": true,
+			setup: func(t *testing.T) []engine.Stage {
+				return []engine.Stage{
+					createPendingEngineStage(t, server, "AllOne"),
+					createPendingEngineStage(t, server, "AllTwo"),
+					createPendingEngineStage(t, server, "AllThree"),
+				}
 			},
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"all": true} },
 			expectErr: false,
-		},
-		{
-			name:      "apply_without_params",
-			params:    map[string]any{},
-			expectErr: false, // Should default to latest
-		},
-		{
-			name: "apply_non_existent_stage",
-			params: map[string]any{
-				"id": "non_existent",
+			check: func(t *testing.T, result map[string]any, stages []engine.Stage) {
+				applied := toStringSlice(result["applied"])
+				if len(applied) != len(stages) {
+					t.Fatalf("expected %d applied stages, got %d", len(stages), len(applied))
+				}
+				if remaining := listPendingEngineStages(t, server); len(remaining) != 0 {
+					t.Fatalf("expected 0 pending stages after apply all, got %d", len(remaining))
+				}
 			},
+		},
+		{
+			name: "apply_without_params",
+			setup: func(t *testing.T) []engine.Stage {
+				return []engine.Stage{createPendingEngineStage(t, server, "DefaultLatest")}
+			},
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{} },
+			expectErr: false,
+			check: func(t *testing.T, result map[string]any, stages []engine.Stage) {
+				applied := toStringSlice(result["applied"])
+				if len(applied) != 1 || applied[0] != stages[0].ID {
+					t.Fatalf("expected default latest apply of %s, got %+v", stages[0].ID, applied)
+				}
+			},
+		},
+		{
+			name:      "apply_non_existent_stage",
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"id": "non_existent"} },
 			expectErr: true,
-			errMsg:    "failed to load stage",
+			errMsg:    "stage not found",
 		},
 		{
 			name: "apply_with_conflicting_params",
-			params: map[string]any{
-				"id":     "stage1",
-				"all":    true,
-				"latest": true,
+			setup: func(t *testing.T) []engine.Stage {
+				return []engine.Stage{createPendingEngineStage(t, server, "Conflict")}
+			},
+			params: func(stages []engine.Stage) map[string]any {
+				return map[string]any{"id": stages[0].ID, "all": true, "latest": true}
 			},
 			expectErr: true,
 			errMsg:    "conflicting",
 		},
 		{
-			name: "apply_when_no_stages",
-			params: map[string]any{
-				"latest": true,
-			},
+			name:      "apply_when_no_stages",
+			params:    func(stages []engine.Stage) map[string]any { return map[string]any{"latest": true} },
 			expectErr: true,
 			errMsg:    "no stages",
-			setup: func() {
-				clearStages(server)
-			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset stages before each test
-			clearStages(server)
-			addTestStage(server, "stage1", stage1)
-			addTestStage(server, "stage2", stage2)
-			addTestStage(server, "stage3", stage3)
+			clearPendingEngineStages(t, server)
+			server.samplingRequests = nil
+			server.samplingResults = nil
+			server.samplingErr = nil
 
+			var stages []engine.Stage
 			if tt.setup != nil {
-				tt.setup()
+				stages = tt.setup(t)
 			}
 
-			params := createTestParams(tt.params)
-			server.samplingRequests = nil
-			result, err := tool.handle(context.Background(), params)
-
+			result, err := tool.handle(context.Background(), createTestParams(tt.params(stages)))
 			if tt.expectErr {
 				assertError(t, err, tt.errMsg)
 				return
 			}
+
 			assertNoError(t, err)
 			if result == nil {
 				t.Fatal("Expected result but got nil")
@@ -135,83 +193,13 @@ func TestApplyTool_Execute(t *testing.T) {
 			if !ok {
 				t.Fatalf("Expected map result, got %T", result)
 			}
-
 			if !hasContentArray(resultMap) {
-				t.Error("Result should include content array")
+				t.Fatal("Result should include content array")
 			}
-
-			applied := toStringSlice(resultMap["applied"])
-
-			switch tt.name {
-			case "apply_all_stages":
-				if len(applied) == 0 {
-					t.Error("expected applied stages for all mode")
-				}
+			if tt.check != nil {
+				tt.check(t, resultMap, stages)
 			}
-
-			server.samplingResults = nil
-			server.samplingErr = nil
 		})
-	}
-}
-
-func TestApplyTool_StagingDisabled(t *testing.T) {
-	server := newMockServer()
-	setStaging(server, false) // Staging disabled
-	tool := NewApplyTool(server)
-
-	params := createTestParams(map[string]any{
-		"latest": true,
-	})
-
-	_, err := tool.handle(context.Background(), params)
-	assertError(t, err, "staging is not enabled")
-}
-
-func TestApplyTool_ApplyOrder(t *testing.T) {
-	server := newMockServer()
-	setStaging(server, true)
-	tool := NewApplyTool(server)
-
-	// Create stages with timestamps
-	now := time.Now()
-	stages := []struct {
-		id        string
-		timestamp time.Time
-	}{
-		{"stage1", now.Add(-3 * time.Minute)},
-		{"stage2", now.Add(-2 * time.Minute)},
-		{"stage3", now.Add(-1 * time.Minute)},
-	}
-
-	for _, s := range stages {
-		addTestStage(server, s.id, map[string]any{
-			"id":        s.id,
-			"timestamp": s.timestamp.Unix(),
-		})
-	}
-
-	// Apply all stages
-	params := createTestParams(map[string]any{
-		"all": true,
-	})
-
-	result, err := tool.handle(context.Background(), params)
-	assertNoError(t, err)
-
-	resultMap, ok := result.(map[string]any)
-	if !ok {
-		t.Fatalf("expected apply result map, got %T", result)
-	}
-	applied := toStringSlice(resultMap["applied"])
-	if len(applied) != len(stages) {
-		t.Errorf("expected %d applied stage IDs, got %d", len(stages), len(applied))
-	}
-
-	// Verify stages were cleared after application
-	stageCount := getStageCount(server)
-	if stageCount != 0 {
-		t.Errorf("Expected 0 stages after apply all, got %d", stageCount)
 	}
 }
 
@@ -219,37 +207,29 @@ func TestApplyTool_Schema(t *testing.T) {
 	server := newMockServer()
 	tool := NewApplyTool(server)
 
-	// Verify tool metadata
 	if tool.Name() != "apply" {
 		t.Errorf("Expected name 'apply', got '%s'", tool.Name())
 	}
-
 	if tool.Description() == "" {
 		t.Error("Tool should have a description")
 	}
 
 	schema := tool.InputSchema()
-
-	// Verify schema structure
 	if schema["type"] != "object" {
 		t.Errorf("Schema type should be 'object', got %v", schema["type"])
 	}
 
-	// Apply tool should have optional parameters
 	required, ok := schema["required"].([]string)
 	if ok && len(required) > 0 {
 		t.Error("Apply tool should not have required parameters")
 	}
 
-	// Verify properties exist
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		t.Fatal("Schema should have properties")
 	}
 
-	// Check for expected properties
-	expectedProps := []string{"id", "latest", "all"}
-	for _, prop := range expectedProps {
+	for _, prop := range []string{"id", "latest", "all"} {
 		if _, exists := properties[prop]; !exists {
 			t.Errorf("Schema missing property '%s'", prop)
 		}
@@ -260,10 +240,7 @@ func TestApplyTool_InvalidJSON(t *testing.T) {
 	server := newMockServer()
 	tool := NewApplyTool(server)
 
-	// Test with invalid JSON
-	invalidJSON := []byte(`{"invalid": json}`)
-	_, err := tool.handle(context.Background(), invalidJSON)
-
+	_, err := tool.handle(context.Background(), []byte(`{"invalid": json}`))
 	if err == nil {
 		t.Error("Expected error for invalid JSON")
 	}

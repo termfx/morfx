@@ -41,7 +41,7 @@ func (s *engineOnlyServer) GetEngine() *engine.Engine {
 }
 
 func (s *engineOnlyServer) GetStaging() any {
-	return nil
+	panic("legacy staging access: tool should use engine lifecycle")
 }
 
 func (s *engineOnlyServer) GetSafety() any {
