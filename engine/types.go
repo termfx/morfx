@@ -31,3 +31,16 @@ type TransformResult struct {
 	Diff       string
 	Confidence core.ConfidenceScore
 }
+
+type FileTransformRequest struct {
+	Language string
+	Path     string
+	Op       core.TransformOp
+}
+
+type FileTransformResult struct {
+	Applied    bool
+	MatchCount int
+	Diff       string
+	Confidence core.ConfidenceScore
+}
