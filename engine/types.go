@@ -1,6 +1,10 @@
 package engine
 
-import "github.com/oxhq/morfx/core"
+import (
+	"time"
+
+	"github.com/oxhq/morfx/core"
+)
 
 type Engine struct {
 	cfg     Config
@@ -44,6 +48,65 @@ type FileTransformResult struct {
 	MatchCount int
 	Diff       string
 	Confidence core.ConfidenceScore
+}
+
+type StageStatus string
+
+const (
+	StageStatusPending StageStatus = "pending"
+	StageStatusApplied StageStatus = "applied"
+	StageStatusExpired StageStatus = "expired"
+	StageStatusFailed  StageStatus = "failed"
+)
+
+type Stage struct {
+	ID          string               `json:"id"`
+	CreatedAt   time.Time            `json:"created_at"`
+	ExpiresAt   time.Time            `json:"expires_at"`
+	AppliedAt   *time.Time           `json:"applied_at,omitempty"`
+	Status      StageStatus          `json:"status"`
+	Language    string               `json:"language"`
+	Operation   string               `json:"operation"`
+	Path        string               `json:"path"`
+	Original    string               `json:"original"`
+	Modified    string               `json:"modified"`
+	Diff        string               `json:"diff"`
+	BaseDigest  string               `json:"base_digest"`
+	AfterDigest string               `json:"after_digest"`
+	Confidence  core.ConfidenceScore `json:"confidence"`
+	Metadata    map[string]any       `json:"metadata,omitempty"`
+}
+
+type StageCreateRequest struct {
+	Path        string
+	Language    string
+	Operation   string
+	Original    string
+	Modified    string
+	Diff        string
+	BaseDigest  string
+	AfterDigest string
+	Confidence  core.ConfidenceScore
+	Metadata    map[string]any
+	ExpiresAt   time.Time
+}
+
+type StageFilter struct {
+	Status StageStatus
+}
+
+type StageApplyRequest struct {
+	ID          string
+	AutoApplied bool
+}
+
+type ApplyResult struct {
+	StageID       string
+	Applied       bool
+	AutoApplied   bool
+	Status        StageStatus
+	AppliedAt     *time.Time
+	FailureReason string
 }
 
 type FileQueryRequest struct {

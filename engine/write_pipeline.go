@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -33,8 +34,7 @@ func (e *Engine) writePipelineApply(path string, original string, modified strin
 		if err := isDirWritable(stageDir); err != nil {
 			return false, "", err
 		}
-		store := NewStageStore(stageDir)
-		stage, err := store.Create(StageCreateRequest{
+		stage, err := e.CreateStage(context.Background(), StageCreateRequest{
 			Path:     path,
 			Original: original,
 			Modified: modified,
