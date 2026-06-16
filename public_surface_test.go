@@ -2,6 +2,7 @@ package morfx_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -76,6 +77,27 @@ func TestPublicReleaseNotesMatchCurrentTimeline(t *testing.T) {
 		if _, ok := allowed[path]; !ok {
 			t.Fatalf("%s is not part of the current public release timeline", path)
 		}
+	}
+}
+
+func TestTrackedPublicSurfaceExcludesAgentFacingPaths(t *testing.T) {
+	cmd := exec.Command("git", "ls-files", "--", "docs/superpowers", "plugins/morfx-codex")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list tracked files: %v\n%s", err, output)
+	}
+
+	var present []string
+	for _, path := range strings.Fields(strings.TrimSpace(string(output))) {
+		if _, err := os.Stat(path); err == nil {
+			present = append(present, path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat tracked path %s: %v", path, err)
+		}
+	}
+
+	if len(present) > 0 {
+		t.Fatalf("tracked agent-facing paths must not be part of the public surface: %v", present)
 	}
 }
 
