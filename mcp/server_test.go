@@ -329,10 +329,10 @@ func TestServerComponentInitialization(t *testing.T) {
 
 	// Check all critical components are initialized
 	components := map[string]any{
+		"engine":        server.engine,
 		"providers":     server.providers,
 		"fileProcessor": server.fileProcessor,
 		"toolRegistry":  server.toolRegistry,
-		"staging":       server.staging,
 		"safety":        server.safety,
 	}
 
@@ -365,10 +365,6 @@ func TestNewStdioServerDatabaseConnectionFailed(t *testing.T) {
 		t.Error("Session should be nil when database connection fails")
 	}
 
-	// Staging should be nil
-	if server.staging != nil {
-		t.Error("Staging should be nil when database connection fails")
-	}
 }
 
 // TestServerHandleRequest tests request routing
@@ -1125,12 +1121,12 @@ func waitForSpecificOutboundRequest(t *testing.T, server *StdioServer, buf *byte
 }
 
 type applyToolServerAdapter struct {
-	inner   *StdioServer
-	staging any
+	inner *StdioServer
 }
 
 func newApplyToolServerAdapter(inner *StdioServer, staging any) *applyToolServerAdapter {
-	return &applyToolServerAdapter{inner: inner, staging: staging}
+	_ = staging
+	return &applyToolServerAdapter{inner: inner}
 }
 
 func (a *applyToolServerAdapter) GetProviders() *providers.Registry {
@@ -1143,10 +1139,6 @@ func (a *applyToolServerAdapter) GetEngine() *engine.Engine {
 
 func (a *applyToolServerAdapter) GetFileProcessor() *core.FileProcessor {
 	return a.inner.GetFileProcessor()
-}
-
-func (a *applyToolServerAdapter) GetStaging() any {
-	return a.staging
 }
 
 func (a *applyToolServerAdapter) GetSafety() any {

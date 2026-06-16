@@ -52,9 +52,6 @@ type StdioServer struct {
 	// Session tracking
 	session *models.Session
 
-	// Staging manager
-	staging *StagingManager
-
 	// Safety manager
 	safety *SafetyManager
 
@@ -129,11 +126,9 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 		if err != nil {
 			// Log the error but continue without database for better compatibility
 			server.debugLog("Database connection failed, continuing without persistence: %v", err)
-			// Don't fail the server initialization - just continue without database features
-			// Explicitly set these to nil to ensure clean state
+			// Don't fail the server initialization - just continue without database features.
 			server.db = nil
 			server.session = nil
-			server.staging = nil
 		} else {
 			server.db = database
 
@@ -148,8 +143,6 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 				server.session = session
 				server.debugLog("Session created: %s", session.ID)
 			}
-
-			// Staging manager will be initialized after safety setup
 		}
 	}
 
@@ -219,14 +212,6 @@ func NewStdioServer(config Config) (*StdioServer, error) {
 	server.safety = NewSafetyManager(config.Safety)
 	server.debugLog("Initialized safety manager")
 	server.fileProcessor.SetSafety(newFileSafetyAdapter(server.safety))
-
-	// Initialize staging manager once safety is available
-	if server.db != nil && server.session != nil {
-		server.staging = NewStagingManager(server.db, config, server.safety)
-		server.debugLog("Initialized staging manager")
-	} else if server.db != nil {
-		server.debugLog("Skipping staging manager because persistence is not writable")
-	}
 
 	// Register request/notification handlers with the router
 	server.registerHandlers()

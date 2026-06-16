@@ -5,17 +5,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
+	"path/filepath"
+	"time"
 
-	"github.com/oxhq/morfx/db"
+	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/internal/toolenv"
-	"github.com/oxhq/morfx/mcp"
-	"github.com/oxhq/morfx/models"
-	"gorm.io/gorm"
 )
 
-const applyHelp = `Usage: apply [--db path] [-h]
+const applyHelp = `Usage: apply [--root path] [--stage-dir path] [-h]
 
 Reads a JSON request from stdin and emits a JSON response to stdout.
 
@@ -24,7 +22,7 @@ Input schema:
   "id": "<stage id>",          // optional; applies specific stage
   "all": <bool>,                // optional; apply every pending stage
   "latest": <bool>,             // optional; apply the most recent stage
-  "session_id": "<session id>" // optional filter when using database persistence
+  "session_id": "<session id>" // optional filter against stage metadata
 }
 Exactly one of "id", "all", or "latest" may be set. If none are provided the
 command defaults to "latest".
@@ -41,8 +39,9 @@ Output schema:
 }
 
 Flags:
-  --db <path>   Path to the Morfx SQLite database (default ./.morfx/db/morfx.db)
-  -h, --help    Show this help message
+  --root <path>       Allowed root for staged file application (default current directory)
+  --stage-dir <path>  Stage directory (default <root>/.morfx-stages)
+  -h, --help          Show this help message
 `
 
 type applyRequest struct {
@@ -54,11 +53,13 @@ type applyRequest struct {
 
 func main() {
 	var (
-		dbPath   string
+		rootDir  string
+		stageDir string
 		showHelp bool
 	)
 
-	flag.StringVar(&dbPath, "db", "./.morfx/db/morfx.db", "Path to the Morfx SQLite database")
+	flag.StringVar(&rootDir, "root", "", "Allowed root for staged file application")
+	flag.StringVar(&stageDir, "stage-dir", "", "Directory containing engine stage files")
 	flag.BoolVar(&showHelp, "h", false, "Show help message")
 	flag.BoolVar(&showHelp, "help", false, "Show help message")
 	flag.Usage = func() {
@@ -83,26 +84,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	cfg := mcp.DefaultConfig()
-	cfg.DatabaseURL = dbPath
-	cfg.Debug = false
-	cfg.LogWriter = io.Discard
-
-	gormDB, err := db.Connect(cfg.DatabaseURL, cfg.Debug)
+	lifecycle, err := newLifecycle(rootDir, stageDir)
 	if err != nil {
-		_ = toolenv.WriteError(os.Stdout, "failed to connect to database", err)
+		_ = toolenv.WriteError(os.Stdout, "failed to initialize engine lifecycle", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if sqlDB, err := gormDB.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	}()
 
-	safety := mcp.NewSafetyManager(cfg.Safety)
-	staging := mcp.NewStagingManager(gormDB, cfg, safety)
-
-	appliedIDs, err := applyStages(context.Background(), staging, gormDB, req, mode)
+	appliedIDs, err := applyStages(context.Background(), lifecycle, req, mode)
 	if err != nil {
 		_ = toolenv.WriteError(os.Stdout, "apply operation failed", err)
 		os.Exit(1)
@@ -164,19 +152,44 @@ func determineMode(req *applyRequest) (string, error) {
 	return "latest", nil
 }
 
-func applyStages(ctx context.Context, staging *mcp.StagingManager, gormDB *gorm.DB, req *applyRequest, mode string) ([]string, error) {
+func newLifecycle(rootDir string, stageDir string) (*engine.Engine, error) {
+	if rootDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		rootDir = cwd
+	}
+	if stageDir == "" {
+		stageDir = filepath.Join(rootDir, ".morfx-stages")
+	}
+	return engine.New(engine.Config{
+		AllowedRoots:  []string{rootDir},
+		WriteMode:     engine.WriteModeStage,
+		EnableStaging: true,
+		StageDir:      stageDir,
+	})
+}
+
+func applyStages(ctx context.Context, lifecycle *engine.Engine, req *applyRequest, mode string) ([]string, error) {
+	if lifecycle == nil {
+		return nil, errors.New("engine lifecycle is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	switch mode {
 	case "single":
 		if req.ID == "" {
 			return nil, errors.New("id is required for single mode")
 		}
-		if err := applyStage(ctx, staging, req.ID); err != nil {
+		if err := applyStage(ctx, lifecycle, req.ID); err != nil {
 			return nil, err
 		}
 		return []string{req.ID}, nil
 
 	case "all":
-		ids, err := fetchPendingStageIDs(gormDB, req.SessionID)
+		ids, err := listPendingStageIDs(ctx, lifecycle, req.SessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +198,7 @@ func applyStages(ctx context.Context, staging *mcp.StagingManager, gormDB *gorm.
 		}
 		var applied []string
 		for _, id := range ids {
-			if err := applyStage(ctx, staging, id); err != nil {
+			if err := applyStage(ctx, lifecycle, id); err != nil {
 				return applied, err
 			}
 			applied = append(applied, id)
@@ -193,7 +206,7 @@ func applyStages(ctx context.Context, staging *mcp.StagingManager, gormDB *gorm.
 		return applied, nil
 
 	case "latest":
-		ids, err := fetchPendingStageIDs(gormDB, req.SessionID)
+		ids, err := listPendingStageIDs(ctx, lifecycle, req.SessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +214,7 @@ func applyStages(ctx context.Context, staging *mcp.StagingManager, gormDB *gorm.
 			return nil, errors.New("no pending stages available")
 		}
 		latestID := ids[0]
-		if err := applyStage(ctx, staging, latestID); err != nil {
+		if err := applyStage(ctx, lifecycle, latestID); err != nil {
 			return nil, err
 		}
 		return []string{latestID}, nil
@@ -211,30 +224,42 @@ func applyStages(ctx context.Context, staging *mcp.StagingManager, gormDB *gorm.
 	}
 }
 
-func applyStage(ctx context.Context, staging *mcp.StagingManager, stageID string) error {
+func applyStage(ctx context.Context, lifecycle *engine.Engine, stageID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := staging.ApplyStage(ctx, stageID, false)
+	_, err := lifecycle.ApplyStage(ctx, engine.StageApplyRequest{ID: stageID})
 	return err
 }
 
-func fetchPendingStageIDs(gormDB *gorm.DB, sessionID string) ([]string, error) {
-	if gormDB == nil {
-		return nil, errors.New("database handle is nil")
+func listPendingStageIDs(ctx context.Context, lifecycle *engine.Engine, sessionID string) ([]string, error) {
+	if lifecycle == nil {
+		return nil, errors.New("engine lifecycle is required")
 	}
-
-	query := gormDB.Model(&models.Stage{}).
-		Where("status = ?", "pending")
-	if sessionID != "" {
-		query = query.Where("session_id = ?", sessionID)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-
-	var ids []string
-	if err := query.Order("created_at DESC").Pluck("id", &ids).Error; err != nil {
+	if _, err := lifecycle.ExpireStages(ctx, timeNow()); err != nil {
 		return nil, err
 	}
+	stages, err := lifecycle.ListStages(ctx, engine.StageFilter{Status: engine.StageStatusPending})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		if sessionID != "" {
+			if value, ok := stage.Metadata["session_id"].(string); !ok || value != sessionID {
+				continue
+			}
+		}
+		ids = append(ids, stage.ID)
+	}
 	return ids, nil
+}
+
+var timeNow = func() time.Time {
+	return time.Now()
 }
 
 func buildApplyMessage(mode string, applied []string) string {

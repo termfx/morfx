@@ -109,10 +109,6 @@ func (m *mockServer) GetFileProcessor() *core.FileProcessor {
 	return m.fileProcessor
 }
 
-func (m *mockServer) GetStaging() any {
-	return m.staging
-}
-
 func (m *mockServer) GetSafety() any {
 	return m.safety
 }

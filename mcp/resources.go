@@ -315,7 +315,7 @@ func (s *StdioServer) generateServerInfo() (*ResourceContent, error) {
 		},
 		"database": dbInfo,
 		"features": map[string]any{
-			"staging":   s.staging != nil,
+			"staging":   s.engine != nil,
 			"sessions":  s.session != nil,
 			"file_ops":  true,
 			"in_memory": true,
@@ -472,7 +472,7 @@ func (s *StdioServer) generateCurrentSession() (*ResourceContent, error) {
 		"session_id": nil,
 		"status":     "active",
 		"database":   s.db != nil,
-		"staging":    s.staging != nil,
+		"staging":    s.engine != nil,
 		"mode":       "stateless", // Default to stateless when no database
 	}
 
@@ -485,7 +485,6 @@ func (s *StdioServer) generateCurrentSession() (*ResourceContent, error) {
 	} else {
 		sessionInfo["message"] = "Running in stateless mode - no persistence available"
 		sessionInfo["limitations"] = []string{
-			"No staging of transformations",
 			"No session history",
 			"Transformations applied immediately or returned as text",
 		}

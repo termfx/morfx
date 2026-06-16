@@ -10,7 +10,6 @@ import (
 
 	"github.com/oxhq/morfx/core"
 	"github.com/oxhq/morfx/engine"
-	"github.com/oxhq/morfx/models"
 	"github.com/oxhq/morfx/providers"
 )
 
@@ -19,7 +18,6 @@ type ServerInterface interface {
 	GetEngine() *engine.Engine
 	GetProviders() *providers.Registry
 	GetFileProcessor() *core.FileProcessor
-	GetStaging() any
 	GetSafety() any
 	GetSessionID() string
 	ReportProgress(ctx context.Context, progress, total float64, message string)
@@ -27,24 +25,6 @@ type ServerInterface interface {
 	RequestSampling(ctx context.Context, params map[string]any) (map[string]any, error)
 	RequestElicitation(ctx context.Context, params map[string]any) (map[string]any, error)
 	FinalizeTransform(ctx context.Context, req TransformRequest) (map[string]any, error)
-}
-
-// StagingStore captures the operations ApplyTool expects from a staging manager implementation.
-type StagingStore interface {
-	ListPendingStages(sessionID string) ([]models.Stage, error)
-	GetStage(stageID string) (*models.Stage, error)
-	ApplyStage(ctx context.Context, stageID string, autoApplied bool) (*models.Apply, error)
-}
-
-// StagingToggle allows staged operations to advertise whether they are active.
-type StagingToggle interface {
-	IsEnabled() bool
-}
-
-// StagingManager combines the core staging operations needed by tools
-type StagingManager interface {
-	StagingStore
-	StagingToggle
 }
 
 // ToolHandler represents a function that handles a tool call

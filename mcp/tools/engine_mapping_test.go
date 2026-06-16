@@ -40,10 +40,6 @@ func (s *engineOnlyServer) GetEngine() *engine.Engine {
 	return s.engine
 }
 
-func (s *engineOnlyServer) GetStaging() any {
-	panic("legacy staging access: tool should use engine lifecycle")
-}
-
 func (s *engineOnlyServer) GetSafety() any {
 	return nil
 }
@@ -52,7 +48,8 @@ func (s *engineOnlyServer) GetSessionID() string {
 	return "engine-only-session"
 }
 
-func (s *engineOnlyServer) ReportProgress(ctx context.Context, progress, total float64, message string) {}
+func (s *engineOnlyServer) ReportProgress(ctx context.Context, progress, total float64, message string) {
+}
 
 func (s *engineOnlyServer) ConfirmApply(ctx context.Context, summary string) error {
 	return nil

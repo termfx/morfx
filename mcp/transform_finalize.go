@@ -3,14 +3,11 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/oxhq/morfx/engine"
 	"github.com/oxhq/morfx/mcp/types"
-	"github.com/oxhq/morfx/models"
-	"gorm.io/datatypes"
 )
 
 // FinalizeTransform implements types.ServerInterface. It centralises staging, auto-apply,
@@ -201,73 +198,12 @@ func (s *StdioServer) FinalizeTransform(ctx context.Context, req types.Transform
 	return resp, nil
 }
 
-func (s *StdioServer) buildStage(req types.TransformRequest, originalHash string) *models.Stage {
-	targetJSON := req.TargetJSON
-	if len(targetJSON) == 0 {
-		if encoded, err := json.Marshal(req.Target); err == nil {
-			targetJSON = encoded
-		}
-	}
-
-	stageID := generateID("stg")
-	stage := &models.Stage{
-		ID:        stageID,
-		Language:  req.Language,
-		Operation: req.Operation,
-
-		TargetType:  req.Target.Type,
-		TargetName:  req.Target.Name,
-		TargetQuery: datatypes.JSON(targetJSON),
-
-		Original: req.OriginalSource,
-		Modified: req.Result.Modified,
-		Content:  req.Content,
-		Diff:     req.Result.Diff,
-
-		BaseDigest:  originalHash,
-		AfterDigest: calculateSHA256(req.Result.Modified),
-
-		ConfidenceScore:   req.Result.Confidence.Score,
-		ConfidenceLevel:   req.Result.Confidence.Level,
-		ConfidenceFactors: mustMarshalJSON(req.Result.Confidence.Factors),
-	}
-
-	if s.session != nil {
-		stage.SessionID = s.session.ID
-	}
-
-	if req.Path != "" {
-		scope := map[string]any{
-			"file_path":        req.Path,
-			"safety_validated": s.safety != nil,
-			"file_size":        len(req.Result.Modified),
-		}
-		if originalHash != "" {
-			scope["original_hash"] = originalHash
-		}
-		stage.ScopeAST = mustMarshalJSON(scope)
-	}
-
-	return stage
-}
-
 func calculateSHA256(content string) string {
 	if content == "" {
 		return ""
 	}
 	sum := sha256Sum([]byte(content))
 	return fmt.Sprintf("%x", sum)
-}
-
-func mustMarshalJSON(value any) datatypes.JSON {
-	if value == nil {
-		return datatypes.JSON([]byte("null"))
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return datatypes.JSON([]byte("null"))
-	}
-	return datatypes.JSON(data)
 }
 
 func sha256Sum(data []byte) [32]byte {

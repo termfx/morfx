@@ -30,14 +30,6 @@ func (s *StdioServer) GetFileProcessor() *core.FileProcessor {
 	return s.fileProcessor
 }
 
-// GetStaging returns the staging manager
-func (s *StdioServer) GetStaging() any {
-	if s.staging == nil {
-		return nil
-	}
-	return s.staging
-}
-
 // GetSafety returns the safety manager
 func (s *StdioServer) GetSafety() any {
 	if s.safety == nil {
