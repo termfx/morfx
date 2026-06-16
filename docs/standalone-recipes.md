@@ -71,7 +71,7 @@ JSON
 ### Apply staged work
 
 ```bash
-cat <<'JSON' | ./bin/apply
+cat <<'JSON' | ./bin/apply --root . --stage-dir ./.morfx-stages
 {"latest":true}
 JSON
 ```

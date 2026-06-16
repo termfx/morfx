@@ -36,7 +36,7 @@ AI agents edit code by generating diffs or full-file rewrites. That works until 
 - **Delete** — Remove a matched element cleanly
 - **Insert before / after** — Add code relative to a target element
 - **Append** — Smart placement at end of file or scope
-- **Stage / Apply / Rollback** — Two-phase commit with SQLite audit trail
+- **Stage / Apply** — Engine-managed staged changes with explicit apply
 - **Confidence scoring** — Every transform gets a score with explainable factors
 - **Multi-language** — Go, JavaScript, TypeScript, PHP, Python via tree-sitter
 - **Recipes / Rules** - Named repeatable transformations composed from the same safe primitives
@@ -352,7 +352,7 @@ When confidence exceeds the threshold (default 0.85), transforms auto-apply. Bel
 ```bash
 morfx mcp                           # Start with defaults
 morfx mcp --debug                   # Debug logging to stderr
-morfx mcp --db ./my.db              # Custom SQLite path
+morfx mcp --stage-dir ./my-stages   # Custom stage store path
 morfx mcp --auto-threshold 0.9      # Stricter auto-apply
 ```
 
@@ -414,7 +414,7 @@ morfx mcp (stdio)
 │   ├── Confidence scoring
 │   └── AST cache + parser pool
 ├── Safety Manager (atomic writes, integrity checks)
-└── Staging Manager (SQLite, stage/apply/rollback)
+└── Engine stage store (engine-managed staged changes and apply lifecycle)
 ```
 
 ## Development

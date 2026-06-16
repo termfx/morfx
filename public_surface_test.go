@@ -57,11 +57,11 @@ func TestPublicSurfaceDoesNotExposeInternalProjectNames(t *testing.T) {
 }
 
 func TestPublicReleaseNotesMatchCurrentTimeline(t *testing.T) {
-	allowed := map[string]struct{}{
-		"docs/release-notes-v0.1.0.md": {},
+	expected := map[string]struct{}{
 		"docs/release-notes-v0.2.0.md": {},
 		"docs/release-notes-v0.3.0.md": {},
 		"docs/release-notes-v0.4.0.md": {},
+		"docs/release-notes-v0.5.0.md": {},
 	}
 	pattern := regexp.MustCompile(`^release-notes-v[0-9]+\.[0-9]+\.[0-9]+\.md$`)
 
@@ -69,13 +69,101 @@ func TestPublicReleaseNotesMatchCurrentTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read docs: %v", err)
 	}
+	actual := make(map[string]struct{}, len(expected))
 	for _, entry := range entries {
 		if entry.IsDir() || !pattern.MatchString(entry.Name()) {
 			continue
 		}
 		path := filepath.ToSlash(filepath.Join("docs", entry.Name()))
-		if _, ok := allowed[path]; !ok {
+		actual[path] = struct{}{}
+		if _, ok := expected[path]; !ok {
 			t.Fatalf("%s is not part of the current public release timeline", path)
+		}
+	}
+	for path := range expected {
+		if _, ok := actual[path]; !ok {
+			t.Fatalf("%s is required in the current public release timeline", path)
+		}
+	}
+}
+
+func TestPublicDocsMatchEngineManagedStaging(t *testing.T) {
+	checks := []struct {
+		path      string
+		required  []string
+		forbidden []string
+	}{
+		{
+			path: "README.md",
+			required: []string{
+				"Engine-managed staged changes",
+				"morfx mcp --stage-dir ./my-stages",
+			},
+			forbidden: []string{
+				"Two-phase commit with SQLite audit trail",
+				"morfx mcp --db ./my.db",
+			},
+		},
+		{
+			path: "docs/standalone-tools.md",
+			required: []string{
+				"apply [--root path] [--stage-dir path]",
+				"Apply pending engine-managed staged changes from the stage store.",
+			},
+			forbidden: []string{
+				"apply --db",
+				"Apply staged transformations stored in the Morfx database.",
+				"SQLite/Turso DSN",
+			},
+		},
+		{
+			path: "CHANGELOG.md",
+			required: []string{
+				"## v0.5.0",
+			},
+		},
+		{
+			path: "docs/release-notes-v0.5.0.md",
+			required: []string{
+				"# Morfx v0.5.0",
+				"engine",
+			},
+		},
+	}
+
+	for _, check := range checks {
+		content, err := os.ReadFile(check.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", check.path, err)
+		}
+		text := string(content)
+		for _, required := range check.required {
+			if !strings.Contains(text, required) {
+				t.Fatalf("%s must contain %q", check.path, required)
+			}
+		}
+		for _, forbidden := range check.forbidden {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%s must not contain %q", check.path, forbidden)
+			}
+		}
+	}
+}
+
+func TestCIWorkflowValidatesDevelopBranch(t *testing.T) {
+	content, err := os.ReadFile(".github/workflows/ci.yml")
+	if err != nil {
+		t.Fatalf("read CI workflow: %v", err)
+	}
+	text := string(content)
+
+	required := []string{
+		"push:\n    branches: [main, develop]",
+		"pull_request:\n    branches: [main, develop]",
+	}
+	for _, snippet := range required {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("CI workflow must contain %q", snippet)
 		}
 	}
 }

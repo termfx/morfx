@@ -6,8 +6,8 @@ information summarised below.
 
 These are not flag-first CLIs. In normal use, the only flags you should expect
 to reach for are help flags and the occasional tool-specific control flag such
-as `apply --db ...`. The actual query, transform, or recipe payload still travels over
-stdin/stdout as JSON.
+as `apply [--root path] [--stage-dir path]`. The actual query, transform, or
+recipe payload still travels over stdin/stdout as JSON.
 
 Build all standalone binaries locally with:
 
@@ -260,8 +260,10 @@ For the full grammar, selector tables, agent usage rules, and limitations, see
 [dsl.md](./dsl.md).
 
 ## `apply`
-- **Purpose:** Apply staged transformations stored in the Morfx database.
-- **Flags:** `--db` to select the SQLite/Turso DSN (default `./.morfx/db/morfx.db`).
+- **Purpose:** Apply pending engine-managed staged changes from the stage store.
+- **Flags:** `--root <path>` sets the allowed root (default current directory).
+  `--stage-dir <path>` points at the stage store directory (default
+  `<root>/.morfx-stages`).
 - **Input:**
   ```json
   {

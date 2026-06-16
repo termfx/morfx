@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0
+
+- Made the public `engine` package the canonical owner of staged change
+  lifecycle, including create, list, inspect, apply, and expire flows.
+- Routed staged apply through the engine so MCP and standalone tooling validate
+  roots, digests, expiry, and status with one shared public path.
+- Updated public docs for the engine-managed stage store and added release notes
+  for `v0.5.0`.
+- Expanded public-surface verification around release-note timeline coverage and
+  `develop` CI validation.
+
 ## v0.4.0
 
 - Added deeper structural DSL matching: capture patterns, direct-child
